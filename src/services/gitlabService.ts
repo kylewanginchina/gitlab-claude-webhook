@@ -27,7 +27,7 @@ export class GitLabService {
       });
     } catch (error) {
       logger.error('Failed to add issue comment:', error);
-      throw new Error(`Failed to add issue comment: ${error.message}`);
+      throw new Error(`Failed to add issue comment: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -46,7 +46,7 @@ export class GitLabService {
       });
     } catch (error) {
       logger.error('Failed to add merge request comment:', error);
-      throw new Error(`Failed to add merge request comment: ${error.message}`);
+      throw new Error(`Failed to add merge request comment: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -56,7 +56,7 @@ export class GitLabService {
       return project;
     } catch (error) {
       logger.error('Failed to get project:', error);
-      throw new Error(`Failed to get project: ${error.message}`);
+      throw new Error(`Failed to get project: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -66,7 +66,7 @@ export class GitLabService {
       return branches;
     } catch (error) {
       logger.error('Failed to get branches:', error);
-      throw new Error(`Failed to get branches: ${error.message}`);
+      throw new Error(`Failed to get branches: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -87,7 +87,7 @@ export class GitLabService {
       return branch;
     } catch (error) {
       logger.error('Failed to create branch:', error);
-      throw new Error(`Failed to create branch: ${error.message}`);
+      throw new Error(`Failed to create branch: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -107,7 +107,7 @@ export class GitLabService {
       });
     } catch (error) {
       logger.error('Failed to update merge request description:', error);
-      throw new Error(`Failed to update merge request description: ${error.message}`);
+      throw new Error(`Failed to update merge request description: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -127,7 +127,7 @@ export class GitLabService {
       });
     } catch (error) {
       logger.error('Failed to update issue description:', error);
-      throw new Error(`Failed to update issue description: ${error.message}`);
+      throw new Error(`Failed to update issue description: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -137,7 +137,7 @@ export class GitLabService {
       return issue;
     } catch (error) {
       logger.error('Failed to get issue:', error);
-      throw new Error(`Failed to get issue: ${error.message}`);
+      throw new Error(`Failed to get issue: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -147,7 +147,7 @@ export class GitLabService {
       return mergeRequest;
     } catch (error) {
       logger.error('Failed to get merge request:', error);
-      throw new Error(`Failed to get merge request: ${error.message}`);
+      throw new Error(`Failed to get merge request: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -161,12 +161,15 @@ export class GitLabService {
     }
   ): Promise<any> {
     try {
-      const mergeRequest = await this.gitlab.MergeRequests.create(projectId, {
-        source_branch: options.sourceBranch,
-        target_branch: options.targetBranch,
-        title: options.title,
-        description: options.description,
-      });
+      const mergeRequest = await this.gitlab.MergeRequests.create(
+        projectId,
+        options.sourceBranch,
+        options.targetBranch,
+        options.title,
+        {
+          ...(options.description && { description: options.description }),
+        }
+      );
       
       logger.info('Created merge request', {
         projectId,
@@ -178,7 +181,7 @@ export class GitLabService {
       return mergeRequest;
     } catch (error) {
       logger.error('Failed to create merge request:', error);
-      throw new Error(`Failed to create merge request: ${error.message}`);
+      throw new Error(`Failed to create merge request: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

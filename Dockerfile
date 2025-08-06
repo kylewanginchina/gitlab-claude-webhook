@@ -10,14 +10,17 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm ci --omit=dev
+# Install dependencies (including dev deps for build)
+RUN npm ci
 
 # Copy source code
 COPY src/ ./src/
 
 # Build the application
 RUN npm run build
+
+# Remove dev dependencies after build
+RUN npm prune --omit=dev
 
 # Create work directory
 RUN mkdir -p /tmp/gitlab-claude-work

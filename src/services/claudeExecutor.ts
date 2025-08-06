@@ -50,7 +50,7 @@ export class ClaudeExecutor {
       logger.error('Claude execution failed:', error);
       return {
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }
@@ -202,7 +202,7 @@ export class ClaudeExecutor {
         });
       } catch (error) {
         logger.error('Failed to commit and push changes:', error);
-        result.error = `Execution successful but failed to push changes: ${error.message}`;
+        result.error = `Execution successful but failed to push changes: ${error instanceof Error ? error.message : String(error)}`;;
         result.success = false;
       }
     }
