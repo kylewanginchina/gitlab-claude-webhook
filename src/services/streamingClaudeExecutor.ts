@@ -215,7 +215,7 @@ export class StreamingClaudeExecutor {
 
   private extractProgressMessage(buffer: string): string {
     // Extract meaningful progress messages from Claude output
-    const lines = buffer.split('\\n').filter(line => line.trim());
+    const lines = buffer.split('\n').filter(line => line.trim());
     const lastLine = lines[lines.length - 1];
     
     // Filter out common debug/verbose messages and extract meaningful ones
@@ -253,7 +253,7 @@ export class StreamingClaudeExecutor {
     try {
       await callback.onProgress('📤 Committing and pushing changes...', false);
 
-      const commitMessage = `Claude: ${context.instruction.substring(0, 50)}${context.instruction.length > 50 ? '...' : ''}\\n\\n🤖 Generated with Claude Code Webhook`;
+      const commitMessage = `Claude: ${context.instruction.substring(0, 50)}${context.instruction.length > 50 ? '...' : ''}\n\n🤖 Generated with Claude Code Webhook`;
 
       await this.projectManager.commitAndPush(
         projectPath,
@@ -295,12 +295,12 @@ export class ClaudeExecutor {
     
     const callback: StreamingProgressCallback = {
       onProgress: async (message: string, isComplete?: boolean) => {
-        finalOutput += message + '\\n';
+        finalOutput += message + '\n';
         logger.info('Claude progress:', message);
       },
       onError: async (error: string) => {
         hasError = true;
-        finalOutput += `ERROR: ${error}\\n`;
+        finalOutput += `ERROR: ${error}\n`;
         logger.error('Claude error:', error);
       }
     };
@@ -314,7 +314,7 @@ export class ClaudeExecutor {
 
     // Include progress messages in output
     if (finalOutput && result.success) {
-      result.output = `${finalOutput}\\n${result.output || ''}`;
+      result.output = `${finalOutput}\n${result.output || ''}`;
     }
 
     return result;

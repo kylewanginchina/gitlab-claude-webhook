@@ -153,18 +153,18 @@ export class EventProcessor {
       hasChanges: result.changes?.length > 0,
     });
 
-    let responseMessage = '✅ Claude processed your request successfully.\\n\\n';
+    let responseMessage = '✅ Claude processed your request successfully.\n\n';
     
     if (result.output) {
-      responseMessage += `**Output:**\\n\`\`\`\\n${result.output}\\n\`\`\`\\n\\n`;
+      responseMessage += `**Output:**\n\`\`\`\n${result.output}\n\`\`\`\n\n`;
     }
 
     if (result.changes?.length > 0) {
-      responseMessage += `**Changes made:**\\n`;
+      responseMessage += `**Changes made:**\n`;
       for (const change of result.changes) {
-        responseMessage += `- ${change.type}: \`${change.path}\`\\n`;
+        responseMessage += `- ${change.type}: \`${change.path}\`\n`;
       }
-      responseMessage += '\\n';
+      responseMessage += '\n';
       
       // Push changes to repository
       await this.projectManager.pushChanges(
@@ -187,12 +187,12 @@ export class EventProcessor {
       error: result.error,
     });
 
-    const responseMessage = `❌ Claude encountered an error while processing your request:\\n\\n\`\`\`\\n${result.error}\\n\`\`\``;
+    const responseMessage = `❌ Claude encountered an error while processing your request:\n\n\`\`\`\n${result.error}\n\`\`\``;
     await this.postComment(event, responseMessage);
   }
 
   private async reportError(event: GitLabWebhookEvent, error: any): Promise<void> {
-    const responseMessage = `🚨 Internal error occurred while processing your Claude request:\\n\\n\`\`\`\\n${error.message}\\n\`\`\``;
+    const responseMessage = `🚨 Internal error occurred while processing your Claude request:\n\n\`\`\`\n${error.message}\n\`\`\``;
     
     try {
       await this.postComment(event, responseMessage);
@@ -314,25 +314,25 @@ export class EventProcessor {
       this.progressMessages.push(formattedMessage);
 
       // Build the complete comment body
-      let commentBody = '🤖 **Claude Progress Report**\\n\\n';
+      let commentBody = '🤖 **Claude Progress Report**\n\n';
       
       // Add the latest messages (keep last 10 to avoid too long comments)
       const recentMessages = this.progressMessages.slice(-10);
       recentMessages.forEach(msg => {
-        commentBody += `${msg}\\n`;
+        commentBody += `${msg}\n`;
       });
 
       if (isComplete) {
         if (isError) {
-          commentBody += '\\n❌ **Task completed with errors**';
+          commentBody += '\n❌ **Task completed with errors**';
         } else {
-          commentBody += '\\n✅ **Task completed successfully!**';
+          commentBody += '\n✅ **Task completed successfully!**';
         }
       } else {
-        commentBody += '\\n⏳ *Processing...*';
+        commentBody += '\n⏳ *Processing...*';
       }
 
-      commentBody += `\\n\\n---\\n*Last updated: ${new Date().toISOString()}*`;
+      commentBody += `\n\n---\n*Last updated: ${new Date().toISOString()}*`;
 
       // Update the comment
       await this.updateComment(event, this.currentCommentId, commentBody);
