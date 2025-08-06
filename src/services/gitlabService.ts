@@ -12,22 +12,55 @@ export class GitLabService {
     });
   }
 
+  public async createIssueComment(
+    projectId: number,
+    issueIid: number,
+    body: string
+  ): Promise<any> {
+    try {
+      const comment = await this.gitlab.IssueNotes.create(projectId, issueIid, body);
+      
+      logger.info('Created comment on issue', {
+        projectId,
+        issueIid,
+        bodyLength: body.length,
+        commentId: comment?.id,
+      });
+
+      return comment;
+    } catch (error) {
+      logger.error('Failed to create issue comment:', error);
+      throw new Error(`Failed to create issue comment: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   public async addIssueComment(
     projectId: number,
     issueIid: number,
     body: string
   ): Promise<void> {
+    await this.createIssueComment(projectId, issueIid, body);
+  }
+
+  public async createMergeRequestComment(
+    projectId: number,
+    mergeRequestIid: number,
+    body: string
+  ): Promise<any> {
     try {
-      await this.gitlab.IssueNotes.create(projectId, issueIid, body);
+      const comment = await this.gitlab.MergeRequestNotes.create(projectId, mergeRequestIid, body);
       
-      logger.info('Added comment to issue', {
+      logger.info('Created comment on merge request', {
         projectId,
-        issueIid,
+        mergeRequestIid,
         bodyLength: body.length,
+        commentId: comment?.id,
       });
+
+      return comment;
     } catch (error) {
-      logger.error('Failed to add issue comment:', error);
-      throw new Error(`Failed to add issue comment: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error('Failed to create merge request comment:', error);
+      throw new Error(`Failed to create merge request comment: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -36,18 +69,7 @@ export class GitLabService {
     mergeRequestIid: number,
     body: string
   ): Promise<void> {
-    try {
-      await this.gitlab.MergeRequestNotes.create(projectId, mergeRequestIid, body);
-      
-      logger.info('Added comment to merge request', {
-        projectId,
-        mergeRequestIid,
-        bodyLength: body.length,
-      });
-    } catch (error) {
-      logger.error('Failed to add merge request comment:', error);
-      throw new Error(`Failed to add merge request comment: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    await this.createMergeRequestComment(projectId, mergeRequestIid, body);
   }
 
   public async getProject(projectId: number): Promise<any> {

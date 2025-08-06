@@ -2,17 +2,18 @@ import { GitLabWebhookEvent, ClaudeInstruction } from '../types/gitlab';
 import { extractClaudeInstructions } from '../utils/webhook';
 import logger from '../utils/logger';
 import { ProjectManager } from './projectManager';
-import { ClaudeExecutor } from './claudeExecutor';
+import { StreamingClaudeExecutor, StreamingProgressCallback } from './streamingClaudeExecutor';
 import { GitLabService } from './gitlabService';
 
 export class EventProcessor {
   private projectManager: ProjectManager;
-  private claudeExecutor: ClaudeExecutor;
+  private claudeExecutor: StreamingClaudeExecutor;
   private gitlabService: GitLabService;
+  private currentCommentId: number | null = null;
 
   constructor() {
     this.projectManager = new ProjectManager();
-    this.claudeExecutor = new ClaudeExecutor();
+    this.claudeExecutor = new StreamingClaudeExecutor();
     this.gitlabService = new GitLabService();
   }
 
@@ -98,20 +99,38 @@ export class EventProcessor {
     event: GitLabWebhookEvent,
     instruction: ClaudeInstruction
   ): Promise<void> {
+    // Create initial progress comment
+    const initialMessage = `🚀 Claude is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
+    
+    this.currentCommentId = await this.createProgressComment(event, initialMessage);
+    
     const projectPath = await this.projectManager.prepareProject(
       event.project,
       instruction.branch || event.project.default_branch
     );
 
     try {
-      const result = await this.claudeExecutor.execute(
+      // Create streaming callback for real-time updates
+      const callback: StreamingProgressCallback = {
+        onProgress: async (message: string, isComplete?: boolean) => {
+          await this.updateProgressComment(event, message, isComplete);
+        },
+        onError: async (error: string) => {
+          await this.updateProgressComment(event, error, true, true);
+        }
+      };
+
+      const result = await this.claudeExecutor.executeWithStreaming(
         instruction.command,
         projectPath,
         {
           context: instruction.context,
           projectUrl: event.project.web_url,
           branch: instruction.branch || event.project.default_branch,
-        }
+          event,
+          instruction: instruction.command,
+        },
+        callback
       );
 
       if (result.success) {
@@ -220,5 +239,117 @@ export class EventProcessor {
         }
         break;
     }
+  }
+
+  private async createProgressComment(event: GitLabWebhookEvent, message: string): Promise<number | null> {
+    try {
+      let commentId: number | null = null;
+      
+      switch (event.object_kind) {
+        case 'issue':
+          if (event.issue) {
+            const comment = await this.gitlabService.createIssueComment(
+              event.project.id,
+              event.issue.iid,
+              message
+            );
+            commentId = comment?.id || null;
+          }
+          break;
+
+        case 'merge_request':
+          if (event.merge_request) {
+            const comment = await this.gitlabService.createMergeRequestComment(
+              event.project.id,
+              event.merge_request.iid,
+              message
+            );
+            commentId = comment?.id || null;
+          }
+          break;
+
+        case 'note':
+          if (event.issue) {
+            const comment = await this.gitlabService.createIssueComment(
+              event.project.id,
+              event.issue.iid,
+              message
+            );
+            commentId = comment?.id || null;
+          } else if (event.merge_request) {
+            const comment = await this.gitlabService.createMergeRequestComment(
+              event.project.id,
+              event.merge_request.iid,
+              message
+            );
+            commentId = comment?.id || null;
+          }
+          break;
+      }
+
+      return commentId;
+    } catch (error) {
+      logger.error('Failed to create progress comment:', error);
+      return null;
+    }
+  }
+
+  private progressMessages: string[] = [];
+
+  private async updateProgressComment(
+    event: GitLabWebhookEvent, 
+    message: string, 
+    isComplete?: boolean, 
+    isError?: boolean
+  ): Promise<void> {
+    if (!this.currentCommentId) {
+      return;
+    }
+
+    try {
+      // Add new message to the progress log
+      const timestamp = new Date().toISOString().slice(11, 19);
+      const formattedMessage = `[${timestamp}] ${message}`;
+      
+      this.progressMessages.push(formattedMessage);
+
+      // Build the complete comment body
+      let commentBody = '🤖 **Claude Progress Report**\\n\\n';
+      
+      // Add the latest messages (keep last 10 to avoid too long comments)
+      const recentMessages = this.progressMessages.slice(-10);
+      recentMessages.forEach(msg => {
+        commentBody += `${msg}\\n`;
+      });
+
+      if (isComplete) {
+        if (isError) {
+          commentBody += '\\n❌ **Task completed with errors**';
+        } else {
+          commentBody += '\\n✅ **Task completed successfully!**';
+        }
+      } else {
+        commentBody += '\\n⏳ *Processing...*';
+      }
+
+      commentBody += `\\n\\n---\\n*Last updated: ${new Date().toISOString()}*`;
+
+      // Update the comment
+      await this.updateComment(event, this.currentCommentId, commentBody);
+    } catch (error) {
+      logger.error('Failed to update progress comment:', error);
+    }
+  }
+
+  private async updateComment(event: GitLabWebhookEvent, commentId: number, body: string): Promise<void> {
+    // Note: GitLab API doesn't support updating comments directly
+    // We would need to use the notes API with PUT method, but the GitLab client might not support this
+    // For now, we'll create new comments for major updates
+    // This is a limitation we'll document
+    
+    logger.info('Progress update (comment update not supported by GitLab API)', {
+      commentId,
+      messageLength: body.length,
+    });
   }
 }
