@@ -3,8 +3,21 @@ export interface GitLabProject {
   name: string;
   web_url: string;
   default_branch: string;
-  ssh_url_to_repo: string;
-  http_url_to_repo: string;
+  ssh_url_to_repo?: string;
+  http_url_to_repo?: string;
+  // Additional fields that may be present in webhook data
+  http_url?: string;
+  git_http_url?: string;
+  git_ssh_url?: string;
+  url?: string;
+  ssh_url?: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  namespace?: string;
+  visibility_level?: number;
+  path_with_namespace?: string;
+  ci_config_path?: string;
+  homepage?: string;
 }
 
 export interface GitLabUser {

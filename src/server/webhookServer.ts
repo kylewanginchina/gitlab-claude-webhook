@@ -17,8 +17,9 @@ export class WebhookServer {
   }
 
   private setupMiddleware(): void {
+    // Use raw middleware to preserve original request body for signature verification
+    this.app.use('/webhook', express.raw({ type: 'application/json', limit: '10mb' }));
     this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.raw({ type: 'application/json', limit: '10mb' }));
   }
 
   private setupRoutes(): void {
@@ -40,14 +41,15 @@ export class WebhookServer {
   private async handleWebhook(req: Request, res: Response): Promise<void> {
     try {
       const signature = req.headers['x-gitlab-token'] as string;
-      const body = JSON.stringify(req.body);
+      const rawBody = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
 
-      if (!verifyGitLabSignature(body, signature)) {
+      if (!verifyGitLabSignature(rawBody, signature)) {
         res.status(401).json({ error: 'Invalid signature' });
         return;
       }
 
-      const event: GitLabWebhookEvent = req.body;
+      // Parse JSON if we have raw body
+      const event: GitLabWebhookEvent = req.body instanceof Buffer ? JSON.parse(rawBody) : req.body;
       
       logger.info(`Received GitLab webhook: ${event.object_kind}`, {
         eventType: event.object_kind,

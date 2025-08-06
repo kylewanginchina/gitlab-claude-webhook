@@ -52,8 +52,19 @@ export class ProjectManager {
   ): Promise<void> {
     const git = simpleGit();
     
+    logger.debug('Project details for cloning', {
+      projectId: project.id,
+      projectName: project.name,
+      httpUrl: project.http_url_to_repo,
+      webUrl: project.web_url,
+      defaultBranch: project.default_branch,
+      requestedBranch: branch
+    });
+    
     // Use HTTP URL with token for authentication
-    const cloneUrl = this.getAuthenticatedUrl(project.http_url_to_repo);
+    // GitLab webhook uses 'http_url' or 'git_http_url' instead of 'http_url_to_repo'
+    const httpUrl = project.http_url_to_repo || (project as any).http_url || (project as any).git_http_url;
+    const cloneUrl = this.getAuthenticatedUrl(httpUrl);
     
     logger.info('Cloning project', {
       projectId: project.id,
@@ -89,6 +100,11 @@ export class ProjectManager {
   }
 
   private getAuthenticatedUrl(httpUrl: string): string {
+    if (!httpUrl) {
+      logger.error('HTTP URL is undefined or empty', { httpUrl });
+      throw new Error('HTTP URL for repository is not available');
+    }
+    
     const url = new URL(httpUrl);
     url.username = 'oauth2';
     url.password = config.gitlab.token;
