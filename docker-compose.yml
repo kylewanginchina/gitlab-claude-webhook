@@ -3,14 +3,14 @@ services:
     build: .
     container_name: gitlab-claude-webhook
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     environment:
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
       - GITLAB_BASE_URL=${GITLAB_BASE_URL:-https://gitlab.com}
       - GITLAB_TOKEN=${GITLAB_TOKEN}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
-      - PORT=3000
+      - PORT=${PORT:-3000}
       - WORK_DIR=/tmp/gitlab-claude-work
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
@@ -18,7 +18,7 @@ services:
       - webhook-work:/tmp/gitlab-claude-work
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:${PORT:-3000}/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -26,3 +26,10 @@ services:
 
 volumes:
   webhook-work:
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
