@@ -7,8 +7,9 @@ A webhook service that integrates GitLab with Claude Code CLI, enabling AI-power
 - **GitLab Integration**: Receives webhook events from GitLab for issues, merge requests, and comments
 - **Claude AI Processing**: Automatically detects `@claude` mentions and executes Claude Code CLI commands
 - **Secure Webhook Verification**: Validates webhook signatures to ensure security
-- **Branch-aware Processing**: Automatically works with the correct branch/tag for each context
+- **Branch-aware Processing**: Automatically creates new branches for Claude changes with merge request workflow
 - **Automatic Code Changes**: Commits and pushes changes made by Claude back to the repository
+- **Smart Merge Requests**: Creates professional MRs with conventional commit titles and structured descriptions
 - **Real-time Feedback**: Posts results and errors as comments back to GitLab
 
 ## Quick Start
@@ -16,7 +17,7 @@ A webhook service that integrates GitLab with Claude Code CLI, enabling AI-power
 ### Prerequisites
 
 - Node.js 18+ or Docker
-- Claude Code CLI installed (if running locally)
+- [Claude Code](https://github.com/anthropics/claude-code) installed (if running locally)
 - GitLab project with webhook access
 - Anthropic API key
 - GitLab API token
@@ -75,9 +76,11 @@ npm install
 npm run build
 
 # Start the service
+# Note: must run with non-root privilege, due to the requirement for Claude Code's parameter --dangerously-skip-permissions
 npm start
 
 # For development with hot reload
+# Note: must run with non-root privilege, due to the requirement for Claude Code's parameter --dangerously-skip-permissions
 npm run dev
 ```
 
@@ -126,10 +129,14 @@ You can provide specific instructions:
 2. **Signature Verification**: Validates webhook authenticity using secret
 3. **Content Analysis**: Scans for `@claude` mentions in issues/MRs/comments
 4. **Project Preparation**: Clones the GitLab project to a temporary directory
-5. **Branch Management**: Switches to the appropriate branch (source branch for MRs, default for issues)
+5. **Branch Management**: Creates timestamp-based branch for Claude changes
 6. **Claude Execution**: Runs Claude Code CLI with the extracted instructions
 7. **Change Handling**: Commits and pushes any code changes made by Claude
-8. **Feedback**: Posts results or errors as comments back to GitLab
+8. **Smart MR Creation**: Automatically creates merge requests with:
+   - Conventional commit format titles (feat, fix, docs, etc.)
+   - Structured descriptions with testing checklists
+   - Auto-detected scope and change categorization
+9. **Feedback**: Posts results or errors as comments back to GitLab
 
 ## API Endpoints
 
@@ -172,9 +179,9 @@ Your GitLab token needs the following scopes:
 
 ### Common Issues
 
-1. **"Claude CLI not found"**
+1. **"Claude Code CLI not found"**
    - Ensure Claude Code CLI is installed and in PATH
-   - For Docker: Claude CLI needs to be available in the container
+   - For Docker: Claude Code CLI needs to be available in the container
 
 2. **"Invalid webhook signature"**
    - Verify `WEBHOOK_SECRET` matches GitLab webhook configuration
@@ -232,7 +239,8 @@ src/
 └── utils/
     ├── config.ts         # Configuration management
     ├── logger.ts         # Logging utility
-    └── webhook.ts        # Webhook utilities
+    ├── webhook.ts        # Webhook utilities
+    └── mrGenerator.ts    # Smart merge request generation
 ```
 
 ## Documentation

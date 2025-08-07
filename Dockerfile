@@ -4,7 +4,7 @@ FROM node:18-alpine
 RUN apk add --no-cache git curl
 
 # Install Claude Code CLI globally
-RUN npm install -g @anthropic-ai/claude-code@1.0.69
+RUN npm install -g @anthropic-ai/claude-code
 
 # Create app directory
 WORKDIR /app
