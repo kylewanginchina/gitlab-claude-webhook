@@ -4,6 +4,7 @@ import logger from '../utils/logger';
 import { ProjectManager } from './projectManager';
 import { StreamingClaudeExecutor, StreamingProgressCallback } from './streamingClaudeExecutor';
 import { GitLabService } from './gitlabService';
+import { MRGenerator } from '../utils/mrGenerator';
 
 export class EventProcessor {
   private projectManager: ProjectManager;
@@ -190,16 +191,20 @@ export class EventProcessor {
       // Changes should already be pushed by the ClaudeExecutor
       // Create merge request
       try {
-        const mrTitle = `Claude: ${instruction.command.substring(0, 50)}${instruction.command.length > 50 ? '...' : ''}`;
-        const mrDescription = `This merge request contains changes made by Claude based on the following instruction:\n\n> ${instruction.command}\n\n**Source:** ${instruction.context}\n\n**Changes:**\n${result.changes.map((change: any) => `- ${change.type}: \`${change.path}\``).join('\n')}\n\n---\n*Generated automatically by Claude Webhook Bot*`;
+        const mrInfo = MRGenerator.generateMR({
+          instruction: instruction.command,
+          context: instruction.context,
+          changes: result.changes,
+          projectUrl: event.project.web_url,
+        });
 
         const mergeRequest = await this.gitlabService.createMergeRequest(
           event.project.id,
           {
             sourceBranch: claudeBranch,
             targetBranch: baseBranch,
-            title: mrTitle,
-            description: mrDescription,
+            title: mrInfo.title,
+            description: mrInfo.description,
           }
         );
 
@@ -209,7 +214,7 @@ export class EventProcessor {
         responseMessage += `**🔀 Merge Request Created**\n`;
         responseMessage += `[Click here to review and merge the changes →](${ mrUrl})\n\n`;
         responseMessage += `**Branch:** \`${claudeBranch}\` → \`${baseBranch}\`\n`;
-        
+
         await this.updateProgressComment(event, `Created merge request: ${mrUrl}`);
 
       } catch (error) {
