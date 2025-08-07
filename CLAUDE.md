@@ -79,7 +79,7 @@ Optional:
 
 Configure GitLab webhooks to trigger on:
 - Issues events
-- Merge request events  
+- Merge request events
 - Comments (Push comments, Issue comments, Merge request comments)
 
 The service detects `@claude` mentions in:

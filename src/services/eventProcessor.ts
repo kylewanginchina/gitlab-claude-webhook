@@ -105,12 +105,6 @@ export class EventProcessor {
 
     this.currentCommentId = await this.createProgressComment(event, initialMessage);
 
-    // Generate timestamp-based branch name for Claude changes
-    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '');
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-    const claudeBranch = `claude-${timestamp}-${randomSuffix}`;
-
-    // Use the default branch as the base branch
     const baseBranch = instruction.branch || event.project.default_branch;
 
     const projectPath = await this.projectManager.prepareProject(
@@ -119,16 +113,6 @@ export class EventProcessor {
     );
 
     try {
-      // Create new branch for Claude changes
-      await this.gitlabService.createBranch(
-        event.project.id,
-        claudeBranch,
-        baseBranch
-      );
-
-      // Update progress
-      await this.updateProgressComment(event, `Created temporary branch: ${claudeBranch}`);
-
       // Create streaming callback for real-time updates
       const callback: StreamingProgressCallback = {
         onProgress: async (message: string, isComplete?: boolean) => {
@@ -139,13 +123,14 @@ export class EventProcessor {
         }
       };
 
+      // Execute Claude without creating branch first
       const result = await this.claudeExecutor.executeWithStreaming(
         instruction.command,
         projectPath,
         {
           context: instruction.context,
           projectUrl: event.project.web_url,
-          branch: claudeBranch,
+          branch: baseBranch, // Use base branch for execution
           event,
           instruction: instruction.command,
         },
@@ -153,7 +138,7 @@ export class EventProcessor {
       );
 
       if (result.success) {
-        await this.handleSuccess(event, instruction, result, claudeBranch, baseBranch);
+        await this.handleSuccess(event, instruction, result, baseBranch, projectPath);
       } else {
         await this.handleFailure(event, instruction, result);
       }
@@ -166,13 +151,12 @@ export class EventProcessor {
     event: GitLabWebhookEvent,
     instruction: ClaudeInstruction,
     result: any,
-    claudeBranch: string,
-    baseBranch: string
+    baseBranch: string,
+    projectPath: string
   ): Promise<void> {
     logger.info('Claude instruction executed successfully', {
       projectId: event.project.id,
       hasChanges: result.changes?.length > 0,
-      claudeBranch,
     });
 
     let responseMessage = '✅ Claude processed your request successfully.\n\n';
@@ -188,15 +172,32 @@ export class EventProcessor {
       }
       responseMessage += '\n';
 
-      // Changes should already be pushed by the ClaudeExecutor
-      // Create merge request
+      // Only create branch and MR if there are actual changes
       try {
+        // Generate timestamp-based branch name for Claude changes
+        const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '');
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const claudeBranch = `claude-${timestamp}-${randomSuffix}`;
+
+        // Create new branch for Claude changes
+        await this.gitlabService.createBranch(
+          event.project.id,
+          claudeBranch,
+          baseBranch
+        );
+
+        await this.updateProgressComment(event, `Created branch: ${claudeBranch}`);
+
+        // Generate MR info first to get the commit message
         const mrInfo = MRGenerator.generateMR({
           instruction: instruction.command,
           context: instruction.context,
           changes: result.changes,
           projectUrl: event.project.web_url,
         });
+
+        // Switch to the new branch and push changes with generated commit message
+        await this.commitAndPushToNewBranch(event, projectPath, claudeBranch, mrInfo.commitMessage);
 
         const mergeRequest = await this.gitlabService.createMergeRequest(
           event.project.id,
@@ -218,13 +219,30 @@ export class EventProcessor {
         await this.updateProgressComment(event, `Created merge request: ${mrUrl}`);
 
       } catch (error) {
-        logger.error('Failed to create merge request:', error);
-        responseMessage += `⚠️ **Note:** Changes were pushed to branch \`${claudeBranch}\` but merge request creation failed: ${error instanceof Error ? error.message : String(error)}\n\n`;
-        responseMessage += `You can manually create a merge request from: \`${claudeBranch}\` → \`${baseBranch}\`\n`;
+        logger.error('Failed to create branch or merge request:', error);
+        responseMessage += `⚠️ **Note:** Changes were made but could not create merge request: ${error instanceof Error ? error.message : String(error)}\n\n`;
       }
+    } else {
+      // No changes, just post the result
+      responseMessage += '📋 No file changes were made.\n';
     }
 
     await this.postComment(event, responseMessage);
+  }
+
+  private async commitAndPushToNewBranch(
+    event: GitLabWebhookEvent,
+    projectPath: string,
+    claudeBranch: string,
+    commitMessage: string
+  ): Promise<void> {
+    try {
+      // Switch to the new branch in local git
+      await this.projectManager.switchToAndPushBranch(projectPath, claudeBranch, commitMessage);
+    } catch (error) {
+      logger.error('Failed to commit and push to new branch:', error);
+      throw error;
+    }
   }
 
   private async handleFailure(

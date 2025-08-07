@@ -3,6 +3,7 @@ import { FileChange } from '../types/common';
 export interface MRInfo {
   title: string;
   description: string;
+  commitMessage: string;
 }
 
 export interface MROptions {
@@ -62,7 +63,7 @@ export class MRGenerator {
     const title = this.generateTitle(type, instruction, scope);
     const description = this.generateDescription(options, type);
 
-    return { title, description };
+    return { title, description, commitMessage: this.generateCommitMessage(title, instruction) };
   }
 
   private static determineChangeType(instruction: string, changes: FileChange[]): string {
@@ -292,5 +293,46 @@ export class MRGenerator {
     }
 
     return section;
+  }
+
+  private static generateCommitMessage(title: string, instruction: string): string {
+    // Use the generated title as the commit message header
+    let commitMessage = title;
+
+    // Add description if the instruction is complex enough
+    const cleanInstruction = instruction
+      .replace(/^@claude\s*/i, '')
+      .trim();
+
+    if (cleanInstruction.length > 60) {
+      // Add multi-line commit message with details
+      commitMessage += '\n\n';
+      commitMessage += this.wrapText(cleanInstruction, 72);
+    }
+
+    return commitMessage;
+  }
+
+  private static wrapText(text: string, maxLength: number): string {
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      if (currentLine.length + word.length + 1 <= maxLength) {
+        currentLine = currentLine ? `${currentLine} ${word}` : word;
+      } else {
+        if (currentLine) {
+          lines.push(currentLine);
+        }
+        currentLine = word;
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines.join('\n');
   }
 }

@@ -57,9 +57,7 @@ export class StreamingClaudeExecutor {
 
       if (changes.length > 0) {
         await callback.onProgress(`📝 Claude made changes to ${changes.length} file(s)`, false);
-
-        // Commit and push changes if needed
-        await this.commitAndPushChanges(projectPath, context, changes, callback);
+        // Don't commit here - let EventProcessor handle branch creation and commit
       }
 
       await callback.onProgress('✅ Claude execution completed successfully!', true);
