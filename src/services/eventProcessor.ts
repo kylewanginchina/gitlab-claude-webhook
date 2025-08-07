@@ -156,7 +156,8 @@ export class EventProcessor {
     let responseMessage = '✅ Claude processed your request successfully.\n\n';
     
     if (result.output) {
-      responseMessage += `**Output:**\n\`\`\`\n${result.output}\n\`\`\`\n\n`;
+      // Remove the code block wrapper to allow Markdown rendering
+      responseMessage += `${result.output}\n\n`;
     }
 
     if (result.changes?.length > 0) {
