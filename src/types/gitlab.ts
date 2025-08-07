@@ -62,10 +62,10 @@ export interface GitLabWebhookEvent {
   event_type?: string;
   user: GitLabUser;
   project: GitLabProject;
-  object_attributes: any;
+  object_attributes: Record<string, unknown>;
   issue?: GitLabIssue;
   merge_request?: GitLabMergeRequest;
-  repository?: any;
+  repository?: Record<string, unknown>;
 }
 
 export interface ClaudeInstruction {

@@ -1,5 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
-import path from 'path';
+import { spawn } from 'child_process';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import { ProcessResult, FileChange } from '../types/common';
@@ -58,7 +57,7 @@ export class StreamingClaudeExecutor {
 
       if (changes.length > 0) {
         await callback.onProgress(`📝 Claude made changes to ${changes.length} file(s)`, false);
-        
+
         // Commit and push changes if needed
         await this.commitAndPushChanges(projectPath, context, changes, callback);
       }
@@ -73,9 +72,9 @@ export class StreamingClaudeExecutor {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('Streaming Claude execution failed:', error);
-      
+
       await callback.onError(`❌ Claude execution failed: ${errorMessage}`);
-      
+
       return {
         success: false,
         error: errorMessage,
@@ -143,10 +142,12 @@ export class StreamingClaudeExecutor {
       let errorOutput = '';
       let lastProgressTime = Date.now();
       let progressBuffer = '';
+      // eslint-disable-next-line prefer-const
       let timeoutHandle: NodeJS.Timeout;
 
       // Set timeout
       const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
+      // eslint-disable-next-line prefer-const
       timeoutHandle = setTimeout(() => {
         claudeProcess.kill('SIGTERM');
         callback.onError('⏰ Claude execution timed out');
@@ -166,7 +167,7 @@ export class StreamingClaudeExecutor {
           if (progressMessage) {
             await callback.onProgress(progressMessage, false);
           }
-          
+
           progressBuffer = '';
           lastProgressTime = now;
         }
@@ -179,7 +180,7 @@ export class StreamingClaudeExecutor {
 
       claudeProcess.on('close', async (code) => {
         clearTimeout(timeoutHandle);
-        
+
         // Send final progress if any remaining
         if (progressBuffer.trim()) {
           const finalMessage = this.extractProgressMessage(progressBuffer);
@@ -217,23 +218,23 @@ export class StreamingClaudeExecutor {
     // Extract meaningful progress messages from Claude output
     const lines = buffer.split('\n').filter(line => line.trim());
     const lastLine = lines[lines.length - 1];
-    
+
     // Filter out common debug/verbose messages and extract meaningful ones
-    if (lastLine && 
-        !lastLine.includes('DEBUG') && 
+    if (lastLine &&
+        !lastLine.includes('DEBUG') &&
         !lastLine.includes('INFO') &&
-        lastLine.length > 10 && 
+        lastLine.length > 10 &&
         lastLine.length < 200) {
       return `🤖 ${lastLine.trim()}`;
     }
-    
+
     return '';
   }
 
   private async getFileChanges(projectPath: string): Promise<FileChange[]> {
     try {
       const changedFiles = await this.projectManager.getChangedFiles(projectPath);
-      
+
       return changedFiles.map(file => ({
         path: file.path,
         type: file.type as 'modified' | 'created' | 'deleted',
@@ -291,15 +292,13 @@ export class ClaudeExecutor {
   ): Promise<ProcessResult> {
     // Create a simple callback that collects all messages
     let finalOutput = '';
-    let hasError = false;
-    
+
     const callback: StreamingProgressCallback = {
-      onProgress: async (message: string, isComplete?: boolean) => {
+      onProgress: async (message: string) => {
         finalOutput += message + '\n';
         logger.info('Claude progress:', message);
       },
       onError: async (error: string) => {
-        hasError = true;
         finalOutput += `ERROR: ${error}\n`;
         logger.error('Claude error:', error);
       }
@@ -323,8 +322,7 @@ export class ClaudeExecutor {
   public async executeWithCommit(
     command: string,
     projectPath: string,
-    context: ClaudeExecutionContext,
-    commitMessage?: string
+    context: ClaudeExecutionContext
   ): Promise<ProcessResult> {
     // For backward compatibility, use the streaming version
     return this.execute(command, projectPath, context);

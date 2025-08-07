@@ -1,5 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
-import path from 'path';
+import { spawn } from 'child_process';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import { ProcessResult, FileChange } from '../types/common';
@@ -113,10 +112,12 @@ export class ClaudeExecutor {
 
       let output = '';
       let errorOutput = '';
+      // eslint-disable-next-line prefer-const
       let timeoutHandle: NodeJS.Timeout;
 
       // Set timeout
       const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
+      // eslint-disable-next-line prefer-const
       timeoutHandle = setTimeout(() => {
         claudeProcess.kill('SIGTERM');
         reject(new Error(`Claude execution timed out after ${timeoutMs}ms`));
@@ -132,7 +133,7 @@ export class ClaudeExecutor {
 
       claudeProcess.on('close', (code) => {
         clearTimeout(timeoutHandle);
-        
+
         if (code === 0) {
           logger.info('Claude command executed successfully', {
             outputLength: output.length,
@@ -167,7 +168,7 @@ export class ClaudeExecutor {
   private async getFileChanges(projectPath: string): Promise<FileChange[]> {
     try {
       const changedFiles = await this.projectManager.getChangedFiles(projectPath);
-      
+
       return changedFiles.map(file => ({
         path: file.path,
         type: file.type as 'modified' | 'created' | 'deleted',
@@ -189,7 +190,7 @@ export class ClaudeExecutor {
     if (result.success && result.changes && result.changes.length > 0) {
       try {
         const message = commitMessage || `Claude: ${command.substring(0, 50)}${command.length > 50 ? '...' : ''}`;
-        
+
         await this.projectManager.commitAndPush(
           projectPath,
           message,
@@ -202,7 +203,7 @@ export class ClaudeExecutor {
         });
       } catch (error) {
         logger.error('Failed to commit and push changes:', error);
-        result.error = `Execution successful but failed to push changes: ${error instanceof Error ? error.message : String(error)}`;;
+        result.error = `Execution successful but failed to push changes: ${error instanceof Error ? error.message : String(error)}`;
         result.success = false;
       }
     }

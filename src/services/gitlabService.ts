@@ -19,7 +19,7 @@ export class GitLabService {
   ): Promise<any> {
     try {
       const comment = await this.gitlab.IssueNotes.create(projectId, issueIid, body);
-      
+
       logger.info('Created comment on issue', {
         projectId,
         issueIid,
@@ -49,7 +49,7 @@ export class GitLabService {
   ): Promise<any> {
     try {
       const comment = await this.gitlab.MergeRequestNotes.create(projectId, mergeRequestIid, body);
-      
+
       logger.info('Created comment on merge request', {
         projectId,
         mergeRequestIid,
@@ -99,13 +99,13 @@ export class GitLabService {
   ): Promise<any> {
     try {
       const branch = await this.gitlab.Branches.create(projectId, branchName, ref);
-      
+
       logger.info('Created branch', {
         projectId,
         branchName,
         ref,
       });
-      
+
       return branch;
     } catch (error) {
       logger.error('Failed to create branch:', error);
@@ -122,7 +122,7 @@ export class GitLabService {
       await this.gitlab.MergeRequests.edit(projectId, mergeRequestIid, {
         description,
       });
-      
+
       logger.info('Updated merge request description', {
         projectId,
         mergeRequestIid,
@@ -142,7 +142,7 @@ export class GitLabService {
       await this.gitlab.Issues.edit(projectId, issueIid, {
         description,
       });
-      
+
       logger.info('Updated issue description', {
         projectId,
         issueIid,
@@ -192,14 +192,14 @@ export class GitLabService {
           ...(options.description && { description: options.description }),
         }
       );
-      
+
       logger.info('Created merge request', {
         projectId,
         sourceBranch: options.sourceBranch,
         targetBranch: options.targetBranch,
         title: options.title,
       });
-      
+
       return mergeRequest;
     } catch (error) {
       logger.error('Failed to create merge request:', error);

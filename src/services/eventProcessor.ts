@@ -20,7 +20,7 @@ export class EventProcessor {
   public async processEvent(event: GitLabWebhookEvent): Promise<void> {
     try {
       const instruction = this.extractInstruction(event);
-      
+
       if (!instruction) {
         logger.debug('No Claude instruction found in event', {
           eventType: event.object_kind,
@@ -66,8 +66,8 @@ export class EventProcessor {
 
       case 'note':
         if (event.object_attributes) {
-          content = event.object_attributes.note || '';
-          
+          content = (event.object_attributes as { note?: string }).note || '';
+
           if (event.issue) {
             context = `Issue #${event.issue.iid} comment`;
             branch = event.project.default_branch;
@@ -83,7 +83,7 @@ export class EventProcessor {
     }
 
     const command = extractClaudeInstructions(content);
-    
+
     if (!command) {
       return null;
     }
@@ -101,9 +101,9 @@ export class EventProcessor {
   ): Promise<void> {
     // Create initial progress comment
     const initialMessage = `🚀 Claude is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
-    
+
     this.currentCommentId = await this.createProgressComment(event, initialMessage);
-    
+
     const projectPath = await this.projectManager.prepareProject(
       event.project,
       instruction.branch || event.project.default_branch
@@ -154,7 +154,7 @@ export class EventProcessor {
     });
 
     let responseMessage = '✅ Claude processed your request successfully.\n\n';
-    
+
     if (result.output) {
       // Remove the code block wrapper to allow Markdown rendering
       responseMessage += `${result.output}\n\n`;
@@ -166,7 +166,7 @@ export class EventProcessor {
         responseMessage += `- ${change.type}: \`${change.path}\`\n`;
       }
       responseMessage += '\n';
-      
+
       // Push changes to repository
       await this.projectManager.pushChanges(
         event.project,
@@ -194,7 +194,7 @@ export class EventProcessor {
 
   private async reportError(event: GitLabWebhookEvent, error: any): Promise<void> {
     const responseMessage = `🚨 Internal error occurred while processing your Claude request:\n\n\`\`\`\n${error.message}\n\`\`\``;
-    
+
     try {
       await this.postComment(event, responseMessage);
     } catch (commentError) {
@@ -245,7 +245,7 @@ export class EventProcessor {
   private async createProgressComment(event: GitLabWebhookEvent, message: string): Promise<number | null> {
     try {
       let commentId: number | null = null;
-      
+
       switch (event.object_kind) {
         case 'issue':
           if (event.issue) {
@@ -298,9 +298,9 @@ export class EventProcessor {
   private progressMessages: string[] = [];
 
   private async updateProgressComment(
-    event: GitLabWebhookEvent, 
-    message: string, 
-    isComplete?: boolean, 
+    event: GitLabWebhookEvent,
+    message: string,
+    isComplete?: boolean,
     isError?: boolean
   ): Promise<void> {
     if (!this.currentCommentId) {
@@ -311,12 +311,12 @@ export class EventProcessor {
       // Add new message to the progress log
       const timestamp = new Date().toISOString().slice(11, 19);
       const formattedMessage = `[${timestamp}] ${message}`;
-      
+
       this.progressMessages.push(formattedMessage);
 
       // Build the complete comment body
       let commentBody = '🤖 **Claude Progress Report**\n\n';
-      
+
       // Add the latest messages (keep last 10 to avoid too long comments)
       const recentMessages = this.progressMessages.slice(-10);
       recentMessages.forEach(msg => {
@@ -347,7 +347,7 @@ export class EventProcessor {
     // We would need to use the notes API with PUT method, but the GitLab client might not support this
     // For now, we'll create new comments for major updates
     // This is a limitation we'll document
-    
+
     logger.info('Progress update (comment update not supported by GitLab API)', {
       commentId,
       messageLength: body.length,

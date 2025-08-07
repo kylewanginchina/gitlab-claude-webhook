@@ -24,16 +24,16 @@ export class WebhookServer {
 
   private setupRoutes(): void {
     this.app.post('/webhook', this.handleWebhook.bind(this));
-    
+
     this.app.get('/health', (req: Request, res: Response) => {
       res.json({ status: 'healthy', timestamp: new Date().toISOString() });
     });
 
     this.app.get('/', (req: Request, res: Response) => {
-      res.json({ 
+      res.json({
         service: 'GitLab Claude Webhook',
         version: '1.0.0',
-        status: 'running' 
+        status: 'running'
       });
     });
   }
@@ -50,7 +50,7 @@ export class WebhookServer {
 
       // Parse JSON if we have raw body
       const event: GitLabWebhookEvent = req.body instanceof Buffer ? JSON.parse(rawBody) : req.body;
-      
+
       logger.info(`Received GitLab webhook: ${event.object_kind}`, {
         eventType: event.object_kind,
         projectId: event.project?.id,
@@ -72,7 +72,7 @@ export class WebhookServer {
   public start(): void {
     try {
       validateConfig();
-      
+
       this.app.listen(config.webhook.port, () => {
         logger.info(`GitLab Claude Webhook server started on port ${config.webhook.port}`);
       });

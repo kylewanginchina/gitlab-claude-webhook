@@ -29,12 +29,12 @@ export function validateConfig(): void {
 
   for (const path of required) {
     const keys = path.split('.');
-    let value: any = config;
-    
+    let value = config as unknown as Record<string, unknown>;
+
     for (const key of keys) {
-      value = value?.[key];
+      value = value?.[key] as Record<string, unknown>;
     }
-    
+
     if (!value) {
       throw new Error(`Missing required environment variable for ${path}`);
     }

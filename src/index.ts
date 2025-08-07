@@ -4,10 +4,10 @@ import logger from './utils/logger';
 async function main(): Promise<void> {
   try {
     logger.info('Starting GitLab Claude Webhook Service...');
-    
+
     const server = new WebhookServer();
     server.start();
-    
+
     // Graceful shutdown
     process.on('SIGTERM', () => {
       logger.info('Received SIGTERM, shutting down gracefully...');

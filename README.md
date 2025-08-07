@@ -114,9 +114,9 @@ Add to MR description or comment:
 
 You can provide specific instructions:
 ```
-@claude 
+@claude
 - Fix the TypeScript errors in the authentication module
-- Add proper error handling 
+- Add proper error handling
 - Update the unit tests accordingly
 ```
 

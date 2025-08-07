@@ -48,7 +48,7 @@ For project-specific access:
 2. Create a new token with:
    - **Token name**: `claude-code-bot`
    - **Role**: `Maintainer` (required for pushing changes)
-   - **Scopes**: 
+   - **Scopes**:
      - ✅ `api`
      - ✅ `read_repository`
      - ✅ `write_repository`
@@ -152,7 +152,7 @@ Create an issue with:
 ### 3. Advanced Test
 Create a merge request and comment:
 ```
-@claude 
+@claude
 Please review this MR for:
 - Security vulnerabilities
 - Performance issues
@@ -178,7 +178,7 @@ After each test:
 2. Check GitLab webhook logs for delivery attempts
 3. Ensure webhook URL is correct and accessible
 
-#### "GitLab API authentication failed"  
+#### "GitLab API authentication failed"
 **Symptoms**: 401 errors when accessing GitLab API
 **Solutions**:
 1. Verify GitLab token is valid and hasn't expired

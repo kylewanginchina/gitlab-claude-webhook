@@ -16,7 +16,7 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
   // GitLab can send either:
   // 1. Secret token directly (X-Gitlab-Token header)
   // 2. SHA256 signature (starts with "sha256=")
-  
+
   // Check if it's a direct secret token match
   if (signature === config.webhook.secret) {
     logger.debug('Webhook verified using direct secret token');
@@ -31,7 +31,7 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
       .digest('hex');
 
     const providedSignature = signature.replace('sha256=', '');
-    
+
     // Check if both signatures have the same length before comparing
     if (expectedSignature.length !== providedSignature.length) {
       logger.warn('Signature length mismatch', {
@@ -68,13 +68,13 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
 
 export function extractClaudeInstructions(text: string): string | null {
   if (!text) return null;
-  
+
   const claudePattern = /@claude\s+([\s\S]*?)(?=@\w+|$)/i;
   const match = text.match(claudePattern);
-  
+
   if (match) {
     return match[1].trim();
   }
-  
+
   return null;
 }
