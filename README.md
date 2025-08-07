@@ -81,18 +81,18 @@ npm start
 npm run dev
 ```
 
-## GitLab Webhook Setup
+## GitLab Configuration
 
-1. Go to your GitLab project → Settings → Webhooks
-2. Add a new webhook with:
-   - URL: `http://your-domain:3000/webhook`
-   - Secret Token: Use the same value as `WEBHOOK_SECRET`
-   - Trigger events:
-     - Issues events
-     - Merge request events  
-     - Comments
+For detailed GitLab setup instructions, including webhook configuration, token permissions, and troubleshooting, see:
 
-3. Test the webhook to ensure it's working
+📋 **[Complete GitLab Setup Guide](docs/gitlab-setup.md)**
+
+### Quick Setup Summary
+
+1. **Create GitLab Token**: Generate a personal or project access token with `api`, `read_repository`, and `write_repository` scopes
+2. **Configure Webhook**: Add webhook to your project with URL `http://your-domain:3000/webhook` and secret token
+3. **Set Trigger Events**: Enable Issues events, Merge request events, and Comments
+4. **Test Integration**: Create an issue with `@claude` mention to verify setup
 
 ## Usage
 
@@ -234,6 +234,13 @@ src/
     ├── logger.ts         # Logging utility
     └── webhook.ts        # Webhook utilities
 ```
+
+## Documentation
+
+- 📋 [GitLab Configuration Guide](docs/gitlab-setup.md) - Complete setup instructions for GitLab integration
+- 🔧 [API Reference](#api-endpoints) - Available endpoints and usage
+- 🏗️ [Project Structure](#project-structure) - Codebase organization
+- 🐛 [Troubleshooting](#troubleshooting) - Common issues and solutions
 
 ## Contributing
 
