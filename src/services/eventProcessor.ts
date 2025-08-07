@@ -104,12 +104,30 @@ export class EventProcessor {
 
     this.currentCommentId = await this.createProgressComment(event, initialMessage);
 
+    // Generate timestamp-based branch name for Claude changes
+    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '');
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const claudeBranch = `claude-${timestamp}-${randomSuffix}`;
+
+    // Use the default branch as the base branch
+    const baseBranch = instruction.branch || event.project.default_branch;
+
     const projectPath = await this.projectManager.prepareProject(
       event.project,
-      instruction.branch || event.project.default_branch
+      baseBranch
     );
 
     try {
+      // Create new branch for Claude changes
+      await this.gitlabService.createBranch(
+        event.project.id,
+        claudeBranch,
+        baseBranch
+      );
+
+      // Update progress
+      await this.updateProgressComment(event, `Created temporary branch: ${claudeBranch}`);
+
       // Create streaming callback for real-time updates
       const callback: StreamingProgressCallback = {
         onProgress: async (message: string, isComplete?: boolean) => {
@@ -126,7 +144,7 @@ export class EventProcessor {
         {
           context: instruction.context,
           projectUrl: event.project.web_url,
-          branch: instruction.branch || event.project.default_branch,
+          branch: claudeBranch,
           event,
           instruction: instruction.command,
         },
@@ -134,7 +152,7 @@ export class EventProcessor {
       );
 
       if (result.success) {
-        await this.handleSuccess(event, instruction, result);
+        await this.handleSuccess(event, instruction, result, claudeBranch, baseBranch);
       } else {
         await this.handleFailure(event, instruction, result);
       }
@@ -146,17 +164,19 @@ export class EventProcessor {
   private async handleSuccess(
     event: GitLabWebhookEvent,
     instruction: ClaudeInstruction,
-    result: any
+    result: any,
+    claudeBranch: string,
+    baseBranch: string
   ): Promise<void> {
     logger.info('Claude instruction executed successfully', {
       projectId: event.project.id,
       hasChanges: result.changes?.length > 0,
+      claudeBranch,
     });
 
     let responseMessage = '✅ Claude processed your request successfully.\n\n';
 
     if (result.output) {
-      // Remove the code block wrapper to allow Markdown rendering
       responseMessage += `${result.output}\n\n`;
     }
 
@@ -167,12 +187,36 @@ export class EventProcessor {
       }
       responseMessage += '\n';
 
-      // Push changes to repository
-      await this.projectManager.pushChanges(
-        event.project,
-        instruction.branch || event.project.default_branch,
-        `Claude: ${instruction.command.substring(0, 50)}...`
-      );
+      // Changes should already be pushed by the ClaudeExecutor
+      // Create merge request
+      try {
+        const mrTitle = `Claude: ${instruction.command.substring(0, 50)}${instruction.command.length > 50 ? '...' : ''}`;
+        const mrDescription = `This merge request contains changes made by Claude based on the following instruction:\n\n> ${instruction.command}\n\n**Source:** ${instruction.context}\n\n**Changes:**\n${result.changes.map((change: any) => `- ${change.type}: \`${change.path}\``).join('\n')}\n\n---\n*Generated automatically by Claude Webhook Bot*`;
+
+        const mergeRequest = await this.gitlabService.createMergeRequest(
+          event.project.id,
+          {
+            sourceBranch: claudeBranch,
+            targetBranch: baseBranch,
+            title: mrTitle,
+            description: mrDescription,
+          }
+        );
+
+        // Generate MR URL
+        const mrUrl = `${event.project.web_url}/-/merge_requests/${mergeRequest.iid}`;
+
+        responseMessage += `**🔀 Merge Request Created**\n`;
+        responseMessage += `[Click here to review and merge the changes →](${ mrUrl})\n\n`;
+        responseMessage += `**Branch:** \`${claudeBranch}\` → \`${baseBranch}\`\n`;
+        
+        await this.updateProgressComment(event, `Created merge request: ${mrUrl}`);
+
+      } catch (error) {
+        logger.error('Failed to create merge request:', error);
+        responseMessage += `⚠️ **Note:** Changes were pushed to branch \`${claudeBranch}\` but merge request creation failed: ${error instanceof Error ? error.message : String(error)}\n\n`;
+        responseMessage += `You can manually create a merge request from: \`${claudeBranch}\` → \`${baseBranch}\`\n`;
+      }
     }
 
     await this.postComment(event, responseMessage);

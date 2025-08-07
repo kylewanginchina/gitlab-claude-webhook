@@ -111,18 +111,41 @@ export class ProjectManager {
     return url.toString();
   }
 
-  public async pushChanges(
-    project: GitLabProject,
-    branch: string,
+  public async switchToAndPushBranch(
+    projectPath: string,
+    branchName: string,
     commitMessage: string
   ): Promise<void> {
-    // This method would be called from the executor after making changes
-    // Implementation depends on the specific workflow
-    logger.info('Pushing changes', {
-      projectId: project.id,
-      branch,
-      message: commitMessage,
-    });
+    const git = simpleGit(projectPath);
+
+    try {
+      // Switch to the new branch
+      await git.checkout(['-b', branchName]);
+
+      // Add all changes
+      await git.add('.');
+
+      // Check if there are changes to commit
+      const status = await git.status();
+      if (status.files.length === 0) {
+        logger.info('No changes to commit');
+        return;
+      }
+
+      // Commit changes
+      await git.commit(commitMessage);
+
+      // Push to remote with upstream tracking
+      await git.push(['-u', 'origin', branchName]);
+
+      logger.info('Changes committed and pushed to new branch', {
+        branch: branchName,
+        filesChanged: status.files.length,
+      });
+    } catch (error) {
+      logger.error('Error switching to branch and pushing changes:', error);
+      throw error;
+    }
   }
 
   public async hasChanges(projectPath: string): Promise<boolean> {

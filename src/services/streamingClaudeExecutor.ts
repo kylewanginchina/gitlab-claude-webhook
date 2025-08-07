@@ -127,9 +127,15 @@ export class StreamingClaudeExecutor {
         ANTHROPIC_AUTH_TOKEN: config.anthropic.authToken,
       };
 
-      // Use proper Claude Code CLI arguments
+      // Use proper Claude Code CLI arguments with non-interactive mode and permission bypass
       const claudeArgs = [
-        command, // Direct command without --non-interactive
+        '--print', // Non-interactive mode, print response and exit
+        '--dangerously-skip-permissions', // Bypass all permission checks (recommended for sandboxes)
+        '--output-format', 'text', // Text output format
+        '--allowedTools', 'Bash(git:*),Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
+        '--model', 'claude-sonnet-4-20250514', // Specify the model to use
+        '--append-system-prompt', 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
+        command, // The actual command/prompt
       ];
 
       const claudeProcess = spawn('claude', claudeArgs, {
@@ -256,11 +262,20 @@ export class StreamingClaudeExecutor {
 
       const commitMessage = `Claude: ${context.instruction.substring(0, 50)}${context.instruction.length > 50 ? '...' : ''}\n\n🤖 Generated with Claude Code Webhook`;
 
-      await this.projectManager.commitAndPush(
-        projectPath,
-        commitMessage,
-        context.branch
-      );
+      // Use switchToAndPushBranch for Claude branches, commitAndPush for existing branches
+      if (context.branch.startsWith('claude-')) {
+        await this.projectManager.switchToAndPushBranch(
+          projectPath,
+          context.branch,
+          commitMessage
+        );
+      } else {
+        await this.projectManager.commitAndPush(
+          projectPath,
+          commitMessage,
+          context.branch
+        );
+      }
 
       await callback.onProgress(`✅ Successfully pushed ${changes.length} file changes to ${context.branch}`, false);
 
