@@ -132,11 +132,26 @@ You can provide specific instructions:
 5. **Branch Management**: Creates timestamp-based branch for Claude changes
 6. **Claude Execution**: Runs Claude Code CLI with the extracted instructions
 7. **Change Handling**: Commits and pushes any code changes made by Claude
-8. **Smart MR Creation**: Automatically creates merge requests with:
-   - Conventional commit format titles (feat, fix, docs, etc.)
-   - Structured descriptions with testing checklists
-   - Auto-detected scope and change categorization
+8. **Smart MR Creation**: Automatically creates merge requests with conventional commit format
 9. **Feedback**: Posts results or errors as comments back to GitLab
+
+## Integration Example
+
+Here's what the GitLab integration looks like in action when you use `@claude` mentions:
+
+![GitLab Claude Integration Example](docs/images/gitlab-integration-example.png)
+
+The screenshot shows the complete workflow:
+1. **Request**: User creates an issue or comment with `@claude` mention and specific instructions
+2. **Instant Reply**: Service immediately acknowledges the request and starts processing
+3. **Final Reply**: Claude processes the request, makes the necessary changes, and creates a merge request with detailed information about what was modified
+
+The service automatically:
+- Creates a timestamped branch for the changes
+- Executes the Claude Code CLI with the provided instructions
+- Commits and pushes any code modifications
+- Generates a professional merge request with conventional commit format
+- Provides a direct link to review and merge the changes
 
 ## API Endpoints
 
