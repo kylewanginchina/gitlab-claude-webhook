@@ -135,7 +135,7 @@ export class StreamingClaudeExecutor {
         '--output-format', 'text', // Text output format
         '--allowedTools', 'Bash(git:*),Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
         '--model', 'claude-sonnet-4-20250514', // Specify the model to use
-        '--append-system-prompt', 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
+        '--append-system-prompt', 'You are working in an automated webhook environment. IMPORTANT: Always start by exploring the project structure using available tools (LS, Read, Glob, Grep) to understand the codebase before responding to requests. For merge request contexts, use git commands (git log, git diff, git show) to examine actual code changes. Read relevant files to provide accurate, project-specific information. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
         fullPrompt, // The complete prompt including context
       ];
 
@@ -229,6 +229,28 @@ export class StreamingClaudeExecutor {
       fullPrompt += `**Context:** ${context.context}\n\n`;
     }
 
+    // Detect if the request involves code analysis or exploration
+    const analysisKeywords = [
+      'introduce', 'explain', 'analyze', 'understand', 'review', 'describe',
+      'show', 'list', 'find', 'search', 'what', 'how', 'overview', 'structure',
+      '介绍', '解释', '分析', '理解', '审查', '描述', '显示', '列出', '查找', '搜索', '概述', '结构'
+    ];
+
+    const needsExploration = analysisKeywords.some(keyword =>
+      command.toLowerCase().includes(keyword)
+    );
+
+    // Special handling for MR contexts - always explore when it's MR-related
+    const isMRContext = context.context && context.context.includes('MR #');
+
+    if (needsExploration || isMRContext) {
+      fullPrompt += `**Important:** Before responding, please explore the project structure using the available tools (LS, Read, Glob, Grep) to understand the codebase. Read key files like README.md, package.json, and main source files to provide accurate information about this specific project.\n\n`;
+
+      if (isMRContext) {
+        fullPrompt += `**MR Analysis:** This is a merge request context. Please use git commands to examine the actual changes in this MR. Use 'git log', 'git diff', and 'git show' to understand what files have been modified and what changes were made.\n\n`;
+      }
+    }
+
     // Add the main command/instruction
     fullPrompt += `**Request:** ${command}`;
 
@@ -236,6 +258,7 @@ export class StreamingClaudeExecutor {
       hasContext: !!context.context,
       contextLength: context.context?.length || 0,
       commandLength: command.length,
+      needsExploration,
       fullPromptLength: fullPrompt.length
     });
 

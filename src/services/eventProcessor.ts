@@ -64,7 +64,7 @@ export class EventProcessor {
       case 'merge_request':
         if (event.merge_request) {
           content = event.merge_request.description || '';
-          context = `MR #${event.merge_request.iid}: ${event.merge_request.title}`;
+          context = await this.buildMergeRequestContext(event.merge_request, event.project.id);
           branch = event.merge_request.source_branch;
         }
         break;
@@ -75,25 +75,27 @@ export class EventProcessor {
           const noteId = (event.object_attributes as { id?: number }).id;
 
           if (event.issue) {
-            context = `Issue #${event.issue.iid} comment`;
+            // Build enhanced context for issue comments
+            context = `Issue #${event.issue.iid}: ${event.issue.title}\n\n**Issue Description:** ${event.issue.description ? (event.issue.description.length > 200 ? event.issue.description.substring(0, 200) + '...' : event.issue.description) : 'No description provided'}`;
             branch = event.project.default_branch;
 
-            // Fetch thread context for issue comment - only if it's actually a reply in a discussion
+            // Check if this is a reply in a discussion thread
             if (noteId) {
               const threadInfo = await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId);
               if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `Issue #${event.issue.iid} comment reply\n\n${threadInfo}`;
+                context = `${context}\n\n${threadInfo}`;
               }
             }
           } else if (event.merge_request) {
-            context = `MR #${event.merge_request.iid} comment`;
+            // Build enhanced context for merge request comments including code changes
+            context = await this.buildMergeRequestContext(event.merge_request, event.project.id);
             branch = event.merge_request.source_branch;
 
-            // Fetch thread context for MR comment - only if it's actually a reply in a discussion
+            // Check if this is a reply in a discussion thread
             if (noteId) {
               const threadInfo = await this.getThreadContext('merge_request', event.project.id, event.merge_request.iid, noteId);
               if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `MR #${event.merge_request.iid} comment reply\n\n${threadInfo}`;
+                context = `${context}\n\n${threadInfo}`;
               }
             }
           }
@@ -156,15 +158,81 @@ export class EventProcessor {
   }
 
   private isActualReply(threadContext: string | null): boolean {
-    // If there's actual thread context content, it means there are previous comments in the discussion
-    // If threadContext is empty or just whitespace, it means this is the first comment in the discussion
-    return Boolean(threadContext && threadContext.trim().length > 0 && threadContext.includes('**Thread Context:**'));
+    if (!threadContext || !threadContext.trim()) {
+      return false;
+    }
+
+    // Check if there's meaningful thread context content
+    // Thread context should contain previous comments in the discussion
+    const hasThreadContext = threadContext.includes('**Thread Context:**');
+
+    if (!hasThreadContext) {
+      return false;
+    }
+
+    // Extract the content after "**Thread Context:**"
+    const contextContent = threadContext.split('**Thread Context:**')[1]?.trim();
+
+    // If there's actual previous conversation content, this is a reply
+    // If it's empty or just whitespace, this is the first comment in a new thread
+    return Boolean(contextContent && contextContent.length > 0);
+  }
+
+  private async buildMergeRequestContext(mergeRequest: any, projectId: number): Promise<string> {
+    try {
+      let context = `MR #${mergeRequest.iid}: ${mergeRequest.title}\n\n`;
+
+      // Add MR description if available and not too long
+      if (mergeRequest.description && mergeRequest.description.trim()) {
+        const description = mergeRequest.description.length > 200
+          ? mergeRequest.description.substring(0, 200) + '...'
+          : mergeRequest.description;
+        context += `**Description:** ${description}\n\n`;
+      }
+
+      // Add branch information
+      context += `**Source Branch:** ${mergeRequest.source_branch}\n`;
+      context += `**Target Branch:** ${mergeRequest.target_branch}\n`;
+
+      // Use webhook data first, fall back to API if needed
+      if (mergeRequest.changes_count !== undefined) {
+        context += `**Changes:** ${mergeRequest.changes_count} files modified\n`;
+      }
+
+      if (mergeRequest.additions !== undefined && mergeRequest.deletions !== undefined) {
+        context += `**Additions:** +${mergeRequest.additions}, **Deletions:** -${mergeRequest.deletions}\n`;
+      } else if (!mergeRequest.changes_count) {
+        // Only call API if webhook doesn't have the info we need
+        try {
+          const mrDetails = await this.gitlabService.getMergeRequest(projectId, mergeRequest.iid);
+
+          if (mrDetails.changes_count) {
+            context += `**Changes:** ${mrDetails.changes_count} files modified\n`;
+          }
+
+          if (mrDetails.additions && mrDetails.deletions) {
+            context += `**Additions:** +${mrDetails.additions}, **Deletions:** -${mrDetails.deletions}\n`;
+          }
+
+        } catch (error) {
+          logger.debug('Could not fetch additional MR details:', error);
+        }
+      }
+
+      return context.trim();
+    } catch (error) {
+      logger.error('Error building merge request context:', error);
+      return `MR #${mergeRequest.iid}: ${mergeRequest.title}`;
+    }
   }
 
   private async executeInstruction(
     event: GitLabWebhookEvent,
     instruction: ClaudeInstruction
   ): Promise<void> {
+    // Clear previous progress messages for this new instruction
+    this.progressMessages = [];
+
     // Create initial progress comment
     const initialMessage = `🚀 Claude is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
 
@@ -526,7 +594,18 @@ export class EventProcessor {
       const timestamp = new Date().toISOString().slice(11, 19);
       const formattedMessage = `[${timestamp}] ${message}`;
 
-      this.progressMessages.push(formattedMessage);
+      // Check for duplicate messages (ignore timestamp, only check the message content)
+      const isDuplicate = this.progressMessages.some(existingMsg => {
+        // Extract the message part after the timestamp
+        const existingMessageContent = existingMsg.substring(11); // Remove "[HH:MM:SS] "
+        const newMessageContent = formattedMessage.substring(11);
+        return existingMessageContent === newMessageContent;
+      });
+
+      // Only add if not duplicate
+      if (!isDuplicate) {
+        this.progressMessages.push(formattedMessage);
+      }
 
       // Build the complete comment body
       let commentBody = '🤖 **Claude Progress Report**\n\n';
