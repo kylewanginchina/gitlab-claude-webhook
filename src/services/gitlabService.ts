@@ -230,7 +230,7 @@ export class GitLabService {
   public async findNoteInDiscussions(
     discussions: any[],
     noteId: number
-  ): Promise<{ discussion: any; note: any; threadContext: string } | null> {
+  ): Promise<{ discussion: any; note: any; threadContext: string; discussionId: string } | null> {
     try {
       for (const discussion of discussions) {
         if (discussion.notes && Array.isArray(discussion.notes)) {
@@ -241,7 +241,8 @@ export class GitLabService {
               return {
                 discussion,
                 note,
-                threadContext
+                threadContext,
+                discussionId: discussion.id
               };
             }
           }
@@ -282,6 +283,94 @@ export class GitLabService {
     }
 
     return hasNotes ? context.trim() : '';
+  }
+
+  public async updateIssueComment(
+    projectId: number,
+    issueIid: number,
+    noteId: number,
+    body: string
+  ): Promise<any> {
+    try {
+      const updatedComment = await this.gitlab.IssueNotes.edit(projectId, issueIid, noteId, body);
+
+      logger.info('Updated issue comment', {
+        projectId,
+        issueIid,
+        noteId,
+        bodyLength: body.length,
+      });
+
+      return updatedComment;
+    } catch (error) {
+      logger.error('Failed to update issue comment:', error);
+      throw new Error(`Failed to update issue comment: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  public async updateMergeRequestComment(
+    projectId: number,
+    mergeRequestIid: number,
+    noteId: number,
+    body: string
+  ): Promise<any> {
+    try {
+      const updatedComment = await this.gitlab.MergeRequestNotes.edit(projectId, mergeRequestIid, noteId, body);
+
+      logger.info('Updated merge request comment', {
+        projectId,
+        mergeRequestIid,
+        noteId,
+        bodyLength: body.length,
+      });
+
+      return updatedComment;
+    } catch (error) {
+      logger.error('Failed to update merge request comment:', error);
+      throw new Error(`Failed to update merge request comment: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  public async addIssueDiscussionReply(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _projectId: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _issueIid: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _discussionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _body: string
+  ): Promise<any> {
+    try {
+      // TODO: Implement proper discussion reply API call
+      // For now, always throw to use fallback
+      throw new Error('Discussion reply not yet implemented - falling back to regular comment');
+    } catch (error) {
+      logger.error('Failed to add issue discussion reply:', error);
+      // Fallback to regular comment if discussion reply fails
+      throw new Error(`Failed to add issue discussion reply: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  public async addMergeRequestDiscussionReply(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _projectId: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _mergeRequestIid: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _discussionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _body: string
+  ): Promise<any> {
+    try {
+      // TODO: Implement proper discussion reply API call
+      // For now, always throw to use fallback
+      throw new Error('Discussion reply not yet implemented - falling back to regular comment');
+    } catch (error) {
+      logger.error('Failed to add merge request discussion reply:', error);
+      // Fallback to regular comment if discussion reply fails
+      throw new Error(`Failed to add merge request discussion reply: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   public async testConnection(): Promise<boolean> {

@@ -11,6 +11,7 @@ export class EventProcessor {
   private claudeExecutor: StreamingClaudeExecutor;
   private gitlabService: GitLabService;
   private currentCommentId: number | null = null;
+  private currentDiscussionId: string | null = null;
 
   constructor() {
     this.projectManager = new ProjectManager();
@@ -40,6 +41,9 @@ export class EventProcessor {
     } catch (error) {
       logger.error('Error processing event:', error);
       await this.reportError(event, error);
+    } finally {
+      // Reset discussion ID after processing
+      this.currentDiscussionId = null;
     }
   }
 
@@ -130,11 +134,15 @@ export class EventProcessor {
 
       const result = await this.gitlabService.findNoteInDiscussions(discussions, noteId);
 
-      if (result && result.threadContext) {
+      if (result) {
+        // Store discussion ID for later use in replies
+        this.currentDiscussionId = result.discussionId;
+
         logger.info('Found thread context for note', {
           projectId,
           itemIid,
           noteId,
+          discussionId: result.discussionId,
           contextLength: result.threadContext.length,
         });
         return result.threadContext;
@@ -321,6 +329,42 @@ export class EventProcessor {
   }
 
   private async postComment(event: GitLabWebhookEvent, message: string): Promise<void> {
+    // If we have a discussion ID, try to post as a reply to that discussion
+    if (this.currentDiscussionId) {
+      try {
+        switch (event.object_kind) {
+          case 'issue':
+          case 'note':
+            if (event.issue) {
+              await this.gitlabService.addIssueDiscussionReply(
+                event.project.id,
+                event.issue.iid,
+                this.currentDiscussionId,
+                message
+              );
+              return;
+            }
+            break;
+
+          case 'merge_request':
+            if (event.merge_request) {
+              await this.gitlabService.addMergeRequestDiscussionReply(
+                event.project.id,
+                event.merge_request.iid,
+                this.currentDiscussionId,
+                message
+              );
+              return;
+            }
+            break;
+        }
+      } catch (error) {
+        logger.warn('Failed to post discussion reply, falling back to regular comment:', error);
+        // Continue to fallback posting method
+      }
+    }
+
+    // Fallback to regular comment posting
     switch (event.object_kind) {
       case 'issue':
         if (event.issue) {
@@ -364,6 +408,44 @@ export class EventProcessor {
     try {
       let commentId: number | null = null;
 
+      // If we have a discussion ID, try to create progress comment as a reply to that discussion
+      if (this.currentDiscussionId) {
+        try {
+          switch (event.object_kind) {
+            case 'issue':
+            case 'note':
+              if (event.issue) {
+                const comment = await this.gitlabService.addIssueDiscussionReply(
+                  event.project.id,
+                  event.issue.iid,
+                  this.currentDiscussionId,
+                  message
+                );
+                commentId = comment?.id || null;
+                return commentId;
+              }
+              break;
+
+            case 'merge_request':
+              if (event.merge_request) {
+                const comment = await this.gitlabService.addMergeRequestDiscussionReply(
+                  event.project.id,
+                  event.merge_request.iid,
+                  this.currentDiscussionId,
+                  message
+                );
+                commentId = comment?.id || null;
+                return commentId;
+              }
+              break;
+          }
+        } catch (error) {
+          logger.warn('Failed to create discussion reply progress comment, falling back to regular comment:', error);
+          // Continue to fallback comment creation method
+        }
+      }
+
+      // Fallback to regular comment creation
       switch (event.object_kind) {
         case 'issue':
           if (event.issue) {
@@ -461,14 +543,57 @@ export class EventProcessor {
   }
 
   private async updateComment(event: GitLabWebhookEvent, commentId: number, body: string): Promise<void> {
-    // Note: GitLab API doesn't support updating comments directly
-    // We would need to use the notes API with PUT method, but the GitLab client might not support this
-    // For now, we'll create new comments for major updates
-    // This is a limitation we'll document
+    try {
+      switch (event.object_kind) {
+        case 'issue':
+          if (event.issue) {
+            await this.gitlabService.updateIssueComment(
+              event.project.id,
+              event.issue.iid,
+              commentId,
+              body
+            );
+          }
+          break;
 
-    logger.info('Progress update (comment update not supported by GitLab API)', {
-      commentId,
-      messageLength: body.length,
-    });
+        case 'merge_request':
+          if (event.merge_request) {
+            await this.gitlabService.updateMergeRequestComment(
+              event.project.id,
+              event.merge_request.iid,
+              commentId,
+              body
+            );
+          }
+          break;
+
+        case 'note':
+          if (event.issue) {
+            await this.gitlabService.updateIssueComment(
+              event.project.id,
+              event.issue.iid,
+              commentId,
+              body
+            );
+          } else if (event.merge_request) {
+            await this.gitlabService.updateMergeRequestComment(
+              event.project.id,
+              event.merge_request.iid,
+              commentId,
+              body
+            );
+          }
+          break;
+      }
+
+      logger.info('Progress comment updated successfully', {
+        commentId,
+        messageLength: body.length,
+      });
+    } catch (error) {
+      logger.error('Failed to update progress comment:', error);
+      // Fallback: create a new comment if update fails
+      await this.postComment(event, `**Updated Progress:**\n\n${body}`);
+    }
   }
 }
