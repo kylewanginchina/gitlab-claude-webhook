@@ -20,7 +20,7 @@ export class EventProcessor {
 
   public async processEvent(event: GitLabWebhookEvent): Promise<void> {
     try {
-      const instruction = this.extractInstruction(event);
+      const instruction = await this.extractInstruction(event);
 
       if (!instruction) {
         logger.debug('No Claude instruction found in event', {
@@ -43,7 +43,7 @@ export class EventProcessor {
     }
   }
 
-  private extractInstruction(event: GitLabWebhookEvent): ClaudeInstruction | null {
+  private async extractInstruction(event: GitLabWebhookEvent): Promise<ClaudeInstruction | null> {
     let content = '';
     let branch = '';
     let context = '';
@@ -68,13 +68,30 @@ export class EventProcessor {
       case 'note':
         if (event.object_attributes) {
           content = (event.object_attributes as { note?: string }).note || '';
+          const noteId = (event.object_attributes as { id?: number }).id;
 
           if (event.issue) {
             context = `Issue #${event.issue.iid} comment`;
             branch = event.project.default_branch;
+
+            // Fetch thread context for issue comment
+            if (noteId) {
+              const threadContext = await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId);
+              if (threadContext) {
+                context = `Issue #${event.issue.iid} comment reply\n\n${threadContext}`;
+              }
+            }
           } else if (event.merge_request) {
             context = `MR #${event.merge_request.iid} comment`;
             branch = event.merge_request.source_branch;
+
+            // Fetch thread context for MR comment
+            if (noteId) {
+              const threadContext = await this.getThreadContext('merge_request', event.project.id, event.merge_request.iid, noteId);
+              if (threadContext) {
+                context = `MR #${event.merge_request.iid} comment reply\n\n${threadContext}`;
+              }
+            }
           }
         }
         break;
@@ -94,6 +111,40 @@ export class EventProcessor {
       context,
       branch,
     };
+  }
+
+  private async getThreadContext(
+    type: 'issue' | 'merge_request',
+    projectId: number,
+    itemIid: number,
+    noteId: number
+  ): Promise<string | null> {
+    try {
+      let discussions: any[];
+
+      if (type === 'issue') {
+        discussions = await this.gitlabService.getIssueDiscussions(projectId, itemIid);
+      } else {
+        discussions = await this.gitlabService.getMergeRequestDiscussions(projectId, itemIid);
+      }
+
+      const result = await this.gitlabService.findNoteInDiscussions(discussions, noteId);
+
+      if (result && result.threadContext) {
+        logger.info('Found thread context for note', {
+          projectId,
+          itemIid,
+          noteId,
+          contextLength: result.threadContext.length,
+        });
+        return result.threadContext;
+      }
+
+      return null;
+    } catch (error) {
+      logger.error('Failed to get thread context:', error);
+      return null;
+    }
   }
 
   private async executeInstruction(

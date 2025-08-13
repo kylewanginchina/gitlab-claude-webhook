@@ -55,6 +55,7 @@ export interface GitLabNote {
   author: GitLabUser;
   created_at: string;
   noteable_type: 'Issue' | 'MergeRequest';
+  noteable_id?: number;
 }
 
 export interface GitLabWebhookEvent {

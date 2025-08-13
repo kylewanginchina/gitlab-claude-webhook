@@ -125,6 +125,9 @@ export class StreamingClaudeExecutor {
         ANTHROPIC_AUTH_TOKEN: config.anthropic.authToken,
       };
 
+      // Build the complete prompt with context
+      const fullPrompt = this.buildPromptWithContext(command, context);
+
       // Use proper Claude Code CLI arguments with non-interactive mode and permission bypass
       const claudeArgs = [
         '--print', // Non-interactive mode, print response and exit
@@ -133,7 +136,7 @@ export class StreamingClaudeExecutor {
         '--allowedTools', 'Bash(git:*),Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
         '--model', 'claude-sonnet-4-20250514', // Specify the model to use
         '--append-system-prompt', 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
-        command, // The actual command/prompt
+        fullPrompt, // The complete prompt including context
       ];
 
       const claudeProcess = spawn('claude', claudeArgs, {
@@ -216,6 +219,27 @@ export class StreamingClaudeExecutor {
 
       claudeProcess.stdin?.end();
     });
+  }
+
+  private buildPromptWithContext(command: string, context: ClaudeExecutionContext): string {
+    let fullPrompt = '';
+
+    // Add context information if available
+    if (context.context && context.context.trim()) {
+      fullPrompt += `**Context:** ${context.context}\n\n`;
+    }
+
+    // Add the main command/instruction
+    fullPrompt += `**Request:** ${command}`;
+
+    logger.debug('Built prompt with context', {
+      hasContext: !!context.context,
+      contextLength: context.context?.length || 0,
+      commandLength: command.length,
+      fullPromptLength: fullPrompt.length
+    });
+
+    return fullPrompt;
   }
 
   private extractProgressMessage(buffer: string): string {

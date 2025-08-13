@@ -207,6 +207,83 @@ export class GitLabService {
     }
   }
 
+  public async getIssueDiscussions(projectId: number, issueIid: number): Promise<any[]> {
+    try {
+      const discussions = await this.gitlab.IssueDiscussions.all(projectId, issueIid);
+      return discussions;
+    } catch (error) {
+      logger.error('Failed to get issue discussions:', error);
+      throw new Error(`Failed to get issue discussions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  public async getMergeRequestDiscussions(projectId: number, mergeRequestIid: number): Promise<any[]> {
+    try {
+      const discussions = await this.gitlab.MergeRequestDiscussions.all(projectId, mergeRequestIid);
+      return discussions;
+    } catch (error) {
+      logger.error('Failed to get merge request discussions:', error);
+      throw new Error(`Failed to get merge request discussions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  public async findNoteInDiscussions(
+    discussions: any[],
+    noteId: number
+  ): Promise<{ discussion: any; note: any; threadContext: string } | null> {
+    try {
+      for (const discussion of discussions) {
+        if (discussion.notes && Array.isArray(discussion.notes)) {
+          for (const note of discussion.notes) {
+            if (note.id === noteId) {
+              // Found the note, now build thread context
+              const threadContext = this.buildThreadContext(discussion.notes, noteId);
+              return {
+                discussion,
+                note,
+                threadContext
+              };
+            }
+          }
+        }
+      }
+      return null;
+    } catch (error) {
+      logger.error('Failed to find note in discussions:', error);
+      return null;
+    }
+  }
+
+  private buildThreadContext(notes: any[], currentNoteId: number): string {
+    if (!notes || notes.length <= 1) {
+      return '';
+    }
+
+    // Sort notes by creation time
+    const sortedNotes = notes.sort((a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
+    let context = '**Thread Context:**\n\n';
+    let hasNotes = false;
+
+    for (const note of sortedNotes) {
+      if (note.id === currentNoteId) {
+        // Don't include the current note in context, just notes before it
+        break;
+      }
+
+      const author = note.author?.name || note.author?.username || 'Unknown';
+      const timestamp = new Date(note.created_at).toLocaleString();
+
+      context += `**${author}** (${timestamp}):\n`;
+      context += `${note.body}\n\n`;
+      hasNotes = true;
+    }
+
+    return hasNotes ? context.trim() : '';
+  }
+
   public async testConnection(): Promise<boolean> {
     try {
       await this.gitlab.Users.current();
