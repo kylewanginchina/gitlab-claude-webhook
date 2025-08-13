@@ -78,22 +78,22 @@ export class EventProcessor {
             context = `Issue #${event.issue.iid} comment`;
             branch = event.project.default_branch;
 
-            // Fetch thread context for issue comment
+            // Fetch thread context for issue comment - only if it's actually a reply in a discussion
             if (noteId) {
-              const threadContext = await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId);
-              if (threadContext) {
-                context = `Issue #${event.issue.iid} comment reply\n\n${threadContext}`;
+              const threadInfo = await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId);
+              if (threadInfo && this.isActualReply(threadInfo)) {
+                context = `Issue #${event.issue.iid} comment reply\n\n${threadInfo}`;
               }
             }
           } else if (event.merge_request) {
             context = `MR #${event.merge_request.iid} comment`;
             branch = event.merge_request.source_branch;
 
-            // Fetch thread context for MR comment
+            // Fetch thread context for MR comment - only if it's actually a reply in a discussion
             if (noteId) {
-              const threadContext = await this.getThreadContext('merge_request', event.project.id, event.merge_request.iid, noteId);
-              if (threadContext) {
-                context = `MR #${event.merge_request.iid} comment reply\n\n${threadContext}`;
+              const threadInfo = await this.getThreadContext('merge_request', event.project.id, event.merge_request.iid, noteId);
+              if (threadInfo && this.isActualReply(threadInfo)) {
+                context = `MR #${event.merge_request.iid} comment reply\n\n${threadInfo}`;
               }
             }
           }
@@ -153,6 +153,12 @@ export class EventProcessor {
       logger.error('Failed to get thread context:', error);
       return null;
     }
+  }
+
+  private isActualReply(threadContext: string | null): boolean {
+    // If there's actual thread context content, it means there are previous comments in the discussion
+    // If threadContext is empty or just whitespace, it means this is the first comment in the discussion
+    return Boolean(threadContext && threadContext.trim().length > 0 && threadContext.includes('**Thread Context:**'));
   }
 
   private async executeInstruction(
@@ -359,7 +365,11 @@ export class EventProcessor {
             break;
         }
       } catch (error) {
-        logger.warn('Failed to post discussion reply, falling back to regular comment:', error);
+        // Silently fallback for known unimplemented features
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!errorMessage.includes('Discussion reply not implemented')) {
+          logger.warn('Failed to post discussion reply, falling back to regular comment:', error);
+        }
         // Continue to fallback posting method
       }
     }
@@ -440,7 +450,11 @@ export class EventProcessor {
               break;
           }
         } catch (error) {
-          logger.warn('Failed to create discussion reply progress comment, falling back to regular comment:', error);
+          // Silently fallback for known unimplemented features
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (!errorMessage.includes('Discussion reply not implemented')) {
+            logger.warn('Failed to create discussion reply progress comment, falling back to regular comment:', error);
+          }
           // Continue to fallback comment creation method
         }
       }
@@ -520,14 +534,15 @@ export class EventProcessor {
       // Add the latest messages (keep last 10 to avoid too long comments)
       const recentMessages = this.progressMessages.slice(-10);
       recentMessages.forEach(msg => {
-        commentBody += `${msg}\n`;
+        commentBody += `- ${msg}\n`;
       });
 
       if (isComplete) {
+        commentBody += '\n---\n\n';
         if (isError) {
-          commentBody += '\n❌ **Task completed with errors**';
+          commentBody += '❌ **Task completed with errors**';
         } else {
-          commentBody += '\n✅ **Task completed successfully!**';
+          commentBody += '✅ **Task completed successfully!**';
         }
       } else {
         commentBody += '\n⏳ *Processing...*';

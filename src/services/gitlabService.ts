@@ -341,15 +341,10 @@ export class GitLabService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _body: string
   ): Promise<any> {
-    try {
-      // TODO: Implement proper discussion reply API call
-      // For now, always throw to use fallback
-      throw new Error('Discussion reply not yet implemented - falling back to regular comment');
-    } catch (error) {
-      logger.error('Failed to add issue discussion reply:', error);
-      // Fallback to regular comment if discussion reply fails
-      throw new Error(`Failed to add issue discussion reply: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    // Discussion reply is not yet implemented, silently fail to use fallback
+    // This avoids noisy error logs while still maintaining fallback behavior
+    logger.debug('Discussion reply not implemented, using fallback to regular comment');
+    throw new Error('Discussion reply not implemented');
   }
 
   public async addMergeRequestDiscussionReply(
@@ -362,15 +357,10 @@ export class GitLabService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _body: string
   ): Promise<any> {
-    try {
-      // TODO: Implement proper discussion reply API call
-      // For now, always throw to use fallback
-      throw new Error('Discussion reply not yet implemented - falling back to regular comment');
-    } catch (error) {
-      logger.error('Failed to add merge request discussion reply:', error);
-      // Fallback to regular comment if discussion reply fails
-      throw new Error(`Failed to add merge request discussion reply: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    // Discussion reply is not yet implemented, silently fail to use fallback
+    // This avoids noisy error logs while still maintaining fallback behavior
+    logger.debug('Discussion reply not implemented, using fallback to regular comment');
+    throw new Error('Discussion reply not implemented');
   }
 
   public async testConnection(): Promise<boolean> {
