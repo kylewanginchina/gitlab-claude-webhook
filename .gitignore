@@ -6,3 +6,6 @@ dist/
 work/
 *.tmp
 *.temp
+
+# Claude Code local settings
+.claude/
