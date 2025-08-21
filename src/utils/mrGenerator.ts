@@ -21,38 +21,23 @@ export class MRGenerator {
     feature: [
       /add|implement|create|build|develop/i,
       /new feature|feature/i,
-      /component|function|endpoint|api/i
+      /component|function|endpoint|api/i,
     ],
-    fix: [
-      /fix|resolve|correct|repair/i,
-      /bug|issue|error|problem/i,
-      /broken|failing|not working/i
-    ],
+    fix: [/fix|resolve|correct|repair/i, /bug|issue|error|problem/i, /broken|failing|not working/i],
     refactor: [
       /refactor|restructure|reorganize/i,
       /clean up|cleanup|improve structure/i,
-      /optimize|performance/i
+      /optimize|performance/i,
     ],
-    docs: [
-      /document|documentation|readme/i,
-      /comment|comments|explain/i,
-      /guide|tutorial/i
-    ],
-    style: [
-      /format|formatting|style/i,
-      /eslint|prettier|lint/i,
-      /indentation|spacing/i
-    ],
-    test: [
-      /test|testing|spec|unit test/i,
-      /coverage|jest|mocha/i
-    ],
+    docs: [/document|documentation|readme/i, /comment|comments|explain/i, /guide|tutorial/i],
+    style: [/format|formatting|style/i, /eslint|prettier|lint/i, /indentation|spacing/i],
+    test: [/test|testing|spec|unit test/i, /coverage|jest|mocha/i],
     chore: [
       /update|upgrade|bump/i,
       /dependency|dependencies|package/i,
       /config|configuration/i,
-      /setup|install/i
-    ]
+      /setup|install/i,
+    ],
   };
 
   public static generateMR(options: MROptions): MRInfo {
@@ -110,13 +95,15 @@ export class MRGenerator {
       .filter(Boolean);
 
     // If most changes are in one directory, use it as scope
-    const dirCount = directories.reduce((acc, dir) => {
-      acc[dir!] = (acc[dir!] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const dirCount = directories.reduce(
+      (acc, dir) => {
+        acc[dir!] = (acc[dir!] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
 
-    const topDir = Object.entries(dirCount)
-      .sort(([,a], [,b]) => b - a)[0];
+    const topDir = Object.entries(dirCount).sort(([, a], [, b]) => b - a)[0];
 
     if (topDir && topDir[1] > changes.length * 0.6) {
       return topDir[0];
@@ -142,7 +129,7 @@ export class MRGenerator {
     // Extract the core action/subject from instruction
     const cleanInstruction = instruction
       .replace(/^@claude\s*/i, '') // Remove @claude prefix
-      .replace(/^please\s*/i, '')  // Remove polite prefixes
+      .replace(/^please\s*/i, '') // Remove polite prefixes
       .trim();
 
     // Create a concise summary (max 50 chars for good practice)
@@ -239,9 +226,7 @@ export class MRGenerator {
 
   private static formatInstruction(instruction: string): string {
     // Clean up the instruction for display
-    const cleaned = instruction
-      .replace(/^@claude\s*/i, '')
-      .trim();
+    const cleaned = instruction.replace(/^@claude\s*/i, '').trim();
 
     return cleaned;
   }
@@ -250,7 +235,7 @@ export class MRGenerator {
     return {
       created: changes.filter(c => c.type === 'created'),
       modified: changes.filter(c => c.type === 'modified'),
-      deleted: changes.filter(c => c.type === 'deleted')
+      deleted: changes.filter(c => c.type === 'deleted'),
     };
   }
 
@@ -258,7 +243,7 @@ export class MRGenerator {
     const typeMap: Record<string, string> = {
       created: '📝 Files Created',
       modified: '✏️ Files Modified',
-      deleted: '🗑️ Files Deleted'
+      deleted: '🗑️ Files Deleted',
     };
     return typeMap[type] || type;
   }
@@ -276,7 +261,7 @@ export class MRGenerator {
       case 'fix':
         section += '## Bug Fix Details\n\n';
         section += '- [ ] Issue has been resolved\n';
-        section += '- [ ] Fix doesn\'t introduce new issues\n\n';
+        section += "- [ ] Fix doesn't introduce new issues\n\n";
         break;
 
       case 'refactor':
@@ -300,9 +285,7 @@ export class MRGenerator {
     let commitMessage = title;
 
     // Add description if the instruction is complex enough
-    const cleanInstruction = instruction
-      .replace(/^@claude\s*/i, '')
-      .trim();
+    const cleanInstruction = instruction.replace(/^@claude\s*/i, '').trim();
 
     if (cleanInstruction.length > 60) {
       // Add multi-line commit message with details

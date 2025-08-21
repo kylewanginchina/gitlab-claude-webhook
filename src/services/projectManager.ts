@@ -58,12 +58,13 @@ export class ProjectManager {
       httpUrl: project.http_url_to_repo,
       webUrl: project.web_url,
       defaultBranch: project.default_branch,
-      requestedBranch: branch
+      requestedBranch: branch,
     });
 
     // Use HTTP URL with token for authentication
     // GitLab webhook uses 'http_url' or 'git_http_url' instead of 'http_url_to_repo'
-    const httpUrl = project.http_url_to_repo || (project as any).http_url || (project as any).git_http_url;
+    const httpUrl =
+      project.http_url_to_repo || (project as any).http_url || (project as any).git_http_url;
     const cloneUrl = this.getAuthenticatedUrl(httpUrl);
 
     logger.info('Cloning project', {
@@ -203,7 +204,9 @@ export class ProjectManager {
     }
   }
 
-  public async getChangedFiles(projectPath: string): Promise<Array<{ path: string; type: string }>> {
+  public async getChangedFiles(
+    projectPath: string
+  ): Promise<Array<{ path: string; type: string }>> {
     const git = simpleGit(projectPath);
 
     try {
@@ -211,8 +214,8 @@ export class ProjectManager {
 
       return status.files.map(file => ({
         path: file.path,
-        type: file.working_dir === '?' ? 'created' :
-              file.working_dir === 'D' ? 'deleted' : 'modified'
+        type:
+          file.working_dir === '?' ? 'created' : file.working_dir === 'D' ? 'deleted' : 'modified',
       }));
     } catch (error) {
       logger.error('Error getting changed files:', error);

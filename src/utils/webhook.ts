@@ -36,7 +36,7 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
     if (expectedSignature.length !== providedSignature.length) {
       logger.warn('Signature length mismatch', {
         expected: expectedSignature.length,
-        provided: providedSignature.length
+        provided: providedSignature.length,
       });
       return false;
     }
@@ -61,7 +61,7 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
   // Neither direct token nor valid SHA256 signature
   logger.warn('Invalid webhook authentication - not a direct token or SHA256 signature', {
     receivedLength: signature.length,
-    receivedValue: signature.substring(0, 10) + '...'
+    receivedValue: signature.substring(0, 10) + '...',
   });
   return false;
 }

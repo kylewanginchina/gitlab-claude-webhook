@@ -21,11 +21,7 @@ export const config: Config = {
 };
 
 export function validateConfig(): void {
-  const required = [
-    'anthropic.authToken',
-    'gitlab.token',
-    'webhook.secret',
-  ];
+  const required = ['anthropic.authToken', 'gitlab.token', 'webhook.secret'];
 
   for (const path of required) {
     const keys = path.split('.');

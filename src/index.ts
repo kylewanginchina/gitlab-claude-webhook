@@ -18,7 +18,6 @@ async function main(): Promise<void> {
       logger.info('Received SIGINT, shutting down gracefully...');
       process.exit(0);
     });
-
   } catch (error) {
     logger.error('Failed to start service:', error);
     process.exit(1);

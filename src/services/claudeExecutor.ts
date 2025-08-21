@@ -63,15 +63,15 @@ export class ClaudeExecutor {
       let output = '';
       let error = '';
 
-      process.stdout?.on('data', (data) => {
+      process.stdout?.on('data', data => {
         output += data.toString();
       });
 
-      process.stderr?.on('data', (data) => {
+      process.stderr?.on('data', data => {
         error += data.toString();
       });
 
-      process.on('close', (code) => {
+      process.on('close', code => {
         if (code === 0) {
           logger.debug('Claude CLI is available', { version: output.trim() });
           resolve();
@@ -80,7 +80,7 @@ export class ClaudeExecutor {
         }
       });
 
-      process.on('error', (err) => {
+      process.on('error', err => {
         reject(new Error(`Failed to check Claude CLI: ${err.message}`));
       });
     });
@@ -99,10 +99,7 @@ export class ClaudeExecutor {
       };
 
       // Prepare claude command with context
-      const claudeArgs = [
-        '--non-interactive',
-        command,
-      ];
+      const claudeArgs = ['--non-interactive', command];
 
       const claudeProcess = spawn('claude', claudeArgs, {
         cwd: projectPath,
@@ -123,15 +120,15 @@ export class ClaudeExecutor {
         reject(new Error(`Claude execution timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
-      claudeProcess.stdout?.on('data', (data) => {
+      claudeProcess.stdout?.on('data', data => {
         output += data.toString();
       });
 
-      claudeProcess.stderr?.on('data', (data) => {
+      claudeProcess.stderr?.on('data', data => {
         errorOutput += data.toString();
       });
 
-      claudeProcess.on('close', (code) => {
+      claudeProcess.on('close', code => {
         clearTimeout(timeoutHandle);
 
         if (code === 0) {
@@ -146,11 +143,13 @@ export class ClaudeExecutor {
             error: errorOutput,
             projectPath,
           });
-          reject(new Error(`Claude execution failed (code ${code}): ${errorOutput || 'No error output'}`));
+          reject(
+            new Error(`Claude execution failed (code ${code}): ${errorOutput || 'No error output'}`)
+          );
         }
       });
 
-      claudeProcess.on('error', (err) => {
+      claudeProcess.on('error', err => {
         clearTimeout(timeoutHandle);
         reject(new Error(`Failed to execute Claude: ${err.message}`));
       });
@@ -189,13 +188,10 @@ export class ClaudeExecutor {
 
     if (result.success && result.changes && result.changes.length > 0) {
       try {
-        const message = commitMessage || `Claude: ${command.substring(0, 50)}${command.length > 50 ? '...' : ''}`;
+        const message =
+          commitMessage || `Claude: ${command.substring(0, 50)}${command.length > 50 ? '...' : ''}`;
 
-        await this.projectManager.commitAndPush(
-          projectPath,
-          message,
-          context.branch
-        );
+        await this.projectManager.commitAndPush(projectPath, message, context.branch);
 
         logger.info('Changes committed and pushed', {
           changesCount: result.changes.length,

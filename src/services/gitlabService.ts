@@ -12,11 +12,7 @@ export class GitLabService {
     });
   }
 
-  public async createIssueComment(
-    projectId: number,
-    issueIid: number,
-    body: string
-  ): Promise<any> {
+  public async createIssueComment(projectId: number, issueIid: number, body: string): Promise<any> {
     try {
       const comment = await this.gitlab.IssueNotes.create(projectId, issueIid, body);
 
@@ -30,15 +26,13 @@ export class GitLabService {
       return comment;
     } catch (error) {
       logger.error('Failed to create issue comment:', error);
-      throw new Error(`Failed to create issue comment: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to create issue comment: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
-  public async addIssueComment(
-    projectId: number,
-    issueIid: number,
-    body: string
-  ): Promise<void> {
+  public async addIssueComment(projectId: number, issueIid: number, body: string): Promise<void> {
     await this.createIssueComment(projectId, issueIid, body);
   }
 
@@ -60,7 +54,9 @@ export class GitLabService {
       return comment;
     } catch (error) {
       logger.error('Failed to create merge request comment:', error);
-      throw new Error(`Failed to create merge request comment: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to create merge request comment: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -78,7 +74,9 @@ export class GitLabService {
       return project;
     } catch (error) {
       logger.error('Failed to get project:', error);
-      throw new Error(`Failed to get project: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to get project: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -88,15 +86,13 @@ export class GitLabService {
       return branches;
     } catch (error) {
       logger.error('Failed to get branches:', error);
-      throw new Error(`Failed to get branches: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to get branches: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
-  public async createBranch(
-    projectId: number,
-    branchName: string,
-    ref: string
-  ): Promise<any> {
+  public async createBranch(projectId: number, branchName: string, ref: string): Promise<any> {
     try {
       const branch = await this.gitlab.Branches.create(projectId, branchName, ref);
 
@@ -109,7 +105,9 @@ export class GitLabService {
       return branch;
     } catch (error) {
       logger.error('Failed to create branch:', error);
-      throw new Error(`Failed to create branch: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to create branch: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -129,7 +127,9 @@ export class GitLabService {
       });
     } catch (error) {
       logger.error('Failed to update merge request description:', error);
-      throw new Error(`Failed to update merge request description: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to update merge request description: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -149,7 +149,9 @@ export class GitLabService {
       });
     } catch (error) {
       logger.error('Failed to update issue description:', error);
-      throw new Error(`Failed to update issue description: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to update issue description: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -159,7 +161,9 @@ export class GitLabService {
       return issue;
     } catch (error) {
       logger.error('Failed to get issue:', error);
-      throw new Error(`Failed to get issue: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to get issue: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -169,7 +173,9 @@ export class GitLabService {
       return mergeRequest;
     } catch (error) {
       logger.error('Failed to get merge request:', error);
-      throw new Error(`Failed to get merge request: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to get merge request: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -203,7 +209,9 @@ export class GitLabService {
       return mergeRequest;
     } catch (error) {
       logger.error('Failed to create merge request:', error);
-      throw new Error(`Failed to create merge request: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to create merge request: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -213,17 +221,24 @@ export class GitLabService {
       return discussions;
     } catch (error) {
       logger.error('Failed to get issue discussions:', error);
-      throw new Error(`Failed to get issue discussions: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to get issue discussions: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
-  public async getMergeRequestDiscussions(projectId: number, mergeRequestIid: number): Promise<any[]> {
+  public async getMergeRequestDiscussions(
+    projectId: number,
+    mergeRequestIid: number
+  ): Promise<any[]> {
     try {
       const discussions = await this.gitlab.MergeRequestDiscussions.all(projectId, mergeRequestIid);
       return discussions;
     } catch (error) {
       logger.error('Failed to get merge request discussions:', error);
-      throw new Error(`Failed to get merge request discussions: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to get merge request discussions: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -242,7 +257,7 @@ export class GitLabService {
                 discussion,
                 note,
                 threadContext,
-                discussionId: discussion.id
+                discussionId: discussion.id,
               };
             }
           }
@@ -261,8 +276,8 @@ export class GitLabService {
     }
 
     // Sort notes by creation time
-    const sortedNotes = notes.sort((a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    const sortedNotes = notes.sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
 
     let context = '**Thread Context:**\n\n';
@@ -304,7 +319,9 @@ export class GitLabService {
       return updatedComment;
     } catch (error) {
       logger.error('Failed to update issue comment:', error);
-      throw new Error(`Failed to update issue comment: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to update issue comment: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -315,7 +332,12 @@ export class GitLabService {
     body: string
   ): Promise<any> {
     try {
-      const updatedComment = await this.gitlab.MergeRequestNotes.edit(projectId, mergeRequestIid, noteId, body);
+      const updatedComment = await this.gitlab.MergeRequestNotes.edit(
+        projectId,
+        mergeRequestIid,
+        noteId,
+        body
+      );
 
       logger.info('Updated merge request comment', {
         projectId,
@@ -327,7 +349,9 @@ export class GitLabService {
       return updatedComment;
     } catch (error) {
       logger.error('Failed to update merge request comment:', error);
-      throw new Error(`Failed to update merge request comment: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to update merge request comment: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
