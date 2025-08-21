@@ -26,14 +26,22 @@ export class WebhookServer {
     this.app.post('/webhook', this.handleWebhook.bind(this));
 
     this.app.get('/health', (req: Request, res: Response) => {
-      res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+      const health = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        version: '1.0.0',
+        environment: process.env.NODE_ENV || 'development',
+      };
+      res.json(health);
     });
 
     this.app.get('/', (req: Request, res: Response) => {
       res.json({
         service: 'GitLab Claude Webhook',
         version: '1.0.0',
-        status: 'running'
+        status: 'running',
       });
     });
   }
@@ -41,7 +49,8 @@ export class WebhookServer {
   private async handleWebhook(req: Request, res: Response): Promise<void> {
     try {
       const signature = req.headers['x-gitlab-token'] as string;
-      const rawBody = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
+      const rawBody =
+        req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
 
       if (!verifyGitLabSignature(rawBody, signature)) {
         res.status(401).json({ error: 'Invalid signature' });
@@ -58,7 +67,7 @@ export class WebhookServer {
       });
 
       // Process the event asynchronously
-      this.eventProcessor.processEvent(event).catch((error) => {
+      this.eventProcessor.processEvent(event).catch(error => {
         logger.error('Error processing GitLab event:', error);
       });
 
