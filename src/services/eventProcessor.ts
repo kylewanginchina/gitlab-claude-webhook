@@ -81,7 +81,12 @@ export class EventProcessor {
 
             // Check if this is a reply in a discussion thread
             if (noteId) {
-              const threadInfo = await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId);
+              const threadInfo = await this.getThreadContext(
+                'issue',
+                event.project.id,
+                event.issue.iid,
+                noteId
+              );
               if (threadInfo && this.isActualReply(threadInfo)) {
                 context = `${context}\n\n${threadInfo}`;
               }
@@ -93,7 +98,12 @@ export class EventProcessor {
 
             // Check if this is a reply in a discussion thread
             if (noteId) {
-              const threadInfo = await this.getThreadContext('merge_request', event.project.id, event.merge_request.iid, noteId);
+              const threadInfo = await this.getThreadContext(
+                'merge_request',
+                event.project.id,
+                event.merge_request.iid,
+                noteId
+              );
               if (threadInfo && this.isActualReply(threadInfo)) {
                 context = `${context}\n\n${threadInfo}`;
               }
@@ -184,9 +194,10 @@ export class EventProcessor {
 
       // Add MR description if available and not too long
       if (mergeRequest.description && mergeRequest.description.trim()) {
-        const description = mergeRequest.description.length > 200
-          ? mergeRequest.description.substring(0, 200) + '...'
-          : mergeRequest.description;
+        const description =
+          mergeRequest.description.length > 200
+            ? mergeRequest.description.substring(0, 200) + '...'
+            : mergeRequest.description;
         context += `**Description:** ${description}\n\n`;
       }
 
@@ -213,7 +224,6 @@ export class EventProcessor {
           if (mrDetails.additions && mrDetails.deletions) {
             context += `**Additions:** +${mrDetails.additions}, **Deletions:** -${mrDetails.deletions}\n`;
           }
-
         } catch (error) {
           logger.debug('Could not fetch additional MR details:', error);
         }
@@ -240,10 +250,7 @@ export class EventProcessor {
 
     const baseBranch = instruction.branch || event.project.default_branch;
 
-    const projectPath = await this.projectManager.prepareProject(
-      event.project,
-      baseBranch
-    );
+    const projectPath = await this.projectManager.prepareProject(event.project, baseBranch);
 
     try {
       // Create streaming callback for real-time updates
@@ -253,7 +260,7 @@ export class EventProcessor {
         },
         onError: async (error: string) => {
           await this.updateProgressComment(event, error, true, true);
-        }
+        },
       };
 
       // Execute Claude without creating branch first
@@ -313,11 +320,7 @@ export class EventProcessor {
         const claudeBranch = `claude-${timestamp}-${randomSuffix}`;
 
         // Create new branch for Claude changes
-        await this.gitlabService.createBranch(
-          event.project.id,
-          claudeBranch,
-          baseBranch
-        );
+        await this.gitlabService.createBranch(event.project.id, claudeBranch, baseBranch);
 
         await this.updateProgressComment(event, `Created branch: ${claudeBranch}`);
 
@@ -332,25 +335,21 @@ export class EventProcessor {
         // Switch to the new branch and push changes with generated commit message
         await this.commitAndPushToNewBranch(event, projectPath, claudeBranch, mrInfo.commitMessage);
 
-        const mergeRequest = await this.gitlabService.createMergeRequest(
-          event.project.id,
-          {
-            sourceBranch: claudeBranch,
-            targetBranch: baseBranch,
-            title: mrInfo.title,
-            description: mrInfo.description,
-          }
-        );
+        const mergeRequest = await this.gitlabService.createMergeRequest(event.project.id, {
+          sourceBranch: claudeBranch,
+          targetBranch: baseBranch,
+          title: mrInfo.title,
+          description: mrInfo.description,
+        });
 
         // Generate MR URL
         const mrUrl = `${event.project.web_url}/-/merge_requests/${mergeRequest.iid}`;
 
         responseMessage += `**🔀 Merge Request Created**\n`;
-        responseMessage += `[Click here to review and merge the changes →](${ mrUrl})\n\n`;
+        responseMessage += `[Click here to review and merge the changes →](${mrUrl})\n\n`;
         responseMessage += `**Branch:** \`${claudeBranch}\` → \`${baseBranch}\`\n`;
 
         await this.updateProgressComment(event, `Created merge request: ${mrUrl}`);
-
       } catch (error) {
         logger.error('Failed to create branch or merge request:', error);
         responseMessage += `⚠️ **Note:** Changes were made but could not create merge request: ${error instanceof Error ? error.message : String(error)}\n\n`;
@@ -446,11 +445,7 @@ export class EventProcessor {
     switch (event.object_kind) {
       case 'issue':
         if (event.issue) {
-          await this.gitlabService.addIssueComment(
-            event.project.id,
-            event.issue.iid,
-            message
-          );
+          await this.gitlabService.addIssueComment(event.project.id, event.issue.iid, message);
         }
         break;
 
@@ -466,11 +461,7 @@ export class EventProcessor {
 
       case 'note':
         if (event.issue) {
-          await this.gitlabService.addIssueComment(
-            event.project.id,
-            event.issue.iid,
-            message
-          );
+          await this.gitlabService.addIssueComment(event.project.id, event.issue.iid, message);
         } else if (event.merge_request) {
           await this.gitlabService.addMergeRequestComment(
             event.project.id,
@@ -482,7 +473,10 @@ export class EventProcessor {
     }
   }
 
-  private async createProgressComment(event: GitLabWebhookEvent, message: string): Promise<number | null> {
+  private async createProgressComment(
+    event: GitLabWebhookEvent,
+    message: string
+  ): Promise<number | null> {
     try {
       let commentId: number | null = null;
 
@@ -521,7 +515,10 @@ export class EventProcessor {
           // Silently fallback for known unimplemented features
           const errorMessage = error instanceof Error ? error.message : String(error);
           if (!errorMessage.includes('Discussion reply not implemented')) {
-            logger.warn('Failed to create discussion reply progress comment, falling back to regular comment:', error);
+            logger.warn(
+              'Failed to create discussion reply progress comment, falling back to regular comment:',
+              error
+            );
           }
           // Continue to fallback comment creation method
         }
@@ -636,7 +633,11 @@ export class EventProcessor {
     }
   }
 
-  private async updateComment(event: GitLabWebhookEvent, commentId: number, body: string): Promise<void> {
+  private async updateComment(
+    event: GitLabWebhookEvent,
+    commentId: number,
+    body: string
+  ): Promise<void> {
     try {
       switch (event.object_kind) {
         case 'issue':

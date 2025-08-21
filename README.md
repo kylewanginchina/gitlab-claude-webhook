@@ -29,17 +29,20 @@ A robust webhook service that integrates GitLab with Claude Code CLI, enabling A
 ### Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd gitlab-claude-webhook
 ```
 
 2. Copy environment configuration:
+
 ```bash
 cp .env.example .env
 ```
 
 3. Configure environment variables in `.env`:
+
 ```bash
 # Claude API Configuration
 ANTHROPIC_BASE_URL=https://api.anthropic.com
@@ -106,6 +109,7 @@ For detailed GitLab setup instructions, including webhook configuration, token p
 ### In GitLab Issues
 
 Create or comment on an issue with:
+
 ```
 @claude Please help me optimize this function in src/utils/helper.js
 ```
@@ -113,6 +117,7 @@ Create or comment on an issue with:
 ### In Merge Requests
 
 Add to MR description or comment:
+
 ```
 @claude Review the security implications of these changes and suggest improvements
 ```
@@ -120,6 +125,7 @@ Add to MR description or comment:
 ### Advanced Usage
 
 You can provide specific instructions:
+
 ```
 @claude
 - Fix the TypeScript errors in the authentication module
@@ -146,11 +152,13 @@ Here's what the GitLab integration looks like in action when you use `@claude` m
 ![GitLab Claude Integration Example](docs/images/gitlab-integration-example.png)
 
 The screenshot shows the complete workflow:
+
 1. **Request**: User creates an issue or comment with `@claude` mention and specific instructions
 2. **Instant Reply**: Service immediately acknowledges the request and starts processing
 3. **Final Reply**: Claude processes the request, makes the necessary changes, and creates a merge request with detailed information about what was modified
 
 The service automatically:
+
 - Creates a timestamped branch for the changes
 - Executes the Claude Code CLI with the provided instructions
 - Commits and pushes any code modifications
@@ -165,22 +173,27 @@ The service automatically:
 
 ## Configuration
 
+For detailed configuration instructions including environment variable expansion, Docker setup, and troubleshooting, see:
+
+📋 **[Environment Configuration Guide](docs/CONFIG.md)**
+
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_BASE_URL` | Anthropic API base URL | `https://api.anthropic.com` |
-| `ANTHROPIC_AUTH_TOKEN` | Anthropic API token | Required |
-| `GITLAB_BASE_URL` | GitLab instance URL | `https://gitlab.com` |
-| `GITLAB_TOKEN` | GitLab API token | Required |
-| `WEBHOOK_SECRET` | Webhook validation secret | Required |
-| `PORT` | Server port | `3000` |
-| `WORK_DIR` | Temporary work directory | `/tmp/gitlab-claude-work` |
-| `LOG_LEVEL` | Logging level | `info` |
+| Variable               | Description               | Default                     |
+| ---------------------- | ------------------------- | --------------------------- |
+| `ANTHROPIC_BASE_URL`   | Anthropic API base URL    | `https://api.anthropic.com` |
+| `ANTHROPIC_AUTH_TOKEN` | Anthropic API token       | Required                    |
+| `GITLAB_BASE_URL`      | GitLab instance URL       | `https://gitlab.com`        |
+| `GITLAB_TOKEN`         | GitLab API token          | Required                    |
+| `WEBHOOK_SECRET`       | Webhook validation secret | Required                    |
+| `PORT`                 | Server port               | `3000`                      |
+| `WORK_DIR`             | Temporary work directory  | `/tmp/gitlab-claude-work`   |
+| `LOG_LEVEL`            | Logging level             | `info`                      |
 
 ### GitLab Token Permissions
 
 Your GitLab token needs the following scopes:
+
 - `api` - Full API access
 - `read_user` - Read user information
 - `read_repository` - Read repository
@@ -218,6 +231,7 @@ Your GitLab token needs the following scopes:
 ### Logs
 
 View detailed logs:
+
 ```bash
 # Docker
 docker-compose logs -f gitlab-claude-webhook
@@ -244,27 +258,33 @@ npm run lint
 
 ```
 src/
-├── index.ts              # Main entry point
+├── __tests__/                   # Test files
+│   ├── setup.ts                 # Jest test setup
+│   └── webhook.test.ts          # Webhook functionality tests
+├── index.ts                     # Main entry point with environment loading
 ├── server/
-│   └── webhookServer.ts  # Express server and webhook handling
+│   └── webhookServer.ts         # Express server and webhook handling
 ├── services/
-│   ├── eventProcessor.ts # GitLab event processing logic
-│   ├── projectManager.ts # Git operations and project management
-│   ├── claudeExecutor.ts # Claude Code CLI execution
-│   └── gitlabService.ts  # GitLab API interactions
+│   ├── eventProcessor.ts        # GitLab event processing logic
+│   ├── projectManager.ts        # Git operations and project management
+│   ├── claudeExecutor.ts        # Basic Claude Code CLI execution
+│   ├── streamingClaudeExecutor.ts # Streaming Claude execution with real-time updates
+│   └── gitlabService.ts         # GitLab API interactions
 ├── types/
-│   ├── gitlab.ts         # GitLab-related type definitions
-│   └── common.ts         # Common type definitions
+│   ├── gitlab.ts                # GitLab-related type definitions
+│   └── common.ts                # Common type definitions
 └── utils/
-    ├── config.ts         # Configuration management
-    ├── logger.ts         # Logging utility
-    ├── webhook.ts        # Webhook utilities
-    └── mrGenerator.ts    # Smart merge request generation
+    ├── config.ts                # Configuration management with variable expansion
+    ├── configDebug.ts           # Configuration debugging utilities
+    ├── logger.ts                # Winston-based logging utility
+    ├── webhook.ts               # Webhook utilities and signature verification
+    └── mrGenerator.ts           # Smart merge request generation
 ```
 
 ## Documentation
 
 - 📋 [GitLab Configuration Guide](docs/gitlab-setup.md) - Complete setup instructions for GitLab integration
+- ⚙️ [Environment Configuration Guide](docs/CONFIG.md) - Detailed configuration instructions with variable expansion and Docker setup
 - 🔧 [API Reference](#api-endpoints) - Available endpoints and usage
 - 🏗️ [Project Structure](#project-structure) - Codebase organization
 - 🐛 [Troubleshooting](#troubleshooting) - Common issues and solutions

@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { config, validateConfig } from '../utils/config';
+import { config } from '../utils/config';
 import { verifyGitLabSignature } from '../utils/webhook';
 import logger from '../utils/logger';
 import { GitLabWebhookEvent } from '../types/gitlab';
@@ -80,8 +80,6 @@ export class WebhookServer {
 
   public start(): void {
     try {
-      validateConfig();
-
       this.app.listen(config.webhook.port, () => {
         logger.info(`GitLab Claude Webhook server started on port ${config.webhook.port}`);
       });

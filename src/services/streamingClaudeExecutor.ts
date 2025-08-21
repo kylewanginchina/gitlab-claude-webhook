@@ -89,15 +89,15 @@ export class StreamingClaudeExecutor {
       let output = '';
       let error = '';
 
-      process.stdout?.on('data', (data) => {
+      process.stdout?.on('data', data => {
         output += data.toString();
       });
 
-      process.stderr?.on('data', (data) => {
+      process.stderr?.on('data', data => {
         error += data.toString();
       });
 
-      process.on('close', (code) => {
+      process.on('close', code => {
         if (code === 0) {
           logger.debug('Claude CLI is available', { version: output.trim() });
           resolve();
@@ -106,7 +106,7 @@ export class StreamingClaudeExecutor {
         }
       });
 
-      process.on('error', (err) => {
+      process.on('error', err => {
         reject(new Error(`Failed to check Claude CLI: ${err.message}`));
       });
     });
@@ -132,10 +132,14 @@ export class StreamingClaudeExecutor {
       const claudeArgs = [
         '--print', // Non-interactive mode, print response and exit
         '--dangerously-skip-permissions', // Bypass all permission checks (recommended for sandboxes)
-        '--output-format', 'text', // Text output format
-        '--allowedTools', 'Bash(git:*),Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
-        '--model', 'claude-sonnet-4-20250514', // Specify the model to use
-        '--append-system-prompt', 'You are working in an automated webhook environment. IMPORTANT: Always start by exploring the project structure using available tools (LS, Read, Glob, Grep) to understand the codebase before responding to requests. For merge request contexts, use git commands (git log, git diff, git show) to examine actual code changes. Read relevant files to provide accurate, project-specific information. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
+        '--output-format',
+        'text', // Text output format
+        '--allowedTools',
+        'Bash(git:*),Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
+        '--model',
+        'claude-sonnet-4-20250514', // Specify the model to use
+        '--append-system-prompt',
+        'You are working in an automated webhook environment. IMPORTANT: Always start by exploring the project structure using available tools (LS, Read, Glob, Grep) to understand the codebase before responding to requests. For merge request contexts, use git commands (git log, git diff, git show) to examine actual code changes. Read relevant files to provide accurate, project-specific information. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
         fullPrompt, // The complete prompt including context
       ];
 
@@ -162,7 +166,7 @@ export class StreamingClaudeExecutor {
       }, timeoutMs);
 
       // Handle streaming stdout
-      claudeProcess.stdout?.on('data', async (data) => {
+      claudeProcess.stdout?.on('data', async data => {
         const chunk = data.toString();
         output += chunk;
         progressBuffer += chunk;
@@ -180,12 +184,12 @@ export class StreamingClaudeExecutor {
         }
       });
 
-      claudeProcess.stderr?.on('data', (data) => {
+      claudeProcess.stderr?.on('data', data => {
         errorOutput += data.toString();
         logger.debug('Claude stderr:', data.toString());
       });
 
-      claudeProcess.on('close', async (code) => {
+      claudeProcess.on('close', async code => {
         clearTimeout(timeoutHandle);
 
         // Send final progress if any remaining
@@ -208,11 +212,13 @@ export class StreamingClaudeExecutor {
             error: errorOutput,
             projectPath,
           });
-          reject(new Error(`Claude execution failed (code ${code}): ${errorOutput || 'No error output'}`));
+          reject(
+            new Error(`Claude execution failed (code ${code}): ${errorOutput || 'No error output'}`)
+          );
         }
       });
 
-      claudeProcess.on('error', (err) => {
+      claudeProcess.on('error', err => {
         clearTimeout(timeoutHandle);
         reject(new Error(`Failed to execute Claude: ${err.message}`));
       });
@@ -231,9 +237,32 @@ export class StreamingClaudeExecutor {
 
     // Detect if the request involves code analysis or exploration
     const analysisKeywords = [
-      'introduce', 'explain', 'analyze', 'understand', 'review', 'describe',
-      'show', 'list', 'find', 'search', 'what', 'how', 'overview', 'structure',
-      '介绍', '解释', '分析', '理解', '审查', '描述', '显示', '列出', '查找', '搜索', '概述', '结构'
+      'introduce',
+      'explain',
+      'analyze',
+      'understand',
+      'review',
+      'describe',
+      'show',
+      'list',
+      'find',
+      'search',
+      'what',
+      'how',
+      'overview',
+      'structure',
+      '介绍',
+      '解释',
+      '分析',
+      '理解',
+      '审查',
+      '描述',
+      '显示',
+      '列出',
+      '查找',
+      '搜索',
+      '概述',
+      '结构',
     ];
 
     const needsExploration = analysisKeywords.some(keyword =>
@@ -259,7 +288,7 @@ export class StreamingClaudeExecutor {
       contextLength: context.context?.length || 0,
       commandLength: command.length,
       needsExploration,
-      fullPromptLength: fullPrompt.length
+      fullPromptLength: fullPrompt.length,
     });
 
     return fullPrompt;
@@ -271,11 +300,13 @@ export class StreamingClaudeExecutor {
     const lastLine = lines[lines.length - 1];
 
     // Filter out common debug/verbose messages and extract meaningful ones
-    if (lastLine &&
-        !lastLine.includes('DEBUG') &&
-        !lastLine.includes('INFO') &&
-        lastLine.length > 10 &&
-        lastLine.length < 200) {
+    if (
+      lastLine &&
+      !lastLine.includes('DEBUG') &&
+      !lastLine.includes('INFO') &&
+      lastLine.length > 10 &&
+      lastLine.length < 200
+    ) {
       return `🤖 ${lastLine.trim()}`;
     }
 
@@ -309,20 +340,15 @@ export class StreamingClaudeExecutor {
 
       // Use switchToAndPushBranch for Claude branches, commitAndPush for existing branches
       if (context.branch.startsWith('claude-')) {
-        await this.projectManager.switchToAndPushBranch(
-          projectPath,
-          context.branch,
-          commitMessage
-        );
+        await this.projectManager.switchToAndPushBranch(projectPath, context.branch, commitMessage);
       } else {
-        await this.projectManager.commitAndPush(
-          projectPath,
-          commitMessage,
-          context.branch
-        );
+        await this.projectManager.commitAndPush(projectPath, commitMessage, context.branch);
       }
 
-      await callback.onProgress(`✅ Successfully pushed ${changes.length} file changes to ${context.branch}`, false);
+      await callback.onProgress(
+        `✅ Successfully pushed ${changes.length} file changes to ${context.branch}`,
+        false
+      );
 
       logger.info('Changes committed and pushed', {
         changesCount: changes.length,
@@ -361,7 +387,7 @@ export class ClaudeExecutor {
       onError: async (error: string) => {
         finalOutput += `ERROR: ${error}\n`;
         logger.error('Claude error:', error);
-      }
+      },
     };
 
     const result = await this.streamingExecutor.executeWithStreaming(

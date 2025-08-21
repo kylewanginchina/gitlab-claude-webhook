@@ -30,6 +30,7 @@ docker-compose logs -f gitlab-claude-webhook
 This is a GitLab webhook service that integrates with Claude Code CLI to provide AI-powered code assistance directly from GitLab issues, merge requests, and comments.
 
 ### Core Flow
+
 1. **Webhook Reception** (`src/server/webhookServer.ts`) - Express server receives GitLab webhooks
 2. **Event Processing** (`src/services/eventProcessor.ts`) - Main orchestrator that extracts `@claude` instructions and manages the workflow
 3. **Project Management** (`src/services/projectManager.ts`) - Handles git operations, cloning, and branch management
@@ -40,23 +41,27 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 ### Key Components
 
 **EventProcessor** - Central orchestrator that:
+
 - Extracts Claude instructions from webhook events using `@claude` pattern
 - Creates timestamp-based branches for Claude changes
 - Manages the full workflow from instruction to merge request creation
 - Provides real-time feedback via GitLab comments
 
 **StreamingClaudeExecutor** - Executes Claude Code CLI with:
+
 - Real-time progress streaming back to GitLab
 - Automatic change detection and git operations
 - Error handling and cleanup
 
 **MRGenerator** - Intelligent merge request creation:
+
 - Analyzes instruction content and file changes to determine type (feat, fix, docs, etc.)
 - Auto-detects scope from file paths
 - Generates conventional commit format titles
 - Creates structured descriptions with testing checklists
 
 **ProjectManager** - Git operations wrapper:
+
 - Clones repositories to temporary directories
 - Handles branch creation and switching
 - Manages commits and pushes with proper cleanup
@@ -64,11 +69,13 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 ## Environment Configuration
 
 Required environment variables:
+
 - `ANTHROPIC_AUTH_TOKEN` - Anthropic API token
 - `GITLAB_TOKEN` - GitLab API token with `api`, `read_repository`, `write_repository` scopes
 - `WEBHOOK_SECRET` - GitLab webhook secret for signature verification
 
 Optional:
+
 - `ANTHROPIC_BASE_URL` (default: https://api.anthropic.com)
 - `GITLAB_BASE_URL` (default: https://gitlab.com)
 - `PORT` (default: 3000)
@@ -78,11 +85,13 @@ Optional:
 ## GitLab Webhook Setup
 
 Configure GitLab webhooks to trigger on:
+
 - Issues events
 - Merge request events
 - Comments (Push comments, Issue comments, Merge request comments)
 
 The service detects `@claude` mentions in:
+
 - Issue descriptions and comments
 - Merge request descriptions and comments
 - Any webhook event content
@@ -119,6 +128,7 @@ npm install -g @anthropic-ai/claude-code
 ## Docker Deployment
 
 The service is containerized and includes:
+
 - Health checks on `/health` endpoint
 - Proper volume mounting for temporary work directories
 - Network isolation with custom subnet

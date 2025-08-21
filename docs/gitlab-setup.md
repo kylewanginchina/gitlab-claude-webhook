@@ -66,16 +66,21 @@ For project-specific access:
 Configure the following fields:
 
 #### URL
+
 ```
 https://your-domain.com:3000/webhook
 ```
+
 Replace `your-domain.com` with your actual domain or IP address.
 
 #### Secret Token
+
 Enter the same secret you configured in your service's `WEBHOOK_SECRET` environment variable.
 
 #### Trigger Events
+
 Select the following events:
+
 - ✅ **Issues events** - For `@claude` mentions in issues
 - ✅ **Merge request events** - For `@claude` mentions in MR descriptions
 - ✅ **Comments** - For `@claude` mentions in comments
@@ -83,6 +88,7 @@ Select the following events:
 - ✅ **Wiki Page events** - (Optional) If you want wiki integration
 
 #### SSL Verification
+
 - ✅ **Enable SSL verification** - Recommended for production
 - ❌ **Disable** only for testing with self-signed certificates
 
@@ -96,16 +102,18 @@ Select the following events:
 ## Project Permissions
 
 ### User Permissions
+
 Ensure the token owner has the following project permissions:
 
-| Permission | Required Level | Purpose |
-|------------|----------------|---------|
-| **Repository** | Developer+ | Clone and read repository |
-| **Issues** | Reporter+ | Read and comment on issues |
-| **Merge Requests** | Developer+ | Read and comment on MRs |
-| **Push to Repository** | Developer+ | Commit and push changes |
+| Permission             | Required Level | Purpose                    |
+| ---------------------- | -------------- | -------------------------- |
+| **Repository**         | Developer+     | Clone and read repository  |
+| **Issues**             | Reporter+      | Read and comment on issues |
+| **Merge Requests**     | Developer+     | Read and comment on MRs    |
+| **Push to Repository** | Developer+     | Commit and push changes    |
 
 ### Branch Access
+
 - **Unprotected branches**: No additional setup required
 - **Protected branches**: See [Branch Protection Settings](#branch-protection-settings)
 
@@ -114,6 +122,7 @@ Ensure the token owner has the following project permissions:
 If you have protected branches (like `main` or `develop`):
 
 ### Option 1: Allow Direct Push (Simplest)
+
 1. Go to **Project Settings** → **Repository** → **Protected Branches**
 2. Find your protected branch
 3. Under **Allowed to push**, add:
@@ -121,6 +130,7 @@ If you have protected branches (like `main` or `develop`):
    - Or create a specific service account for Claude
 
 ### Option 2: Use Merge Requests (Recommended)
+
 1. Configure the service to create merge requests instead of direct pushes
 2. Set up auto-merge rules for Claude-generated MRs
 3. Add this to your `.env` configuration:
@@ -130,7 +140,9 @@ If you have protected branches (like `main` or `develop`):
    ```
 
 ### Option 3: Push Rules (GitLab Premium)
+
 Create push rules that allow the service account to bypass certain restrictions:
+
 1. Go to **Project Settings** → **Push Rules**
 2. Add exception for the service account
 3. Configure rules as needed
@@ -138,19 +150,25 @@ Create push rules that allow the service account to bypass certain restrictions:
 ## Testing the Integration
 
 ### 1. Simple Test
+
 Create a new issue with:
+
 ```
 @claude Hello! Can you help me understand what this service does?
 ```
 
 ### 2. Code-related Test
+
 Create an issue with:
+
 ```
 @claude Please review the main entry point file and suggest any improvements.
 ```
 
 ### 3. Advanced Test
+
 Create a merge request and comment:
+
 ```
 @claude
 Please review this MR for:
@@ -161,7 +179,9 @@ Please review this MR for:
 ```
 
 ### 4. Verify Results
+
 After each test:
+
 1. Check webhook service logs for processing
 2. Look for Claude's response comments in GitLab
 3. Verify any code changes were properly committed
@@ -172,30 +192,38 @@ After each test:
 ### Common Issues
 
 #### "Webhook signature verification failed"
+
 **Symptoms**: 403 errors in webhook service logs
 **Solutions**:
+
 1. Verify `WEBHOOK_SECRET` matches GitLab webhook secret token exactly
 2. Check GitLab webhook logs for delivery attempts
 3. Ensure webhook URL is correct and accessible
 
 #### "GitLab API authentication failed"
+
 **Symptoms**: 401 errors when accessing GitLab API
 **Solutions**:
+
 1. Verify GitLab token is valid and hasn't expired
 2. Check token permissions include required scopes
 3. Test token manually: `curl -H "Authorization: Bearer $TOKEN" https://gitlab.com/api/v4/user`
 
 #### "Failed to push changes"
+
 **Symptoms**: Git push errors in service logs
 **Solutions**:
+
 1. Check branch protection settings
 2. Verify token has push permissions
 3. Review Git credentials configuration
 4. Check if branch exists and is accessible
 
 #### "No response from Claude"
+
 **Symptoms**: Webhook received but no Claude processing
 **Solutions**:
+
 1. Verify `@claude` mention format is correct
 2. Check if issue/MR contains actual content to process
 3. Review Claude service logs for errors
@@ -204,6 +232,7 @@ After each test:
 ### Webhook Debugging
 
 #### Test Webhook Manually
+
 ```bash
 curl -X POST https://your-domain.com:3000/webhook \
   -H "Content-Type: application/json" \
@@ -213,13 +242,16 @@ curl -X POST https://your-domain.com:3000/webhook \
 ```
 
 #### View Webhook Deliveries
+
 1. Go to **Project Settings** → **Webhooks**
 2. Click on your webhook
 3. Scroll down to **Recent Deliveries**
 4. Click on individual deliveries to see request/response details
 
 #### Enable Debug Logging
+
 Add to your service configuration:
+
 ```bash
 LOG_LEVEL=debug
 GITLAB_DEBUG=true
@@ -240,6 +272,7 @@ If you encounter rate limiting:
 ### Network and Firewall Issues
 
 #### Webhook Not Reaching Service
+
 1. Check firewall rules allow incoming connections on webhook port
 2. Verify DNS resolution for your webhook URL
 3. Test connectivity: `curl -I https://your-domain.com:3000/health`
@@ -250,6 +283,7 @@ If you encounter rate limiting:
    ```
 
 #### Service Can't Reach GitLab
+
 1. Check outbound firewall rules
 2. Verify DNS resolution for GitLab instance
 3. Test connectivity: `curl -I https://gitlab.com`
@@ -258,6 +292,7 @@ If you encounter rate limiting:
 ### Security Considerations
 
 #### Production Checklist
+
 - ✅ Use HTTPS for webhook URLs
 - ✅ Enable webhook secret verification
 - ✅ Use minimal required token permissions
@@ -268,6 +303,7 @@ If you encounter rate limiting:
 - ✅ Regular security audits
 
 #### Token Security
+
 - Store tokens in secure environment variables
 - Never commit tokens to repository
 - Use token rotation policies

@@ -13,11 +13,12 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies (including dev deps for build)
-RUN npm ci
+# Install dependencies (skip prepare script to avoid premature build)
+RUN npm ci --ignore-scripts
 
-# Copy source code
+# Copy source code and .env.example
 COPY src/ ./src/
+COPY .env.example ./
 
 # Build the application
 RUN npm run build

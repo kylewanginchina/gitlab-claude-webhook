@@ -1,38 +1,39 @@
-import dotenv from 'dotenv';
 import { Config } from '../types/common';
 
-dotenv.config();
+/**
+ * Expand environment variables in a string
+ * Supports ${VAR} and $VAR syntax
+ */
+function expandEnvVars(str: string): string {
+  if (!str) return str;
+
+  return str.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/gi, (match, braced, unbraced) => {
+    const varName = braced || unbraced;
+    return process.env[varName] || match;
+  });
+}
+
+/**
+ * Get environment variable with expansion support
+ */
+function getEnvVar(key: string, defaultValue: string = ''): string {
+  const value = process.env[key] || defaultValue;
+  return expandEnvVars(value);
+}
 
 export const config: Config = {
   anthropic: {
-    baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-    authToken: process.env.ANTHROPIC_AUTH_TOKEN || '',
+    baseUrl: getEnvVar('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
+    authToken: getEnvVar('ANTHROPIC_AUTH_TOKEN'),
   },
   gitlab: {
-    baseUrl: process.env.GITLAB_BASE_URL || 'https://gitlab.com',
-    token: process.env.GITLAB_TOKEN || '',
+    baseUrl: getEnvVar('GITLAB_BASE_URL', 'https://gitlab.com'),
+    token: getEnvVar('GITLAB_TOKEN'),
   },
   webhook: {
-    secret: process.env.WEBHOOK_SECRET || '',
-    port: parseInt(process.env.PORT || '3000'),
+    secret: getEnvVar('WEBHOOK_SECRET'),
+    port: parseInt(getEnvVar('PORT', '3000')),
   },
-  workDir: process.env.WORK_DIR || '/tmp/gitlab-claude-work',
-  logLevel: process.env.LOG_LEVEL || 'info',
+  workDir: getEnvVar('WORK_DIR', '/tmp/gitlab-claude-work'),
+  logLevel: getEnvVar('LOG_LEVEL', 'info'),
 };
-
-export function validateConfig(): void {
-  const required = ['anthropic.authToken', 'gitlab.token', 'webhook.secret'];
-
-  for (const path of required) {
-    const keys = path.split('.');
-    let value = config as unknown as Record<string, unknown>;
-
-    for (const key of keys) {
-      value = value?.[key] as Record<string, unknown>;
-    }
-
-    if (!value) {
-      throw new Error(`Missing required environment variable for ${path}`);
-    }
-  }
-}
