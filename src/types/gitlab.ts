@@ -47,6 +47,9 @@ export interface GitLabMergeRequest {
   source_branch: string;
   target_branch: string;
   author: GitLabUser;
+  changes_count?: number;
+  additions?: number;
+  deletions?: number;
 }
 
 export interface GitLabNote {
@@ -56,6 +59,29 @@ export interface GitLabNote {
   created_at: string;
   noteable_type: 'Issue' | 'MergeRequest';
   noteable_id?: number;
+}
+
+// GitLab API response types
+export interface GitLabComment {
+  id: number;
+  body: string;
+  author: GitLabUser;
+  created_at: string;
+  updated_at: string;
+  system: boolean;
+  resolvable: boolean;
+  resolved: boolean;
+}
+
+export interface GitLabBranch {
+  name: string;
+  commit: {
+    id: string;
+    message: string;
+    timestamp: string;
+  };
+  protected: boolean;
+  default: boolean;
 }
 
 export interface GitLabWebhookEvent {
