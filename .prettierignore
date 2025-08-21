@@ -1,0 +1,12 @@
+node_modules/
+dist/
+logs/
+*.log
+.env
+.env.local
+.env.production
+coverage/
+.nyc_output/
+.cache/
+temp/
+tmp/
