@@ -1,8 +1,12 @@
-# GitLab Claude Webhook Service
+# GitLab Claude Webhook Service 🚀
 
-A webhook service that integrates GitLab with Claude Code CLI, enabling AI-powered code assistance directly from GitLab issues, merge requests, and comments.
+[![CI](https://github.com/kylewanginchina/gitlab-claude-webhook/actions/workflows/ci.yml/badge.svg)](https://github.com/kylewanginchina/gitlab-claude-webhook/actions/workflows/ci.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+A robust webhook service that integrates GitLab with Claude Code CLI, enabling AI-powered code assistance directly from GitLab issues, merge requests, and comments.
+
+## ✨ Features
 
 - **GitLab Integration**: Receives webhook events from GitLab for issues, merge requests, and comments
 - **Claude AI Processing**: Automatically detects `@claude` mentions and executes Claude Code CLI commands
