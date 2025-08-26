@@ -82,31 +82,38 @@ export class StreamingClaudeExecutor {
 
   private async checkClaudeCliAvailability(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const process = spawn('claude', ['--version'], {
+      const childProcess = spawn('claude', ['--version'], {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       let output = '';
       let error = '';
 
-      process.stdout?.on('data', data => {
+      childProcess.stdout?.on('data', data => {
         output += data.toString();
       });
 
-      process.stderr?.on('data', data => {
+      childProcess.stderr?.on('data', data => {
         error += data.toString();
       });
 
-      process.on('close', code => {
+      childProcess.on('close', code => {
+        logger.info('Claude CLI availability check', {
+          code,
+          output: output.trim(),
+          error: error.trim(),
+          userId: process.getuid?.(),
+          userName: process.env.USER || 'unknown',
+        });
+
         if (code === 0) {
-          logger.debug('Claude CLI is available', { version: output.trim() });
           resolve();
         } else {
           reject(new Error(`Claude CLI not found or not working: ${error || 'Unknown error'}`));
         }
       });
 
-      process.on('error', err => {
+      childProcess.on('error', err => {
         reject(new Error(`Failed to check Claude CLI: ${err.message}`));
       });
     });
@@ -128,20 +135,32 @@ export class StreamingClaudeExecutor {
       // Build the complete prompt with context
       const fullPrompt = this.buildPromptWithContext(command, context);
 
-      // Use proper Claude Code CLI arguments with non-interactive mode and permission bypass
+      // Use proper Claude Code CLI arguments with correct parameter names
       const claudeArgs = [
         '--print', // Non-interactive mode, print response and exit
-        '--dangerously-skip-permissions', // Bypass all permission checks (recommended for sandboxes)
         '--output-format',
         'text', // Text output format
-        '--allowedTools',
-        'Bash(git:*),Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
+        '--dangerously-skip-permissions', // Required for automated execution without user prompts
+        '--allowed-tools', // Correct parameter name (with hyphen)
+        'Bash,Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
         '--model',
         'claude-sonnet-4-20250514', // Specify the model to use
         '--append-system-prompt',
-        'You are working in an automated webhook environment. IMPORTANT: Always start by exploring the project structure using available tools (LS, Read, Glob, Grep) to understand the codebase before responding to requests. For merge request contexts, use git commands (git log, git diff, git show) to examine actual code changes. Read relevant files to provide accurate, project-specific information. Make code changes directly without asking for permissions. Focus on implementing the requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
+        'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
         fullPrompt, // The complete prompt including context
       ];
+
+      // Log the exact command being executed for debugging
+      const fullCommand = `claude ${claudeArgs.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`;
+      logger.debug(`[FULL CLAUDE COMMAND] ${fullCommand}`);
+      logger.info('Executing Claude Code CLI', {
+        command: 'claude',
+        args: claudeArgs,
+        fullCommand,
+        cwd: projectPath,
+        userId: process.getuid?.(),
+        userName: process.env.USER || 'unknown',
+      });
 
       const claudeProcess = spawn('claude', claudeArgs, {
         cwd: projectPath,
@@ -171,6 +190,13 @@ export class StreamingClaudeExecutor {
         output += chunk;
         progressBuffer += chunk;
 
+        // Log raw output for debugging intermittent issues
+        console.log(`[CLAUDE STDOUT] ${chunk.trim()}`); // Force console output
+        logger.debug('Claude stdout chunk', {
+          chunk: chunk.trim(),
+          chunkLength: chunk.length
+        });
+
         // Send progress updates every 2 seconds or when we have substantial output
         const now = Date.now();
         if (now - lastProgressTime > 2000 || progressBuffer.length > 500) {
@@ -184,9 +210,16 @@ export class StreamingClaudeExecutor {
         }
       });
 
-      claudeProcess.stderr?.on('data', data => {
-        errorOutput += data.toString();
-        logger.debug('Claude stderr:', data.toString());
+      claudeProcess.stderr?.on('data', async data => {
+        const errorChunk = data.toString();
+        errorOutput += errorChunk;
+        console.log(`[CLAUDE STDERR] ${errorChunk.trim()}`); // Force console output
+        logger.debug('Claude stderr:', errorChunk);
+
+        // Stream error output to user immediately with more context
+        if (errorChunk.trim()) {
+          await callback.onProgress(`⚠️ Error: ${errorChunk.trim()}`, false);
+        }
       });
 
       claudeProcess.on('close', async code => {
@@ -207,14 +240,39 @@ export class StreamingClaudeExecutor {
           });
           resolve({ output: output.trim() });
         } else {
+          // Enhanced error message handling - check entire output for error information
+          let errorMessage = errorOutput.trim();
+          if (!errorMessage) {
+            // Check entire stdout for error information, not just last few lines
+            const outputLower = output.toLowerCase();
+            if (outputLower.includes('error') || outputLower.includes('failed') || outputLower.includes('exception')) {
+              // Find error-related lines in the output
+              const lines = output.split('\n');
+              const errorLines = lines.filter(line => {
+                const lineLower = line.toLowerCase();
+                return lineLower.includes('error') || lineLower.includes('failed') || lineLower.includes('exception');
+              });
+
+              if (errorLines.length > 0) {
+                errorMessage = errorLines.join('\n');
+              } else {
+                // Fallback to last portion of output
+                errorMessage = output.slice(-500).trim() || `Command exited with code ${code}`;
+              }
+            } else {
+              errorMessage = `Command exited with code ${code}. Output: ${output.slice(-200).trim() || 'No output'}`;
+            }
+          }
+
           logger.warn('Claude command failed', {
             code,
-            error: errorOutput,
+            error: errorMessage,
+            stdout: output.slice(-500), // Last 500 chars of stdout for debugging
+            fullOutput: output, // Include full output for debugging intermittent issues
             projectPath,
           });
-          reject(
-            new Error(`Claude execution failed (code ${code}): ${errorOutput || 'No error output'}`)
-          );
+
+          reject(new Error(`Claude execution failed (code ${code}): ${errorMessage}`));
         }
       });
 
@@ -272,12 +330,8 @@ export class StreamingClaudeExecutor {
     // Special handling for MR contexts - always explore when it's MR-related
     const isMRContext = context.context && context.context.includes('MR #');
 
-    if (needsExploration || isMRContext) {
-      fullPrompt += `**Important:** Before responding, please explore the project structure using the available tools (LS, Read, Glob, Grep) to understand the codebase. Read key files like README.md, package.json, and main source files to provide accurate information about this specific project.\n\n`;
-
-      if (isMRContext) {
-        fullPrompt += `**MR Analysis:** This is a merge request context. Please use git commands to examine the actual changes in this MR. Use 'git log', 'git diff', and 'git show' to understand what files have been modified and what changes were made.\n\n`;
-      }
+    if (isMRContext) {
+      fullPrompt += `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`;
     }
 
     // Add the main command/instruction
@@ -307,7 +361,24 @@ export class StreamingClaudeExecutor {
       lastLine.length > 10 &&
       lastLine.length < 200
     ) {
-      return `🤖 ${lastLine.trim()}`;
+      // Filter out generic/unhelpful error messages that don't provide useful information
+      const lastLineLower = lastLine.toLowerCase().trim();
+      if (lastLineLower === 'execution error' ||
+          lastLineLower === 'error' ||
+          lastLineLower === 'failed') {
+        return ''; // Skip generic error messages without context
+      }
+
+      // Include specific error messages that provide useful context
+      const isError = lastLineLower.includes('error') ||
+                     lastLineLower.includes('failed') ||
+                     lastLineLower.includes('exception');
+
+      if (isError) {
+        return `❌ ${lastLine.trim()}`;
+      } else {
+        return `🤖 ${lastLine.trim()}`;
+      }
     }
 
     return '';

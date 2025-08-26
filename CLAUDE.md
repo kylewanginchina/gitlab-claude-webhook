@@ -51,7 +51,8 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 
 - Real-time progress streaming back to GitLab
 - Automatic change detection and git operations
-- Error handling and cleanup
+- Enhanced error handling and debugging capabilities
+- Comprehensive logging for troubleshooting intermittent execution failures
 
 **MRGenerator** - Intelligent merge request creation:
 
@@ -124,6 +125,29 @@ npm install -g @anthropic-ai/claude-code
 - `/src/utils/webhook.ts` - Webhook signature verification and instruction extraction
 - `/src/utils/config.ts` - Environment configuration loading
 - `/src/utils/logger.ts` - Winston-based logging configuration
+
+## Troubleshooting
+
+### Common Issues
+
+**Claude Code Execution Failures**:
+- Check logs for detailed error information and execution context
+- Verify Claude Code CLI is properly installed (`claude --version`)
+- Ensure ANTHROPIC_AUTH_TOKEN is valid and has sufficient credits
+- Review execution logs for authentication or network issues
+
+**Intermittent "Execution error" Messages**:
+- **FIXED**: Issue was caused by aggressive exploration system prompt that forced Claude to explore entire project structure, causing timeouts in large repositories
+- **FIXED**: Removed `Bash(git:*)` tool restriction that could cause parameter parsing issues
+- **FIXED**: Simplified system prompt to avoid mandatory exploration that leads to timeouts
+- Enhanced logging captures Claude Code stdout/stderr for debugging
+- Check service logs with `LOG_LEVEL=debug` for detailed execution traces
+- Verify system resources and network connectivity
+
+**Permission Issues**:
+- Service must run with non-root privileges
+- Ensure proper file system permissions for work directories
+- Docker containers should use non-root user
 
 ## Docker Deployment
 
