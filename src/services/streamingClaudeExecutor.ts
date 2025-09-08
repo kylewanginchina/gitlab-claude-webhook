@@ -199,7 +199,7 @@ export class StreamingClaudeExecutor {
         console.log(`[CLAUDE STDOUT] ${chunk.trim()}`); // Force console output
         logger.debug('Claude stdout chunk', {
           chunk: chunk.trim(),
-          chunkLength: chunk.length
+          chunkLength: chunk.length,
         });
 
         // Send progress updates every 2 seconds or when we have substantial output
@@ -273,10 +273,9 @@ export class StreamingClaudeExecutor {
                 errorMessage = output.slice(-500).trim() || `Command exited with code ${code}`;
               }
             } else {
-              errorMessage =
-                `Command exited with code ${code}. Output: ${
-                  output.slice(-200).trim() || 'No output'
-                }`;
+              errorMessage = `Command exited with code ${code}. Output: ${
+                output.slice(-200).trim() || 'No output'
+              }`;
             }
           }
 
