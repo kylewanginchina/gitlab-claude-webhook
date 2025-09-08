@@ -146,12 +146,17 @@ export class StreamingClaudeExecutor {
         '--model',
         'claude-sonnet-4-20250514', // Specify the model to use
         '--append-system-prompt',
-        'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
+        'You are working in an automated webhook environment. Make code changes ' +
+          'directly without asking for permissions. For merge request contexts, use git ' +
+          'commands to examine code changes when needed. Focus on implementing requested ' +
+          'changes efficiently and provide a clear summary of what was modified.', // Additional system prompt
         fullPrompt, // The complete prompt including context
       ];
 
       // Log the exact command being executed for debugging
-      const fullCommand = `claude ${claudeArgs.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`;
+      const fullCommand = `claude ${claudeArgs
+        .map(arg => (arg.includes(' ') ? `"${arg}"` : arg))
+        .join(' ')}`;
       logger.debug(`[FULL CLAUDE COMMAND] ${fullCommand}`);
       logger.info('Executing Claude Code CLI', {
         command: 'claude',
@@ -245,12 +250,20 @@ export class StreamingClaudeExecutor {
           if (!errorMessage) {
             // Check entire stdout for error information, not just last few lines
             const outputLower = output.toLowerCase();
-            if (outputLower.includes('error') || outputLower.includes('failed') || outputLower.includes('exception')) {
+            if (
+              outputLower.includes('error') ||
+              outputLower.includes('failed') ||
+              outputLower.includes('exception')
+            ) {
               // Find error-related lines in the output
               const lines = output.split('\n');
               const errorLines = lines.filter(line => {
                 const lineLower = line.toLowerCase();
-                return lineLower.includes('error') || lineLower.includes('failed') || lineLower.includes('exception');
+                return (
+                  lineLower.includes('error') ||
+                  lineLower.includes('failed') ||
+                  lineLower.includes('exception')
+                );
               });
 
               if (errorLines.length > 0) {
@@ -260,7 +273,10 @@ export class StreamingClaudeExecutor {
                 errorMessage = output.slice(-500).trim() || `Command exited with code ${code}`;
               }
             } else {
-              errorMessage = `Command exited with code ${code}. Output: ${output.slice(-200).trim() || 'No output'}`;
+              errorMessage =
+                `Command exited with code ${code}. Output: ${
+                  output.slice(-200).trim() || 'No output'
+                }`;
             }
           }
 
@@ -363,16 +379,19 @@ export class StreamingClaudeExecutor {
     ) {
       // Filter out generic/unhelpful error messages that don't provide useful information
       const lastLineLower = lastLine.toLowerCase().trim();
-      if (lastLineLower === 'execution error' ||
-          lastLineLower === 'error' ||
-          lastLineLower === 'failed') {
+      if (
+        lastLineLower === 'execution error' ||
+        lastLineLower === 'error' ||
+        lastLineLower === 'failed'
+      ) {
         return ''; // Skip generic error messages without context
       }
 
       // Include specific error messages that provide useful context
-      const isError = lastLineLower.includes('error') ||
-                     lastLineLower.includes('failed') ||
-                     lastLineLower.includes('exception');
+      const isError =
+        lastLineLower.includes('error') ||
+        lastLineLower.includes('failed') ||
+        lastLineLower.includes('exception');
 
       if (isError) {
         return `❌ ${lastLine.trim()}`;
@@ -407,11 +426,17 @@ export class StreamingClaudeExecutor {
     try {
       await callback.onProgress('📤 Committing and pushing changes...', false);
 
-      const commitMessage = `Claude: ${context.instruction.substring(0, 50)}${context.instruction.length > 50 ? '...' : ''}\n\n🤖 Generated with Claude Code Webhook`;
+      const commitMessage = `Claude: ${context.instruction.substring(0, 50)}${
+        context.instruction.length > 50 ? '...' : ''
+      }\n\n🤖 Generated with Claude Code Webhook`;
 
       // Use switchToAndPushBranch for Claude branches, commitAndPush for existing branches
       if (context.branch.startsWith('claude-')) {
-        await this.projectManager.switchToAndPushBranch(projectPath, context.branch, commitMessage);
+        await this.projectManager.switchToAndPushBranch(
+          projectPath,
+          context.branch,
+          commitMessage
+        );
       } else {
         await this.projectManager.commitAndPush(projectPath, commitMessage, context.branch);
       }
@@ -427,7 +452,9 @@ export class StreamingClaudeExecutor {
       });
     } catch (error) {
       logger.error('Failed to commit and push changes:', error);
-      const errorMessage = `Failed to push changes: ${error instanceof Error ? error.message : String(error)}`;
+      const errorMessage = `Failed to push changes: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
       await callback.onError(errorMessage);
       throw error;
     }
