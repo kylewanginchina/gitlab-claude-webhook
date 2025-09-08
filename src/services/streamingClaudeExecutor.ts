@@ -146,10 +146,7 @@ export class StreamingClaudeExecutor {
         '--model',
         'claude-sonnet-4-20250514', // Specify the model to use
         '--append-system-prompt',
-        'You are working in an automated webhook environment. Make code changes ' +
-          'directly without asking for permissions. For merge request contexts, use git ' +
-          'commands to examine code changes when needed. Focus on implementing requested ' +
-          'changes efficiently and provide a clear summary of what was modified.', // Additional system prompt
+        `You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.`, // Additional system prompt
         fullPrompt, // The complete prompt including context
       ];
 
@@ -273,9 +270,7 @@ export class StreamingClaudeExecutor {
                 errorMessage = output.slice(-500).trim() || `Command exited with code ${code}`;
               }
             } else {
-              errorMessage = `Command exited with code ${code}. Output: ${
-                output.slice(-200).trim() || 'No output'
-              }`;
+              errorMessage = `Command exited with code ${code}. Output: ${output.slice(-200).trim() || 'No output'}`;
             }
           }
 
