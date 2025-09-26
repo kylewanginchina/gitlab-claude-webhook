@@ -79,34 +79,40 @@ export class EventProcessor {
             context = `Issue #${event.issue.iid}: ${event.issue.title}\n\n**Issue Description:** ${event.issue.description ? (event.issue.description.length > 200 ? event.issue.description.substring(0, 200) + '...' : event.issue.description) : 'No description provided'}`;
             branch = event.project.default_branch;
 
-            // Check if this is a reply in a discussion thread
+            // Get thread context to set currentDiscussionId for proper replies
             if (noteId) {
-              const threadInfo = await this.getThreadContext(
-                'issue',
-                event.project.id,
-                event.issue.iid,
-                noteId
-              );
-              if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `${context}\n\n${threadInfo}`;
-              }
+              await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId);
+            }
+
+            // Get full conversation history for this issue
+            const conversationHistory = await this.getConversationHistory(
+              'issue',
+              event.project.id,
+              event.issue.iid,
+              noteId
+            );
+            if (conversationHistory) {
+              context = `${context}\n\n${conversationHistory}`;
             }
           } else if (event.merge_request) {
             // Build enhanced context for merge request comments including code changes
             context = await this.buildMergeRequestContext(event.merge_request, event.project.id);
             branch = event.merge_request.source_branch;
 
-            // Check if this is a reply in a discussion thread
+            // Get thread context to set currentDiscussionId for proper replies
             if (noteId) {
-              const threadInfo = await this.getThreadContext(
-                'merge_request',
-                event.project.id,
-                event.merge_request.iid,
-                noteId
-              );
-              if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `${context}\n\n${threadInfo}`;
-              }
+              await this.getThreadContext('merge_request', event.project.id, event.merge_request.iid, noteId);
+            }
+
+            // Get full conversation history for this merge request
+            const conversationHistory = await this.getConversationHistory(
+              'merge_request',
+              event.project.id,
+              event.merge_request.iid,
+              noteId
+            );
+            if (conversationHistory) {
+              context = `${context}\n\n${conversationHistory}`;
             }
           }
         }
@@ -163,6 +169,71 @@ export class EventProcessor {
       return null;
     } catch (error) {
       logger.error('Failed to get thread context:', error);
+      return null;
+    }
+  }
+
+  private async getConversationHistory(
+    type: 'issue' | 'merge_request',
+    projectId: number,
+    itemIid: number,
+    currentNoteId?: number
+  ): Promise<string | null> {
+    try {
+      let discussions: any[];
+
+      if (type === 'issue') {
+        discussions = await this.gitlabService.getIssueDiscussions(projectId, itemIid);
+      } else {
+        discussions = await this.gitlabService.getMergeRequestDiscussions(projectId, itemIid);
+      }
+
+      if (!discussions || discussions.length === 0) {
+        return null;
+      }
+
+      // Build conversation history from all discussions
+      let conversationHistory = '**Conversation History:**\n\n';
+      let hasContent = false;
+
+      // Sort discussions by creation time
+      const sortedDiscussions = discussions.sort((a, b) => {
+        const aCreatedAt = a.notes?.[0]?.created_at || '';
+        const bCreatedAt = b.notes?.[0]?.created_at || '';
+        return new Date(aCreatedAt).getTime() - new Date(bCreatedAt).getTime();
+      });
+
+      for (const discussion of sortedDiscussions) {
+        if (discussion.notes && Array.isArray(discussion.notes)) {
+          // Sort notes within each discussion by creation time
+          const sortedNotes = discussion.notes.sort((a: any, b: any) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+
+          for (const note of sortedNotes) {
+            // Skip the current note if we have its ID
+            if (currentNoteId && note.id === currentNoteId) {
+              continue;
+            }
+
+            // Skip system notes
+            if (note.system) {
+              continue;
+            }
+
+            const author = note.author?.name || note.author?.username || 'Unknown';
+            const timestamp = new Date(note.created_at).toLocaleString();
+
+            conversationHistory += `**${author}** (${timestamp}):\n`;
+            conversationHistory += `${note.body}\n\n`;
+            hasContent = true;
+          }
+        }
+      }
+
+      return hasContent ? conversationHistory.trim() : null;
+    } catch (error) {
+      logger.error('Failed to get conversation history:', error);
       return null;
     }
   }
