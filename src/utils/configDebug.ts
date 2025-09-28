@@ -63,6 +63,7 @@ export function debugConfig(): void {
     'PORT',
     'WORK_DIR',
     'LOG_LEVEL',
+    'SYSTEM_PROMPT_APPEND'
   ];
 
   envVars.forEach(varName => {

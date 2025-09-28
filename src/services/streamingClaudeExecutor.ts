@@ -137,6 +137,12 @@ export class StreamingClaudeExecutor {
       const fullPrompt = this.buildPromptWithContext(command, context);
 
       // Use proper Claude Code CLI arguments with correct parameter names
+      const baseSystemPrompt = 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. ' +
+          'For merge request contexts, use git commands to examine code changes when needed. ' +
+          'Focus on implementing requested changes efficiently and provide a clear summary of what was modified.';
+      const additionalSystemPrompt = config.claudeSystemPrompt || '';
+      const fullSystemPrompt =  `${baseSystemPrompt}\n\n${additionalSystemPrompt}`
+
       const claudeArgs = [
         '--print', // Non-interactive mode, print response and exit
         '--output-format',
@@ -147,7 +153,7 @@ export class StreamingClaudeExecutor {
         '--model',
         context.model || config.anthropic.defaultModel, // Specify the model to use
         '--append-system-prompt',
-        'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
+        fullSystemPrompt, // Additional system prompt for automation
         fullPrompt, // The complete prompt including context
       ];
 

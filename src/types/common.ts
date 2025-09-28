@@ -25,6 +25,7 @@ export interface Config {
   };
   workDir: string;
   logLevel: string;
+  systemPromptAppend?: string;
 }
 
 export interface ProcessResult {
