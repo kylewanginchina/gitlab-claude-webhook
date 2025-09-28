@@ -36,4 +36,5 @@ export const config: Config = {
   },
   workDir: getEnvVar('WORK_DIR', '/tmp/gitlab-claude-work'),
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
+  claudeSystemPrompt: getEnvVar('CLAUDE_SYSTEM_PROMPT',''),
 };

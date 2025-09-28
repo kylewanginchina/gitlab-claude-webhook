@@ -13,6 +13,7 @@ services:
       - PORT=${PORT:-3000}
       - WORK_DIR=/tmp/gitlab-claude-work
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CLAUDE_SYSTEM_PROMPT=${CLAUDE_SYSTEM_PROMPT}
     volumes:
       - ./logs:/app/logs
       - webhook-work:/tmp/gitlab-claude-work

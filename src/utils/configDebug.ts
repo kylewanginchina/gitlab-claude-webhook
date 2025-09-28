@@ -38,6 +38,7 @@ export function debugConfig(): void {
     'PORT',
     'WORK_DIR',
     'LOG_LEVEL',
+    'CLAUDE_SYSTEM_PROMPT'
   ];
 
   envVars.forEach(varName => {

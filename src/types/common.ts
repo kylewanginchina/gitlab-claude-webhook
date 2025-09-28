@@ -13,6 +13,7 @@ export interface Config {
   };
   workDir: string;
   logLevel: string;
+  claudeSystemPrompt?: string;
 }
 
 export interface ProcessResult {
