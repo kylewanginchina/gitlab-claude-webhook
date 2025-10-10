@@ -27,10 +27,21 @@ jobs:
       issues: write
       id-token: write
     steps:
+      - name: Get PR Info
+        id: pr_info
+        run: |
+          PR_DATA=$(gh pr view ${{ github.event.issue.number }} --json headRefName,headRepository)
+          HEAD_REF_NAME=$(echo "$PR_DATA" | jq -r .headRefName)
+          HEAD_REPOSITORY=$(echo "$PR_DATA" | jq -r .headRepository.nameWithOwner)
+          echo "repo_full_name=$HEAD_REPOSITORY" >> $GITHUB_OUTPUT
+          echo "branch_name=$HEAD_REF_NAME" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: 'refs/pull/${{ github.event.issue.number }}/head'
+          repository: ${{ steps.pr_info.outputs.repo_full_name }}
+          ref: ${{ steps.pr_info.outputs.branch_name }}
           fetch-depth: 0
       - name: Run Claude Code
         id: claude
