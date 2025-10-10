@@ -31,18 +31,10 @@ jobs:
         id: pr_info
         run: |
           PR_DATA=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json headRefName,headRepository,author)
-          
           HEAD_REF_NAME=$(echo "$PR_DATA" | jq -r .headRefName)
           REPO_NAME=$(echo "$PR_DATA" | jq -r .headRepository.name)
           AUTHOR_LOGIN=$(echo "$PR_DATA" | jq -r .author.login)
-          
           HEAD_REPOSITORY="$AUTHOR_LOGIN/$REPO_NAME"
-          
-          echo "==================== DEBUG INFO ===================="
-          echo "Fetched Branch Name: $HEAD_REF_NAME"
-          echo "Manually Constructed Repository Name: $HEAD_REPOSITORY"
-          echo "=================================================="
-
           echo "repo_full_name=$HEAD_REPOSITORY" >> $GITHUB_OUTPUT
           echo "branch_name=$HEAD_REF_NAME" >> $GITHUB_OUTPUT
         env:
