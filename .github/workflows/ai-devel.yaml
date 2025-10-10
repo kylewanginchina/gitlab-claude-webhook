@@ -30,9 +30,28 @@ jobs:
       - name: Get PR Info
         id: pr_info
         run: |
+          echo "Fetching data for PR number: ${{ github.event.issue.number }}"
           PR_DATA=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json headRefName,headRepository)
+          
+          if [ -z "$PR_DATA" ]; then
+            echo "::error::Failed to fetch PR data from gh cli."
+            exit 1
+          fi
+
           HEAD_REF_NAME=$(echo "$PR_DATA" | jq -r .headRefName)
           HEAD_REPOSITORY=$(echo "$PR_DATA" | jq -r .headRepository.nameWithOwner)
+          
+          echo "==================== DEBUG INFO ===================="
+          echo "Fetched Branch Name: $HEAD_REF_NAME"
+          echo "Fetched Repository Name: $HEAD_REPOSITORY"
+          echo "=================================================="
+
+          if [ -z "$HEAD_REF_NAME" ] || [ -z "$HEAD_REPOSITORY" ] || [ "$HEAD_REPOSITORY" == "null" ]; then
+            echo "::error::Could not extract branch or repository name from PR data."
+            echo "Raw PR Data: $PR_DATA"
+            exit 1
+          fi
+
           echo "repo_full_name=$HEAD_REPOSITORY" >> $GITHUB_OUTPUT
           echo "branch_name=$HEAD_REF_NAME" >> $GITHUB_OUTPUT
         env:
