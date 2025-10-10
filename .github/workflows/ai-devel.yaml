@@ -30,7 +30,7 @@ jobs:
       - name: Get PR Info
         id: pr_info
         run: |
-          PR_DATA=$(gh pr view ${{ github.event.issue.number }} --json headRefName,headRepository)
+          PR_DATA=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json headRefName,headRepository)
           HEAD_REF_NAME=$(echo "$PR_DATA" | jq -r .headRefName)
           HEAD_REPOSITORY=$(echo "$PR_DATA" | jq -r .headRepository.nameWithOwner)
           echo "repo_full_name=$HEAD_REPOSITORY" >> $GITHUB_OUTPUT
