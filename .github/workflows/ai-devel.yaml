@@ -37,7 +37,6 @@ jobs:
             HEAD_REPOSITORY="$HEAD_REPO_WITH_OWNER"
             echo "Using official repository name: $HEAD_REPOSITORY"
           else
-            echo "Official repository name is empty. Falling back to manual construction."
             REPO_NAME=$(echo "$PR_DATA" | jq -r .headRepository.name)
             AUTHOR_LOGIN=$(echo "$PR_DATA" | jq -r .author.login)
             HEAD_REPOSITORY="$AUTHOR_LOGIN/$REPO_NAME"
