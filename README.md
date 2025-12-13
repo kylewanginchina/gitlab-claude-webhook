@@ -346,6 +346,7 @@ src/
 │   ├── projectManager.ts        # Git operations and project management
 │   ├── claudeExecutor.ts        # Basic Claude Code CLI execution
 │   ├── streamingClaudeExecutor.ts # Streaming Claude execution with real-time updates
+│   ├── codexExecutor.ts         # OpenAI Codex CLI execution with streaming
 │   └── gitlabService.ts         # GitLab API interactions
 ├── types/
 │   ├── gitlab.ts                # GitLab-related type definitions
@@ -353,6 +354,7 @@ src/
 └── utils/
     ├── config.ts                # Configuration management with variable expansion
     ├── configDebug.ts           # Configuration debugging utilities
+    ├── codexConfig.ts           # Auto-generate Codex config.toml at startup
     ├── logger.ts                # Winston-based logging utility
     ├── webhook.ts               # Webhook utilities and signature verification
     └── mrGenerator.ts           # Smart merge request generation
