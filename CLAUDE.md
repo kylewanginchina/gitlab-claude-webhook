@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Multi-Provider AI Support
+
+This project supports both **Claude Code** and **OpenAI Codex** as AI providers. Users can specify the provider via mentions:
+- `@claude` - Uses Claude Code CLI (default)
+- `@codex` - Uses OpenAI Codex CLI
+- `@claude[model=xxx]` or `@codex[model=xxx]` - Specify custom model
+
 ## Development Commands
 
 ```bash
@@ -32,9 +39,11 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 ### Core Flow
 
 1. **Webhook Reception** (`src/server/webhookServer.ts`) - Express server receives GitLab webhooks
-2. **Event Processing** (`src/services/eventProcessor.ts`) - Main orchestrator that extracts `@claude` instructions and manages the workflow
+2. **Event Processing** (`src/services/eventProcessor.ts`) - Main orchestrator that extracts `@claude` or `@codex` instructions and manages the workflow
 3. **Project Management** (`src/services/projectManager.ts`) - Handles git operations, cloning, and branch management
-4. **Claude Execution** (`src/services/streamingClaudeExecutor.ts`) - Executes Claude Code CLI with streaming progress updates
+4. **AI Execution** - Provider-based execution:
+   - `src/services/streamingClaudeExecutor.ts` - Claude Code CLI with streaming progress
+   - `src/services/codexExecutor.ts` - OpenAI Codex CLI with JSONL streaming
 5. **MR Generation** (`src/utils/mrGenerator.ts`) - Creates smart merge requests with conventional commit titles and structured descriptions
 6. **GitLab Integration** (`src/services/gitlabService.ts`) - Handles all GitLab API interactions
 
@@ -52,7 +61,14 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 - Real-time progress streaming back to GitLab
 - Automatic change detection and git operations
 - Enhanced error handling and debugging capabilities
-- Comprehensive logging for troubleshooting intermittent execution failures
+- Model selection via context parameter
+
+**CodexExecutor** - Executes OpenAI Codex CLI with:
+
+- Non-interactive `codex exec --full-auto --json` mode
+- JSONL event parsing for streaming progress
+- Model selection support
+- Comprehensive error handling
 
 **MRGenerator** - Intelligent merge request creation:
 
@@ -69,15 +85,24 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 
 ## Environment Configuration
 
-Required environment variables:
+**Core required (validated at startup):**
 
-- `ANTHROPIC_AUTH_TOKEN` - Anthropic API token
 - `GITLAB_TOKEN` - GitLab API token with `api`, `read_repository`, `write_repository` scopes
 - `WEBHOOK_SECRET` - GitLab webhook secret for signature verification
 
-Optional:
+**Required based on AI provider:**
 
+- `ANTHROPIC_AUTH_TOKEN` - Required when using Claude
+- `OPENAI_API_KEY` - Required when using Codex
+
+**Optional (all have defaults):**
+
+- `AI_DEFAULT_PROVIDER` (default: claude) - Default AI provider
 - `ANTHROPIC_BASE_URL` (default: https://api.anthropic.com)
+- `OPENAI_BASE_URL` (default: https://api.openai.com/v1)
+- `CLAUDE_DEFAULT_MODEL` (default: claude-sonnet-4-20250514)
+- `CODEX_DEFAULT_MODEL` (default: gpt-5.1-codex-max)
+- `CODEX_REASONING_EFFORT` (default: high)
 - `GITLAB_BASE_URL` (default: https://gitlab.com)
 - `PORT` (default: 3000)
 - `WORK_DIR` (default: /tmp/gitlab-claude-work)
@@ -91,21 +116,44 @@ Configure GitLab webhooks to trigger on:
 - Merge request events
 - Comments (Push comments, Issue comments, Merge request comments)
 
-The service detects `@claude` mentions in:
+The service detects `@claude` and `@codex` mentions in:
 
 - Issue descriptions and comments
 - Merge request descriptions and comments
 - Any webhook event content
 
-## Claude Code CLI Integration
+Optional model specification: `@claude[model=xxx]` or `@codex[model=xxx]`
 
-The service requires Claude Code CLI to be installed and accessible. For Docker deployments, it's installed globally in the container. For local development, install with:
+## AI CLI Integration
 
+The service requires AI CLI tools to be installed and accessible:
+
+**Claude Code CLI:**
 ```bash
 npm install -g @anthropic-ai/claude-code
 ```
 
-**Important**: Must run with non-root privileges due to Claude Code's `--dangerously-skip-permissions` parameter requirement.
+**OpenAI Codex CLI:**
+```bash
+npm install -g @openai/codex
+```
+
+For Docker deployments, both CLIs are installed globally in the container. For local development, install with the commands above.
+
+**Important**: Claude Code must run with non-root privileges due to `--dangerously-skip-permissions` parameter requirement.
+
+## Codex Custom Provider Configuration
+
+Codex config is **auto-generated** at container startup from environment variables:
+
+```bash
+# Example for custom endpoint (88code.org)
+OPENAI_BASE_URL=https://88code.org/openai/v1
+OPENAI_API_KEY=your-api-key
+CODEX_DEFAULT_MODEL=gpt-5.1-codex-max
+```
+
+Provider name is auto-extracted from URL (e.g., `88code.org` → `88code`).
 
 ## Branch and MR Workflow
 

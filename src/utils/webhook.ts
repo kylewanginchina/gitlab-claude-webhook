@@ -1,6 +1,13 @@
 import crypto from 'crypto';
 import { config } from './config';
 import logger from './logger';
+import { AIProvider } from '../types/common';
+
+export interface AIInstructionResult {
+  provider: AIProvider;
+  model?: string;
+  command: string;
+}
 
 export function verifyGitLabSignature(body: string, signature: string): boolean {
   if (!signature) {
@@ -66,15 +73,47 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
   return false;
 }
 
-export function extractClaudeInstructions(text: string): string | null {
+/**
+ * Extract AI instructions from text with provider and optional model selection.
+ * Supports:
+ * - @claude instruction (uses Claude provider)
+ * - @codex instruction (uses Codex provider)
+ * - @claude[model=xxx] instruction (uses Claude with specific model)
+ * - @codex[model=xxx] instruction (uses Codex with specific model)
+ */
+export function extractAIInstructions(text: string): AIInstructionResult | null {
   if (!text) return null;
 
-  const claudePattern = /@claude\s+([\s\S]*?)(?=@\w+|$)/i;
-  const match = text.match(claudePattern);
+  // Pattern to match @claude or @codex with optional [model=xxx] parameter
+  // Group 1: provider (claude or codex)
+  // Group 2: optional model parameter (e.g., [model=claude-sonnet-4-20250514])
+  // Group 3: the actual command/instruction
+  const aiPattern = /@(claude|codex)(?:\[model=([^\]]+)\])?\s+([\s\S]*?)(?=@\w+|$)/i;
+  const match = text.match(aiPattern);
 
   if (match) {
-    return match[1].trim();
+    const provider = match[1].toLowerCase() as AIProvider;
+    const model = match[2] || undefined;
+    const command = match[3].trim();
+
+    if (command) {
+      logger.debug('Extracted AI instruction', { provider, model, commandLength: command.length });
+      return {
+        provider,
+        model,
+        command,
+      };
+    }
   }
 
   return null;
+}
+
+/**
+ * Legacy function for backward compatibility.
+ * Extracts Claude instructions from text.
+ */
+export function extractClaudeInstructions(text: string): string | null {
+  const result = extractAIInstructions(text);
+  return result?.command || null;
 }

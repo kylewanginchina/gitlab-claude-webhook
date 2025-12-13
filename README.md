@@ -4,15 +4,16 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A robust webhook service that integrates GitLab with Claude Code CLI, enabling AI-powered code assistance directly from GitLab issues, merge requests, and comments.
+A robust webhook service that integrates GitLab with AI-powered code assistants (Claude Code CLI and OpenAI Codex), enabling AI-powered code assistance directly from GitLab issues, merge requests, and comments.
 
 ## ✨ Features
 
 - **GitLab Integration**: Receives webhook events from GitLab for issues, merge requests, and comments
-- **Claude AI Processing**: Automatically detects `@claude` mentions and executes Claude Code CLI commands
+- **Multi-Provider AI Processing**: Supports both Claude Code (`@claude`) and OpenAI Codex (`@codex`) with automatic provider detection
+- **Model Selection**: Optionally specify models with `@claude[model=xxx]` or `@codex[model=xxx]` syntax
 - **Secure Webhook Verification**: Validates webhook signatures to ensure security
-- **Branch-aware Processing**: Automatically creates new branches for Claude changes with merge request workflow
-- **Automatic Code Changes**: Commits and pushes changes made by Claude back to the repository
+- **Branch-aware Processing**: Automatically creates new branches for AI changes with merge request workflow
+- **Automatic Code Changes**: Commits and pushes changes made by AI back to the repository
 - **Smart Merge Requests**: Creates professional MRs with conventional commit titles and structured descriptions
 - **Real-time Feedback**: Posts results and errors as comments back to GitLab
 
@@ -21,9 +22,10 @@ A robust webhook service that integrates GitLab with Claude Code CLI, enabling A
 ### Prerequisites
 
 - Node.js 18+ or Docker
-- [Claude Code](https://github.com/anthropics/claude-code) installed (if running locally)
+- [Claude Code](https://github.com/anthropics/claude-code) installed (if using Claude provider)
+- [OpenAI Codex](https://github.com/openai/codex) installed (if using Codex provider)
 - GitLab project with webhook access
-- Anthropic API key
+- Anthropic API key (for Claude) and/or OpenAI API key (for Codex)
 - GitLab API token
 
 ### Installation
@@ -47,6 +49,16 @@ cp .env.example .env
 # Claude API Configuration
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_AUTH_TOKEN=sk-your-anthropic-token
+
+# OpenAI/Codex API Configuration (optional, for Codex provider)
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-proj-your-openai-key
+
+# AI Provider Configuration (optional, all have defaults)
+AI_DEFAULT_PROVIDER=claude
+CLAUDE_DEFAULT_MODEL=claude-sonnet-4-20250514
+CODEX_DEFAULT_MODEL=gpt-5.1-codex-max
+CODEX_REASONING_EFFORT=high
 
 # GitLab Configuration
 GITLAB_BASE_URL=https://gitlab.com
@@ -114,12 +126,30 @@ Create or comment on an issue with:
 @claude Please help me optimize this function in src/utils/helper.js
 ```
 
+Or use Codex:
+
+```
+@codex Please help me optimize this function in src/utils/helper.js
+```
+
 ### In Merge Requests
 
 Add to MR description or comment:
 
 ```
 @claude Review the security implications of these changes and suggest improvements
+```
+
+### Model Selection
+
+Specify a specific model:
+
+```
+@claude[model=claude-sonnet-4-20250514] Fix the TypeScript errors in the authentication module
+```
+
+```
+@codex[model=gpt-5.1-codex-max] Refactor this function for better performance
 ```
 
 ### Advanced Usage
@@ -179,16 +209,63 @@ For detailed configuration instructions including environment variable expansion
 
 ### Environment Variables
 
-| Variable               | Description               | Default                     |
-| ---------------------- | ------------------------- | --------------------------- |
-| `ANTHROPIC_BASE_URL`   | Anthropic API base URL    | `https://api.anthropic.com` |
-| `ANTHROPIC_AUTH_TOKEN` | Anthropic API token       | Required                    |
-| `GITLAB_BASE_URL`      | GitLab instance URL       | `https://gitlab.com`        |
-| `GITLAB_TOKEN`         | GitLab API token          | Required                    |
-| `WEBHOOK_SECRET`       | Webhook validation secret | Required                    |
-| `PORT`                 | Server port               | `3000`                      |
-| `WORK_DIR`             | Temporary work directory  | `/tmp/gitlab-claude-work`   |
-| `LOG_LEVEL`            | Logging level             | `info`                      |
+**Core Required:**
+
+| Variable         | Description               |
+|------------------|---------------------------|
+| `GITLAB_TOKEN`   | GitLab API token          |
+| `WEBHOOK_SECRET` | Webhook validation secret |
+
+**AI Provider Required (based on usage):**
+
+| Variable               | Description                      |
+|------------------------|----------------------------------|
+| `ANTHROPIC_AUTH_TOKEN` | Required when using Claude       |
+| `OPENAI_API_KEY`       | Required when using Codex        |
+
+**Optional (all have defaults):**
+
+| Variable               | Description                    | Default                          |
+| ---------------------- | ------------------------------ | -------------------------------- |
+| `AI_DEFAULT_PROVIDER`  | Default AI provider            | `claude`                         |
+| `ANTHROPIC_BASE_URL`   | Anthropic API base URL         | `https://api.anthropic.com`      |
+| `OPENAI_BASE_URL`      | OpenAI API base URL            | `https://api.openai.com/v1`      |
+| `CLAUDE_DEFAULT_MODEL` | Default model for Claude       | `claude-sonnet-4-20250514`       |
+| `CODEX_DEFAULT_MODEL`  | Default model for Codex        | `gpt-5.1-codex-max`              |
+| `CODEX_REASONING_EFFORT` | Codex reasoning level        | `high`                           |
+| `GITLAB_BASE_URL`      | GitLab instance URL            | `https://gitlab.com`             |
+| `PORT`                 | Server port                    | `3000`                           |
+| `WORK_DIR`             | Temporary work directory       | `/tmp/gitlab-claude-work`        |
+| `LOG_LEVEL`            | Logging level                  | `info`                           |
+
+### Codex Custom Provider Configuration
+
+Codex configuration is **automatically generated** from environment variables at container startup. No manual `config.toml` file is needed.
+
+**Environment variables for Codex config:**
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_BASE_URL` | API endpoint URL | `https://api.openai.com/v1` |
+| `OPENAI_API_KEY` | API key | Required for Codex |
+| `CODEX_DEFAULT_MODEL` | Model name | `gpt-5.1-codex-max` |
+| `CODEX_REASONING_EFFORT` | Reasoning level | `high` |
+
+Provider name is auto-extracted from `OPENAI_BASE_URL` (e.g., `https://88code.org/...` → `88code`).
+
+**Example for custom endpoint (e.g., 88code.org):**
+
+```bash
+OPENAI_BASE_URL=https://88code.org/openai/v1
+OPENAI_API_KEY=your-api-key
+CODEX_DEFAULT_MODEL=gpt-5.1-codex-max
+CODEX_REASONING_EFFORT=high
+```
+
+The container entrypoint script automatically generates `~/.codex/config.toml` with:
+- Custom model provider configuration
+- Base URL and API key settings
+- Reasoning effort and model selection
 
 ### GitLab Token Permissions
 
