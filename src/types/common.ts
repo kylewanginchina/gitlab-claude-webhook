@@ -1,7 +1,16 @@
+// AI Provider type
+export type AIProvider = 'claude' | 'codex';
+
 export interface Config {
   anthropic: {
     baseUrl: string;
     authToken: string;
+    defaultModel: string;
+  };
+  openai: {
+    baseUrl: string;
+    apiKey: string;
+    defaultModel: string;
   };
   gitlab: {
     baseUrl: string;
@@ -10,6 +19,9 @@ export interface Config {
   webhook: {
     secret: string;
     port: number;
+  };
+  ai: {
+    defaultProvider: AIProvider;
   };
   workDir: string;
   logLevel: string;

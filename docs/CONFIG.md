@@ -13,6 +13,16 @@
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_AUTH_TOKEN=sk-your-token-here
 
+# OpenAI/Codex API配置 (可选，用于Codex提供者)
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-proj-your-openai-key
+
+# AI 提供者配置 (可选，都有默认值)
+AI_DEFAULT_PROVIDER=claude                     # 默认: claude
+CLAUDE_DEFAULT_MODEL=claude-sonnet-4-20250514  # 默认: claude-sonnet-4-20250514
+CODEX_DEFAULT_MODEL=gpt-5.1-codex-max          # 默认: gpt-5.1-codex-max
+CODEX_REASONING_EFFORT=high                    # 默认: high
+
 # GitLab配置
 GITLAB_BASE_URL=https://gitlab.com
 GITLAB_TOKEN=glpat-your-token-here
@@ -120,15 +130,31 @@ GitLab Token: ***h7i8j9k0
 ...
 ```
 
-### 6. 必需配置项
+### 6. 必需与可选配置项
 
-以下配置项是必需的：
+#### 核心必需配置（启动时验证）
 
-- `ANTHROPIC_AUTH_TOKEN` - Anthropic API 令牌
 - `GITLAB_TOKEN` - GitLab API 令牌
 - `WEBHOOK_SECRET` - Webhook 验证密钥
 
-启动时会自动验证这些配置项，缺少任何一项都会导致应用启动失败。
+#### AI 提供者配置（根据使用情况）
+
+**使用 Claude 时必需：**
+- `ANTHROPIC_AUTH_TOKEN` - Anthropic API 令牌
+
+**使用 Codex 时必需：**
+- `OPENAI_API_KEY` - OpenAI API 令牌
+
+**可选配置（都有默认值）：**
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `AI_DEFAULT_PROVIDER` | 默认 AI 提供者 | `claude` |
+| `ANTHROPIC_BASE_URL` | Anthropic API 基础 URL | `https://api.anthropic.com` |
+| `OPENAI_BASE_URL` | OpenAI API 基础 URL | `https://api.openai.com/v1` |
+| `CLAUDE_DEFAULT_MODEL` | Claude 默认模型 | `claude-sonnet-4-20250514` |
+| `CODEX_DEFAULT_MODEL` | Codex 默认模型 | `gpt-5.1-codex-max` |
+| `CODEX_REASONING_EFFORT` | Codex 推理等级 | `high` |
 
 ### 7. 配置模板
 

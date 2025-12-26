@@ -1,14 +1,16 @@
-import { GitLabWebhookEvent, ClaudeInstruction } from '../types/gitlab';
-import { extractClaudeInstructions } from '../utils/webhook';
+import { GitLabWebhookEvent, AIInstruction } from '../types/gitlab';
+import { extractAIInstructions } from '../utils/webhook';
 import logger from '../utils/logger';
 import { ProjectManager } from './projectManager';
 import { StreamingClaudeExecutor, StreamingProgressCallback } from './streamingClaudeExecutor';
+import { CodexExecutor } from './codexExecutor';
 import { GitLabService } from './gitlabService';
 import { MRGenerator } from '../utils/mrGenerator';
 
 export class EventProcessor {
   private projectManager: ProjectManager;
   private claudeExecutor: StreamingClaudeExecutor;
+  private codexExecutor: CodexExecutor;
   private gitlabService: GitLabService;
   private currentCommentId: number | null = null;
   private currentDiscussionId: string | null = null;
@@ -16,6 +18,7 @@ export class EventProcessor {
   constructor() {
     this.projectManager = new ProjectManager();
     this.claudeExecutor = new StreamingClaudeExecutor();
+    this.codexExecutor = new CodexExecutor();
     this.gitlabService = new GitLabService();
   }
 
@@ -31,9 +34,10 @@ export class EventProcessor {
         return;
       }
 
-      logger.info('Processing Claude instruction', {
+      logger.info('Processing AI instruction', {
         eventType: event.object_kind,
         projectId: event.project.id,
+        provider: instruction.provider,
         instruction: instruction.command.substring(0, 100),
       });
 
@@ -42,12 +46,12 @@ export class EventProcessor {
       logger.error('Error processing event:', error);
       await this.reportError(event, error);
     } finally {
-      // Reset discussion ID after processing
+      // Reset state after processing
       this.currentDiscussionId = null;
     }
   }
 
-  private async extractInstruction(event: GitLabWebhookEvent): Promise<ClaudeInstruction | null> {
+  private async extractInstruction(event: GitLabWebhookEvent): Promise<AIInstruction | null> {
     let content = '';
     let branch = '';
     let context = '';
@@ -112,16 +116,19 @@ export class EventProcessor {
         return null;
     }
 
-    const command = extractClaudeInstructions(content);
+    // Extract AI instruction with provider and model information
+    const aiInstruction = extractAIInstructions(content);
 
-    if (!command) {
+    if (!aiInstruction) {
       return null;
     }
 
     return {
-      command,
+      command: aiInstruction.command,
       context,
       branch,
+      provider: aiInstruction.provider,
+      model: aiInstruction.model,
     };
   }
 
@@ -299,13 +306,16 @@ export class EventProcessor {
 
   private async executeInstruction(
     event: GitLabWebhookEvent,
-    instruction: ClaudeInstruction
+    instruction: AIInstruction
   ): Promise<void> {
     // Clear previous progress messages for this new instruction
     this.progressMessages = [];
 
+    // Determine provider name for messages
+    const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
+
     // Create initial progress comment
-    const initialMessage = `🚀 Claude is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
+    const initialMessage = `🚀 ${providerName} is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
 
     this.currentCommentId = await this.createProgressComment(event, initialMessage);
 
@@ -324,19 +334,40 @@ export class EventProcessor {
         },
       };
 
-      // Execute Claude without creating branch first
-      const result = await this.claudeExecutor.executeWithStreaming(
-        instruction.command,
-        projectPath,
-        {
-          context: instruction.context,
-          projectUrl: event.project.web_url,
-          branch: baseBranch, // Use base branch for execution
-          event,
-          instruction: instruction.command,
-        },
-        callback
-      );
+      let result;
+
+      // Select executor based on provider
+      if (instruction.provider === 'codex') {
+        // Execute with Codex
+        result = await this.codexExecutor.executeWithStreaming(
+          instruction.command,
+          projectPath,
+          {
+            context: instruction.context,
+            projectUrl: event.project.web_url,
+            branch: baseBranch,
+            event,
+            instruction: instruction.command,
+            model: instruction.model,
+          },
+          callback
+        );
+      } else {
+        // Execute with Claude (default)
+        result = await this.claudeExecutor.executeWithStreaming(
+          instruction.command,
+          projectPath,
+          {
+            context: instruction.context,
+            projectUrl: event.project.web_url,
+            branch: baseBranch,
+            event,
+            instruction: instruction.command,
+            model: instruction.model,
+          },
+          callback
+        );
+      }
 
       if (result.success) {
         await this.handleSuccess(event, instruction, result, baseBranch, projectPath);
@@ -350,17 +381,20 @@ export class EventProcessor {
 
   private async handleSuccess(
     event: GitLabWebhookEvent,
-    instruction: ClaudeInstruction,
+    instruction: AIInstruction,
     result: any,
     baseBranch: string,
     projectPath: string
   ): Promise<void> {
-    logger.info('Claude instruction executed successfully', {
+    const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
+
+    logger.info(`${providerName} instruction executed successfully`, {
       projectId: event.project.id,
       hasChanges: result.changes?.length > 0,
+      provider: instruction.provider,
     });
 
-    let responseMessage = '✅ Claude processed your request successfully.\n\n';
+    let responseMessage = `✅ ${providerName} processed your request successfully.\n\n`;
 
     if (result.output) {
       responseMessage += `${result.output}\n\n`;
@@ -440,15 +474,18 @@ export class EventProcessor {
 
   private async handleFailure(
     event: GitLabWebhookEvent,
-    instruction: ClaudeInstruction,
+    instruction: AIInstruction,
     result: any
   ): Promise<void> {
-    logger.warn('Claude instruction failed', {
+    const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
+
+    logger.warn(`${providerName} instruction failed`, {
       projectId: event.project.id,
       error: result.error,
+      provider: instruction.provider,
     });
 
-    const responseMessage = `❌ Claude encountered an error while processing your request:\n\n\`\`\`\n${result.error}\n\`\`\``;
+    const responseMessage = `❌ ${providerName} encountered an error while processing your request:\n\n\`\`\`\n${result.error}\n\`\`\``;
     await this.postComment(event, responseMessage);
   }
 
@@ -666,7 +703,7 @@ export class EventProcessor {
       }
 
       // Build the complete comment body
-      let commentBody = '🤖 **Claude Progress Report**\n\n';
+      let commentBody = `🤖 **AI Agent Progress Report**\n\n`;
 
       // Add the latest messages (keep last 10 to avoid too long comments)
       const recentMessages = this.progressMessages.slice(-10);

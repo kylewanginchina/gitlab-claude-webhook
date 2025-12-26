@@ -95,10 +95,17 @@ export interface GitLabWebhookEvent {
   repository?: Record<string, unknown>;
 }
 
-export interface ClaudeInstruction {
+import { AIProvider } from './common';
+
+// Legacy alias for backward compatibility
+export type ClaudeInstruction = AIInstruction;
+
+export interface AIInstruction {
   command: string;
   context: string;
   files?: string[];
   branch?: string;
   tag?: string;
+  provider: AIProvider;
+  model?: string;
 }

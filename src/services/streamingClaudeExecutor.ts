@@ -13,6 +13,7 @@ export interface ClaudeExecutionContext {
   timeoutMs?: number;
   event: GitLabWebhookEvent;
   instruction: string;
+  model?: string;
 }
 
 export interface StreamingProgressCallback {
@@ -144,7 +145,7 @@ export class StreamingClaudeExecutor {
         '--allowed-tools', // Correct parameter name (with hyphen)
         'Bash,Read,Write,Edit,Glob,Grep,LS,MultiEdit,NotebookEdit', // Specify allowed tools
         '--model',
-        'claude-sonnet-4-20250514', // Specify the model to use
+        context.model || config.anthropic.defaultModel, // Specify the model to use
         '--append-system-prompt',
         'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.', // Additional system prompt for automation
         fullPrompt, // The complete prompt including context
@@ -191,7 +192,6 @@ export class StreamingClaudeExecutor {
         progressBuffer += chunk;
 
         // Log raw output for debugging intermittent issues
-        console.log(`[CLAUDE STDOUT] ${chunk.trim()}`); // Force console output
         logger.debug('Claude stdout chunk', {
           chunk: chunk.trim(),
           chunkLength: chunk.length,
@@ -213,7 +213,6 @@ export class StreamingClaudeExecutor {
       claudeProcess.stderr?.on('data', async data => {
         const errorChunk = data.toString();
         errorOutput += errorChunk;
-        console.log(`[CLAUDE STDERR] ${errorChunk.trim()}`); // Force console output
         logger.debug('Claude stderr:', errorChunk);
 
         // Stream error output to user immediately with more context
