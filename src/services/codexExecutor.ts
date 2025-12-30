@@ -40,7 +40,7 @@ interface CodexJSONEvent {
 
 export class CodexExecutor {
   private projectManager: ProjectManager;
-  private defaultTimeoutMs = 600000; // 10 minutes
+  private defaultTimeoutMs = config.ai.timeoutMs;
 
   constructor() {
     this.projectManager = new ProjectManager();

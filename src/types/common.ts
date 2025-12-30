@@ -22,6 +22,7 @@ export interface Config {
   };
   ai: {
     defaultProvider: AIProvider;
+    timeoutMs: number;
   };
   workDir: string;
   logLevel: string;
