@@ -24,7 +24,7 @@ export interface StreamingProgressCallback {
 export class StreamingClaudeExecutor {
   private projectManager: ProjectManager;
   private gitlabService: GitLabService;
-  private defaultTimeoutMs = 600000; // 10 minutes
+  private defaultTimeoutMs = config.ai.timeoutMs;
 
   constructor() {
     this.projectManager = new ProjectManager();

@@ -74,14 +74,14 @@ export class ProjectManager {
     });
 
     try {
-      await git.clone(cloneUrl, projectPath, ['--depth', '1', '--branch', branch]);
+      await git.clone(cloneUrl, projectPath, ['--branch', branch]);
     } catch (error) {
       // If specific branch doesn't exist, clone default and checkout
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes('Remote branch') && errorMessage.includes('not found')) {
         logger.warn(`Branch ${branch} not found, cloning default branch and checking out`);
 
-        await git.clone(cloneUrl, projectPath, ['--depth', '1']);
+        await git.clone(cloneUrl, projectPath);
         const projectGit = simpleGit(projectPath);
 
         try {

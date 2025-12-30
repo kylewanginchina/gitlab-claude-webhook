@@ -53,6 +53,7 @@ export const config: Config = {
   },
   ai: {
     defaultProvider: getAIProvider('AI_DEFAULT_PROVIDER', 'claude'),
+    timeoutMs: parseInt(getEnvVar('AI_TIMEOUT_MS', '900000')), // Default 15 minutes
   },
   workDir: getEnvVar('WORK_DIR', '/tmp/gitlab-claude-work'),
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
