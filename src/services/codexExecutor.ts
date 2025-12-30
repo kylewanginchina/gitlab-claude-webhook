@@ -306,7 +306,7 @@ export class CodexExecutor {
     }
 
     // Add automation context
-    fullPrompt += `You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified.\n\n`;
+    fullPrompt += `You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.\n\n`;
 
     // Add the main command/instruction
     fullPrompt += `**Request:** ${command}`;
