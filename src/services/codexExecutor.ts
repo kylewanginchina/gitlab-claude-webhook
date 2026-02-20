@@ -106,9 +106,9 @@ export class CodexExecutor {
 
     // Set up abort handling
     const abortController = new AbortController();
-    let timedOut = false;
+    // let timedOut = false;
     const timeoutHandle = setTimeout(() => {
-      timedOut = true;
+      // timedOut = true;
       abortController.abort();
       callback.onError('⏰ Codex execution timed out').catch(err => {
         logger.error('Failed to send timeout error callback:', err);
