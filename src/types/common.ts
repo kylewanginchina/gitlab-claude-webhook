@@ -1,5 +1,22 @@
+import { GitLabWebhookEvent } from './gitlab';
+
 // AI Provider type
 export type AIProvider = 'claude' | 'codex';
+
+export interface AIExecutionContext {
+  context: string;
+  projectUrl: string;
+  branch: string;
+  timeoutMs?: number;
+  event: GitLabWebhookEvent;
+  instruction: string;
+  model?: string;
+}
+
+export interface StreamingProgressCallback {
+  onProgress: (message: string, isComplete?: boolean) => Promise<void>;
+  onError: (error: string) => Promise<void>;
+}
 
 export interface Config {
   anthropic: {
@@ -11,6 +28,7 @@ export interface Config {
     baseUrl: string;
     apiKey: string;
     defaultModel: string;
+    reasoningEffort: string;
   };
   gitlab: {
     baseUrl: string;

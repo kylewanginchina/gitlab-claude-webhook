@@ -42,6 +42,7 @@ export const config: Config = {
     baseUrl: getEnvVar('OPENAI_BASE_URL', 'https://api.openai.com'),
     apiKey: getEnvVar('OPENAI_API_KEY'),
     defaultModel: getEnvVar('CODEX_DEFAULT_MODEL', 'gpt-5.1-codex-max'),
+    reasoningEffort: getEnvVar('CODEX_REASONING_EFFORT', 'high'),
   },
   gitlab: {
     baseUrl: getEnvVar('GITLAB_BASE_URL', 'https://gitlab.com'),
