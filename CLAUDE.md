@@ -41,9 +41,9 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 1. **Webhook Reception** (`src/server/webhookServer.ts`) - Express server receives GitLab webhooks
 2. **Event Processing** (`src/services/eventProcessor.ts`) - Main orchestrator that extracts `@claude` or `@codex` instructions and manages the workflow
 3. **Project Management** (`src/services/projectManager.ts`) - Handles git operations, cloning, and branch management
-4. **AI Execution** - Provider-based execution:
-   - `src/services/streamingClaudeExecutor.ts` - Claude Code CLI with streaming progress
-   - `src/services/codexExecutor.ts` - OpenAI Codex CLI with JSONL streaming
+4. **AI Execution** - Provider-based execution via official SDKs:
+   - `src/services/streamingClaudeExecutor.ts` - Uses `@anthropic-ai/claude-agent-sdk` `query()` API with streaming messages
+   - `src/services/codexExecutor.ts` - Uses `@openai/codex-sdk` `Codex` class with `runStreamed()` events
 5. **MR Generation** (`src/utils/mrGenerator.ts`) - Creates smart merge requests with conventional commit titles and structured descriptions
 6. **GitLab Integration** (`src/services/gitlabService.ts`) - Handles all GitLab API interactions
 
@@ -56,19 +56,20 @@ This is a GitLab webhook service that integrates with Claude Code CLI to provide
 - Manages the full workflow from instruction to merge request creation
 - Provides real-time feedback via GitLab comments
 
-**StreamingClaudeExecutor** - Executes Claude Code CLI with:
+**StreamingClaudeExecutor** - Uses `@anthropic-ai/claude-agent-sdk`:
 
-- Real-time progress streaming back to GitLab
-- Automatic change detection and git operations
-- Enhanced error handling and debugging capabilities
-- Model selection via context parameter
+- Calls `query()` with `permissionMode: 'bypassPermissions'` for automated execution
+- Iterates over `SDKMessage` async generator for real-time streaming progress
+- Extracts progress from `assistant`, `tool_progress`, and `system` message types
+- Handles `SDKResultMessage` for success/error detection with cost and usage tracking
+- Supports abort via `AbortController` for timeout handling
 
-**CodexExecutor** - Executes OpenAI Codex CLI with:
+**CodexExecutor** - Uses `@openai/codex-sdk`:
 
-- Non-interactive `codex exec --full-auto --json` mode
-- JSONL event parsing for streaming progress
-- Model selection support
-- Comprehensive error handling
+- Creates `Codex` instance and starts threads with `approvalPolicy: 'never'` and `sandboxMode: 'danger-full-access'`
+- Uses `thread.runStreamed()` to receive `ThreadEvent` stream
+- Handles `item.started`, `item.completed`, `turn.completed`, and error events for progress
+- Supports `AbortSignal` for timeout handling
 
 **MRGenerator** - Intelligent merge request creation:
 
@@ -124,23 +125,27 @@ The service detects `@claude` and `@codex` mentions in:
 
 Optional model specification: `@claude[model=xxx]` or `@codex[model=xxx]`
 
-## AI CLI Integration
+## AI SDK Integration
 
-The service requires AI CLI tools to be installed and accessible:
+The service uses official SDKs (not CLI spawning) for AI execution:
 
-**Claude Code CLI:**
+**Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`):
+- Uses `query()` function to execute prompts with streaming `SDKMessage` events
+- Configured with `permissionMode: 'bypassPermissions'` for automated execution
+- The SDK spawns the Claude Code binary internally
+
+**OpenAI Codex SDK** (`@openai/codex-sdk`):
+- Uses `Codex` class with `startThread()` and `thread.runStreamed()` for streaming events
+- Configured with `approvalPolicy: 'never'` and `sandboxMode: 'danger-full-access'`
+- The SDK spawns the Codex CLI binary internally
+
+Both SDKs require their respective CLI tools to be installed:
 ```bash
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code  # Required by claude-agent-sdk
+npm install -g @openai/codex              # Required by codex-sdk
 ```
 
-**OpenAI Codex CLI:**
-```bash
-npm install -g @openai/codex
-```
-
-For Docker deployments, both CLIs are installed globally in the container. For local development, install with the commands above.
-
-**Important**: Claude Code must run with non-root privileges due to `--dangerously-skip-permissions` parameter requirement.
+For Docker deployments, both CLIs are installed globally in the container.
 
 ## Codex Custom Provider Configuration
 

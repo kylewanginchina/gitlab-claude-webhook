@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { query, type SDKResultMessage, type SDKAssistantMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import { ProcessResult, FileChange } from '../types/common';
@@ -25,17 +25,14 @@ export class ClaudeExecutor {
     context: ClaudeExecutionContext
   ): Promise<ProcessResult> {
     try {
-      logger.info('Executing Claude command', {
+      logger.info('Executing Claude command via SDK', {
         command: command.substring(0, 100),
         projectPath,
         context: context.context,
       });
 
-      // Check if claude CLI is available
-      await this.checkClaudeCliAvailability();
-
-      // Execute claude command
-      const result = await this.runClaudeCommand(command, projectPath, context);
+      // Execute claude command via SDK
+      const result = await this.runClaudeWithSDK(command, projectPath, context);
 
       // Check for file changes
       const changes = await this.getFileChanges(projectPath);
@@ -54,114 +51,91 @@ export class ClaudeExecutor {
     }
   }
 
-  private async checkClaudeCliAvailability(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const process = spawn('claude', ['--version'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      let output = '';
-      let error = '';
-
-      process.stdout?.on('data', data => {
-        output += data.toString();
-      });
-
-      process.stderr?.on('data', data => {
-        error += data.toString();
-      });
-
-      process.on('close', code => {
-        if (code === 0) {
-          logger.debug('Claude CLI is available', { version: output.trim() });
-          resolve();
-        } else {
-          reject(new Error(`Claude CLI not found or not working: ${error || 'Unknown error'}`));
-        }
-      });
-
-      process.on('error', err => {
-        reject(new Error(`Failed to check Claude CLI: ${err.message}`));
-      });
-    });
-  }
-
-  private async runClaudeCommand(
+  private async runClaudeWithSDK(
     command: string,
     projectPath: string,
     context: ClaudeExecutionContext
   ): Promise<{ output: string; error?: string }> {
-    return new Promise((resolve, reject) => {
-      const env = {
-        ...process.env,
-        ANTHROPIC_BASE_URL: config.anthropic.baseUrl,
-        ANTHROPIC_AUTH_TOKEN: config.anthropic.authToken,
-      };
+    const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
 
-      // Prepare claude command with context
-      const claudeArgs = ['--non-interactive', command];
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      ANTHROPIC_BASE_URL: config.anthropic.baseUrl,
+      ANTHROPIC_API_KEY: config.anthropic.authToken,
+    };
 
-      const claudeProcess = spawn('claude', claudeArgs, {
-        cwd: projectPath,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
+    // Build prompt with context
+    let prompt = command;
+    if (context.context) {
+      prompt = `Context: ${context.context}\nProject: ${context.projectUrl}\nBranch: ${context.branch}\n\n${command}`;
+    }
+
+    const abortController = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      abortController.abort();
+    }, timeoutMs);
+
+    let output = '';
+    let queryHandle: Query | undefined;
+
+    try {
+      queryHandle = query({
+        prompt,
+        options: {
+          cwd: projectPath,
+          model: config.anthropic.defaultModel,
+          permissionMode: 'bypassPermissions',
+          allowDangerouslySkipPermissions: true,
+          env,
+          abortController,
+          persistSession: false,
+        },
       });
 
-      let output = '';
-      let errorOutput = '';
-      // eslint-disable-next-line prefer-const
-      let timeoutHandle: NodeJS.Timeout;
-
-      // Set timeout
-      const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
-      // eslint-disable-next-line prefer-const
-      timeoutHandle = setTimeout(() => {
-        claudeProcess.kill('SIGTERM');
-        reject(new Error(`Claude execution timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      claudeProcess.stdout?.on('data', data => {
-        output += data.toString();
-      });
-
-      claudeProcess.stderr?.on('data', data => {
-        errorOutput += data.toString();
-      });
-
-      claudeProcess.on('close', code => {
-        clearTimeout(timeoutHandle);
-
-        if (code === 0) {
-          logger.info('Claude command executed successfully', {
-            outputLength: output.length,
-            projectPath,
-          });
-          resolve({ output: output.trim() });
-        } else {
-          logger.warn('Claude command failed with non-zero exit code', {
-            code,
-            error: errorOutput,
-            projectPath,
-          });
-          reject(
-            new Error(`Claude execution failed (code ${code}): ${errorOutput || 'No error output'}`)
-          );
+      for await (const message of queryHandle) {
+        // Capture output from assistant messages
+        if (message.type === 'assistant') {
+          const assistantMsg = message as SDKAssistantMessage;
+          if (assistantMsg.message?.content) {
+            for (const block of assistantMsg.message.content) {
+              if ('text' in block && typeof block.text === 'string') {
+                output += block.text + '\n';
+              }
+            }
+          }
         }
-      });
 
-      claudeProcess.on('error', err => {
-        clearTimeout(timeoutHandle);
-        reject(new Error(`Failed to execute Claude: ${err.message}`));
-      });
-
-      // Provide context to claude if needed
-      if (context.context) {
-        const contextMessage = `Context: ${context.context}\\nProject: ${context.projectUrl}\\nBranch: ${context.branch}\\n\\n`;
-        claudeProcess.stdin?.write(contextMessage);
+        // Handle result messages
+        if (message.type === 'result') {
+          const resultMsg = message as SDKResultMessage;
+          if (resultMsg.subtype === 'success') {
+            if ('result' in resultMsg && resultMsg.result) {
+              output = resultMsg.result;
+            }
+            logger.info('Claude command executed successfully via SDK', {
+              outputLength: output.length,
+              projectPath,
+            });
+          } else {
+            const errors = 'errors' in resultMsg ? resultMsg.errors : [];
+            throw new Error(
+              `Claude execution failed (${resultMsg.subtype}): ${errors?.join('; ') || 'No error output'}`
+            );
+          }
+        }
       }
 
-      claudeProcess.stdin?.end();
-    });
+      return { output: output.trim() };
+    } finally {
+      clearTimeout(timeoutHandle);
+      if (queryHandle) {
+        try {
+          queryHandle.close();
+        } catch {
+          // Query may already be closed
+        }
+      }
+    }
   }
 
   private async getFileChanges(projectPath: string): Promise<FileChange[]> {
