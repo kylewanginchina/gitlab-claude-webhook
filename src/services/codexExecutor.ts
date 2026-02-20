@@ -1,7 +1,12 @@
 import { Codex, type ThreadEvent, type ThreadItem } from '@openai/codex-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
-import { ProcessResult, FileChange, AIExecutionContext, StreamingProgressCallback } from '../types/common';
+import {
+  ProcessResult,
+  FileChange,
+  AIExecutionContext,
+  StreamingProgressCallback,
+} from '../types/common';
 import { ProjectManager } from './projectManager';
 
 export class CodexExecutor {
