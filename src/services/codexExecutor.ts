@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { Codex, type ThreadEvent, type ThreadItem } from '@openai/codex-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import { ProcessResult, FileChange } from '../types/common';
@@ -20,24 +20,6 @@ export interface StreamingProgressCallback {
   onError: (error: string) => Promise<void>;
 }
 
-interface CodexJSONEvent {
-  type: string;
-  item?: {
-    id?: string;
-    type?: string;
-    text?: string;
-    command?: string;
-    aggregated_output?: string;
-    status?: string;
-    exit_code?: number;
-  };
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-  error?: string;
-}
-
 export class CodexExecutor {
   private projectManager: ProjectManager;
   private defaultTimeoutMs = 900000; // 15 minutes
@@ -53,21 +35,18 @@ export class CodexExecutor {
     callback: StreamingProgressCallback
   ): Promise<ProcessResult> {
     try {
-      logger.info('Starting streaming Codex execution', {
+      logger.info('Starting streaming Codex execution via SDK', {
         command: command.substring(0, 100),
         projectPath,
         context: context.context,
         model: context.model,
       });
 
-      // Check if codex CLI is available
-      await this.checkCodexCliAvailability();
-
       // Post initial progress message
       await callback.onProgress('🚀 Codex is analyzing your request...', false);
 
-      // Execute codex command with streaming
-      const result = await this.runCodexCommandStreaming(command, projectPath, context, callback);
+      // Execute codex command with streaming via SDK
+      const result = await this.runCodexWithSDK(command, projectPath, context, callback);
 
       // Check for file changes
       const changes = await this.getFileChanges(projectPath);
@@ -96,198 +75,85 @@ export class CodexExecutor {
     }
   }
 
-  private async checkCodexCliAvailability(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const childProcess = spawn('codex', ['--version'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      let output = '';
-      let error = '';
-
-      childProcess.stdout?.on('data', data => {
-        output += data.toString();
-      });
-
-      childProcess.stderr?.on('data', data => {
-        error += data.toString();
-      });
-
-      childProcess.on('close', code => {
-        logger.info('Codex CLI availability check', {
-          code,
-          output: output.trim(),
-          error: error.trim(),
-          userId: process.getuid?.(),
-          userName: process.env.USER || 'unknown',
-        });
-
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`Codex CLI not found or not working: ${error || 'Unknown error'}`));
-        }
-      });
-
-      childProcess.on('error', err => {
-        reject(new Error(`Failed to check Codex CLI: ${err.message}`));
-      });
-    });
-  }
-
-  private async runCodexCommandStreaming(
+  private async runCodexWithSDK(
     command: string,
     projectPath: string,
     context: CodexExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    return new Promise((resolve, reject) => {
-      // Set up environment with API key
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-      };
+    const fullPrompt = this.buildPromptWithContext(command, context);
+    const model = context.model || config.openai.defaultModel;
+    const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
+    const reasoningEffort = process.env.CODEX_REASONING_EFFORT || 'high';
 
-      // Use CODEX_API_KEY or OPENAI_API_KEY for authentication
-      const apiKey = config.openai.apiKey;
-      if (apiKey) {
-        env.CODEX_API_KEY = apiKey;
+    logger.info('Executing Codex via SDK', {
+      model,
+      cwd: projectPath,
+      promptLength: fullPrompt.length,
+      reasoningEffort,
+    });
+
+    // Create Codex SDK instance
+    const codex = new Codex({
+      apiKey: config.openai.apiKey,
+      baseUrl: config.openai.baseUrl,
+    });
+
+    // Start a thread with full-auto equivalent settings
+    const thread = codex.startThread({
+      model,
+      workingDirectory: projectPath,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      skipGitRepoCheck: true,
+      modelReasoningEffort: reasoningEffort as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+    });
+
+    // Set up abort handling
+    const abortController = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      abortController.abort();
+      callback.onError('⏰ Codex execution timed out');
+    }, timeoutMs);
+
+    let lastProgressTime = Date.now();
+    let lastAgentMessage = '';
+
+    try {
+      const { events } = await thread.runStreamed(fullPrompt, {
+        signal: abortController.signal,
+      });
+
+      for await (const event of events) {
+        const progressMessage = this.extractProgressFromEvent(event);
+        if (progressMessage) {
+          const now = Date.now();
+          // Throttle progress updates to every 2 seconds, except for turn completion
+          if (now - lastProgressTime > 2000 || event.type === 'turn.completed') {
+            await callback.onProgress(progressMessage, false);
+            lastProgressTime = now;
+          }
+        }
+
+        // Capture the final agent message
+        if (event.type === 'item.completed' && event.item.type === 'agent_message') {
+          lastAgentMessage = event.item.text;
+        }
+
+        // Handle errors
+        if (event.type === 'turn.failed') {
+          throw new Error(`Codex execution failed: ${event.error.message}`);
+        }
+
+        if (event.type === 'error') {
+          throw new Error(`Codex stream error: ${event.message}`);
+        }
       }
 
-      // Build the complete prompt with context
-      const fullPrompt = this.buildPromptWithContext(command, context);
-
-      // Determine the model to use
-      const model = context.model || config.openai.defaultModel;
-
-      // Build Codex CLI arguments for non-interactive execution
-      // --dangerously-bypass-approvals-and-sandbox includes full-auto behavior
-      const codexArgs = [
-        'exec',
-        '--json', // JSONL output for streaming
-        '--dangerously-bypass-approvals-and-sandbox', // Bypass sandbox and approvals (includes full-auto)
-        '--model',
-        model,
-        '--skip-git-repo-check', // Allow running outside git repos if needed
-        fullPrompt,
-      ];
-
-      // Log the exact command being executed for debugging
-      const fullCommand = `codex ${codexArgs.map(arg => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`;
-      logger.debug(`[FULL CODEX COMMAND] ${fullCommand}`);
-      logger.info('Executing Codex CLI', {
-        command: 'codex',
-        args: codexArgs,
-        model,
-        cwd: projectPath,
-        userId: process.getuid?.(),
-        userName: process.env.USER || 'unknown',
-      });
-
-      const codexProcess = spawn('codex', codexArgs, {
-        cwd: projectPath,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      let output = '';
-      let errorOutput = '';
-      let lastProgressTime = Date.now();
-      let lastAgentMessage = '';
-      // eslint-disable-next-line prefer-const
-      let timeoutHandle: NodeJS.Timeout;
-
-      // Set timeout
-      const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
-      // eslint-disable-next-line prefer-const
-      timeoutHandle = setTimeout(() => {
-        codexProcess.kill('SIGTERM');
-        callback.onError('⏰ Codex execution timed out');
-        reject(new Error(`Codex execution timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      // Handle streaming stdout (JSONL format)
-      codexProcess.stdout?.on('data', async data => {
-        const chunk = data.toString();
-        output += chunk;
-
-        // Log raw output for debugging
-        logger.debug('Codex stdout chunk', {
-          chunk: chunk.trim(),
-          chunkLength: chunk.length,
-        });
-
-        // Parse JSONL events
-        const lines = chunk.split('\n').filter((line: string) => line.trim());
-        for (const line of lines) {
-          try {
-            const event = JSON.parse(line) as CodexJSONEvent;
-            const progressMessage = this.extractProgressFromEvent(event);
-
-            if (progressMessage) {
-              const now = Date.now();
-              // Throttle progress updates to every 2 seconds
-              if (now - lastProgressTime > 2000 || event.type === 'turn.completed') {
-                await callback.onProgress(progressMessage, false);
-                lastProgressTime = now;
-              }
-            }
-
-            // Capture the final agent message
-            if (event.item?.type === 'agent_message' && event.item?.text) {
-              lastAgentMessage = event.item.text;
-            }
-          } catch {
-            // Not valid JSON, might be partial line
-            logger.debug('Could not parse Codex JSONL line:', line);
-          }
-        }
-      });
-
-      codexProcess.stderr?.on('data', async data => {
-        const errorChunk = data.toString();
-        errorOutput += errorChunk;
-        logger.debug('Codex stderr:', errorChunk);
-
-        // Stream error output to user immediately
-        if (errorChunk.trim()) {
-          await callback.onProgress(`⚠️ ${errorChunk.trim()}`, false);
-        }
-      });
-
-      codexProcess.on('close', async code => {
-        clearTimeout(timeoutHandle);
-
-        if (code === 0) {
-          logger.info('Codex command executed successfully', {
-            outputLength: output.length,
-            projectPath,
-          });
-          resolve({ output: lastAgentMessage || output.trim() });
-        } else {
-          // Enhanced error message handling
-          let errorMessage = errorOutput.trim();
-          if (!errorMessage) {
-            errorMessage = `Command exited with code ${code}. Output: ${output.slice(-200).trim() || 'No output'}`;
-          }
-
-          logger.warn('Codex command failed', {
-            code,
-            error: errorMessage,
-            stdout: output.slice(-500),
-            projectPath,
-          });
-
-          reject(new Error(`Codex execution failed (code ${code}): ${errorMessage}`));
-        }
-      });
-
-      codexProcess.on('error', err => {
-        clearTimeout(timeoutHandle);
-        reject(new Error(`Failed to execute Codex: ${err.message}`));
-      });
-
-      codexProcess.stdin?.end();
-    });
+      return { output: lastAgentMessage || 'Codex completed execution.' };
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   }
 
   private buildPromptWithContext(command: string, context: CodexExecutionContext): string {
@@ -321,7 +187,7 @@ export class CodexExecutor {
     return fullPrompt;
   }
 
-  private extractProgressFromEvent(event: CodexJSONEvent): string {
+  private extractProgressFromEvent(event: ThreadEvent): string {
     switch (event.type) {
       case 'thread.started':
         return '🔄 Started processing...';
@@ -331,24 +197,7 @@ export class CodexExecutor {
 
       case 'item.started':
       case 'item.completed':
-        if (event.item) {
-          switch (event.item.type) {
-            case 'reasoning':
-              return event.item.text ? `💭 ${event.item.text}` : '';
-            case 'command_execution':
-              if (event.item.status === 'in_progress') {
-                return `⚙️ Running: ${event.item.command}`;
-              } else if (event.item.status === 'completed') {
-                return `✓ Completed: ${event.item.command}`;
-              }
-              break;
-            case 'file_change':
-              return `📝 File changed`;
-            case 'agent_message':
-              return ''; // Final message, don't show as progress
-          }
-        }
-        break;
+        return this.extractProgressFromItem(event.item, event.type === 'item.completed');
 
       case 'turn.completed':
         if (event.usage) {
@@ -356,8 +205,41 @@ export class CodexExecutor {
         }
         break;
 
+      case 'turn.failed':
+        return `❌ Error: ${event.error?.message || 'Unknown error'}`;
+
       case 'error':
-        return `❌ Error: ${event.error || 'Unknown error'}`;
+        return `❌ Error: ${event.message || 'Unknown error'}`;
+    }
+
+    return '';
+  }
+
+  private extractProgressFromItem(item: ThreadItem, isCompleted: boolean): string {
+    switch (item.type) {
+      case 'reasoning':
+        return item.text ? `💭 ${item.text}` : '';
+
+      case 'command_execution':
+        if (!isCompleted && item.status === 'in_progress') {
+          return `⚙️ Running: ${item.command}`;
+        } else if (isCompleted) {
+          return `✓ Completed: ${item.command}`;
+        }
+        break;
+
+      case 'file_change':
+        if (isCompleted && item.changes) {
+          const paths = item.changes.map(c => c.path).join(', ');
+          return `📝 Files changed: ${paths}`;
+        }
+        return '📝 File changed';
+
+      case 'agent_message':
+        return ''; // Final message, don't show as progress
+
+      case 'error':
+        return `❌ ${item.message}`;
     }
 
     return '';
