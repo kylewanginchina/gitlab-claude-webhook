@@ -55,7 +55,13 @@ export class CodexExecutor {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('Streaming Codex execution failed:', error);
 
-      await callback.onError(`❌ Codex execution failed: ${errorMessage}`);
+      // Avoid duplicate error reporting if timeout already sent an error callback
+      const isAbortError = error instanceof Error && error.name === 'AbortError';
+      if (!isAbortError) {
+        await callback.onError(`❌ Codex execution failed: ${errorMessage}`).catch(err => {
+          logger.error('Failed to send error callback:', err);
+        });
+      }
 
       return {
         success: false,
@@ -100,9 +106,13 @@ export class CodexExecutor {
 
     // Set up abort handling
     const abortController = new AbortController();
+    let timedOut = false;
     const timeoutHandle = setTimeout(() => {
+      timedOut = true;
       abortController.abort();
-      callback.onError('⏰ Codex execution timed out').catch(() => {});
+      callback.onError('⏰ Codex execution timed out').catch(err => {
+        logger.error('Failed to send timeout error callback:', err);
+      });
     }, timeoutMs);
 
     let lastProgressTime = Date.now();
@@ -131,7 +141,7 @@ export class CodexExecutor {
 
         // Handle errors
         if (event.type === 'turn.failed') {
-          throw new Error(`Codex execution failed: ${event.error.message}`);
+          throw new Error(`Codex execution failed: ${event.error?.message || 'Unknown error'}`);
         }
 
         if (event.type === 'error') {
