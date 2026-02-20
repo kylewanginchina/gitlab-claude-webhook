@@ -1,4 +1,9 @@
-import { query, type SDKResultMessage, type SDKAssistantMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type SDKResultMessage,
+  type SDKAssistantMessage,
+  type Query,
+} from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import { ProcessResult, FileChange } from '../types/common';

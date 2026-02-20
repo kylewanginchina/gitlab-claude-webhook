@@ -1,4 +1,10 @@
-import { query, type SDKMessage, type SDKResultMessage, type SDKAssistantMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type SDKMessage,
+  type SDKResultMessage,
+  type SDKAssistantMessage,
+  type Query,
+} from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import { ProcessResult, FileChange } from '../types/common';
@@ -117,11 +123,22 @@ export class StreamingClaudeExecutor {
           model,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
-          allowedTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'LS', 'MultiEdit', 'NotebookEdit'],
+          allowedTools: [
+            'Bash',
+            'Read',
+            'Write',
+            'Edit',
+            'Glob',
+            'Grep',
+            'LS',
+            'MultiEdit',
+            'NotebookEdit',
+          ],
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
-            append: 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+            append:
+              'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
           },
           env,
           abortController,
@@ -165,7 +182,8 @@ export class StreamingClaudeExecutor {
             });
           } else {
             const errors = 'errors' in resultMsg ? resultMsg.errors : [];
-            const errorStr = errors?.join('; ') || `Execution ended with status: ${resultMsg.subtype}`;
+            const errorStr =
+              errors?.join('; ') || `Execution ended with status: ${resultMsg.subtype}`;
             logger.warn('Claude SDK execution ended with non-success', {
               subtype: resultMsg.subtype,
               errors,
