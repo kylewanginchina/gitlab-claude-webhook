@@ -1,24 +1,8 @@
 import { Codex, type ThreadEvent, type ThreadItem } from '@openai/codex-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
-import { ProcessResult, FileChange } from '../types/common';
+import { ProcessResult, FileChange, AIExecutionContext, StreamingProgressCallback } from '../types/common';
 import { ProjectManager } from './projectManager';
-import { GitLabWebhookEvent } from '../types/gitlab';
-
-export interface CodexExecutionContext {
-  context: string;
-  projectUrl: string;
-  branch: string;
-  timeoutMs?: number;
-  event: GitLabWebhookEvent;
-  instruction: string;
-  model?: string;
-}
-
-export interface StreamingProgressCallback {
-  onProgress: (message: string, isComplete?: boolean) => Promise<void>;
-  onError: (error: string) => Promise<void>;
-}
 
 export class CodexExecutor {
   private projectManager: ProjectManager;
@@ -31,7 +15,7 @@ export class CodexExecutor {
   public async executeWithStreaming(
     command: string,
     projectPath: string,
-    context: CodexExecutionContext,
+    context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<ProcessResult> {
     try {
@@ -78,13 +62,13 @@ export class CodexExecutor {
   private async runCodexWithSDK(
     command: string,
     projectPath: string,
-    context: CodexExecutionContext,
+    context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
     const fullPrompt = this.buildPromptWithContext(command, context);
     const model = context.model || config.openai.defaultModel;
     const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
-    const reasoningEffort = process.env.CODEX_REASONING_EFFORT || 'high';
+    const reasoningEffort = config.openai.reasoningEffort;
 
     logger.info('Executing Codex via SDK', {
       model,
@@ -113,7 +97,7 @@ export class CodexExecutor {
     const abortController = new AbortController();
     const timeoutHandle = setTimeout(() => {
       abortController.abort();
-      callback.onError('⏰ Codex execution timed out');
+      callback.onError('⏰ Codex execution timed out').catch(() => {});
     }, timeoutMs);
 
     let lastProgressTime = Date.now();
@@ -156,7 +140,7 @@ export class CodexExecutor {
     }
   }
 
-  private buildPromptWithContext(command: string, context: CodexExecutionContext): string {
+  private buildPromptWithContext(command: string, context: AIExecutionContext): string {
     let fullPrompt = '';
 
     // Add context information if available

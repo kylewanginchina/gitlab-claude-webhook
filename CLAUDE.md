@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Multi-Provider AI Support
 
-This project supports both **Claude Code** and **OpenAI Codex** as AI providers. Users can specify the provider via mentions:
-- `@claude` - Uses Claude Code CLI (default)
-- `@codex` - Uses OpenAI Codex CLI
+This project supports both **Claude Agent SDK** and **OpenAI Codex SDK** as AI providers. Users can specify the provider via mentions:
+- `@claude` - Uses Claude Agent SDK (default)
+- `@codex` - Uses OpenAI Codex SDK
 - `@claude[model=xxx]` or `@codex[model=xxx]` - Specify custom model
 
 ## Development Commands
@@ -34,7 +34,7 @@ docker-compose logs -f gitlab-claude-webhook
 
 ## Architecture Overview
 
-This is a GitLab webhook service that integrates with Claude Code CLI to provide AI-powered code assistance directly from GitLab issues, merge requests, and comments.
+This is a GitLab webhook service that integrates with Claude Agent SDK to provide AI-powered code assistance directly from GitLab issues, merge requests, and comments.
 
 ### Core Flow
 
@@ -163,7 +163,7 @@ Provider name is auto-extracted from URL (e.g., `88code.org` → `88code`).
 ## Branch and MR Workflow
 
 1. Service creates timestamped branches (format: `claude-YYYYMMDDTHHMMSS-XXXXXX`)
-2. Claude Code CLI executes in the project context
+2. AI SDK executes in the project context
 3. Changes are committed and pushed to the new branch
 4. Smart merge request is created with:
    - Conventional commit title (e.g., `feat(api): add user authentication`)
@@ -183,9 +183,9 @@ Provider name is auto-extracted from URL (e.g., `88code.org` → `88code`).
 
 ### Common Issues
 
-**Claude Code Execution Failures**:
+**Claude Execution Failures**:
 - Check logs for detailed error information and execution context
-- Verify Claude Code CLI is properly installed (`claude --version`)
+- Verify Claude Code CLI is properly installed (`claude --version`) — required by the Agent SDK
 - Ensure ANTHROPIC_AUTH_TOKEN is valid and has sufficient credits
 - Review execution logs for authentication or network issues
 
@@ -193,7 +193,7 @@ Provider name is auto-extracted from URL (e.g., `88code.org` → `88code`).
 - **FIXED**: Issue was caused by aggressive exploration system prompt that forced Claude to explore entire project structure, causing timeouts in large repositories
 - **FIXED**: Removed `Bash(git:*)` tool restriction that could cause parameter parsing issues
 - **FIXED**: Simplified system prompt to avoid mandatory exploration that leads to timeouts
-- Enhanced logging captures Claude Code stdout/stderr for debugging
+- Enhanced logging captures SDK execution output for debugging
 - Check service logs with `LOG_LEVEL=debug` for detailed execution traces
 - Verify system resources and network connectivity
 

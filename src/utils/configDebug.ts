@@ -31,6 +31,7 @@ export function debugConfig(): void {
   console.log(`OpenAI Base URL: ${config.openai.baseUrl}`);
   console.log(`OpenAI API Key: ${config.openai.apiKey ? '********' : 'NOT SET'}`);
   console.log(`Codex Default Model: ${config.openai.defaultModel}`);
+  console.log(`Codex Reasoning Effort: ${config.openai.reasoningEffort}`);
 
   // GitLab Settings
   console.log(`\n[GitLab]`);

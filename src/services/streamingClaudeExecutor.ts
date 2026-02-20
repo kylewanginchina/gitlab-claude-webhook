@@ -1,46 +1,21 @@
-import {
-  query,
-  type SDKMessage,
-  type SDKResultMessage,
-  type SDKAssistantMessage,
-  type Query,
-} from '@anthropic-ai/claude-agent-sdk';
+import { query, type SDKMessage, type SDKResultMessage, type SDKAssistantMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
-import { ProcessResult, FileChange } from '../types/common';
+import { ProcessResult, FileChange, AIExecutionContext, StreamingProgressCallback } from '../types/common';
 import { ProjectManager } from './projectManager';
-import { GitLabService } from './gitlabService';
-import { GitLabWebhookEvent } from '../types/gitlab';
-
-export interface ClaudeExecutionContext {
-  context: string;
-  projectUrl: string;
-  branch: string;
-  timeoutMs?: number;
-  event: GitLabWebhookEvent;
-  instruction: string;
-  model?: string;
-}
-
-export interface StreamingProgressCallback {
-  onProgress: (message: string, isComplete?: boolean) => Promise<void>;
-  onError: (error: string) => Promise<void>;
-}
 
 export class StreamingClaudeExecutor {
   private projectManager: ProjectManager;
-  private gitlabService: GitLabService;
   private defaultTimeoutMs = 600000; // 10 minutes
 
   constructor() {
     this.projectManager = new ProjectManager();
-    this.gitlabService = new GitLabService();
   }
 
   public async executeWithStreaming(
     command: string,
     projectPath: string,
-    context: ClaudeExecutionContext,
+    context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<ProcessResult> {
     try {
@@ -86,7 +61,7 @@ export class StreamingClaudeExecutor {
   private async runClaudeWithSDK(
     command: string,
     projectPath: string,
-    context: ClaudeExecutionContext,
+    context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
     const fullPrompt = this.buildPromptWithContext(command, context);
@@ -108,7 +83,7 @@ export class StreamingClaudeExecutor {
     const abortController = new AbortController();
     const timeoutHandle = setTimeout(() => {
       abortController.abort();
-      callback.onError('⏰ Claude execution timed out');
+      callback.onError('⏰ Claude execution timed out').catch(() => {});
     }, timeoutMs);
 
     let output = '';
@@ -123,26 +98,14 @@ export class StreamingClaudeExecutor {
           model,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
-          allowedTools: [
-            'Bash',
-            'Read',
-            'Write',
-            'Edit',
-            'Glob',
-            'Grep',
-            'LS',
-            'MultiEdit',
-            'NotebookEdit',
-          ],
+          allowedTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'LS', 'MultiEdit', 'NotebookEdit'],
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
-            append:
-              'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+            append: 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
           },
           env,
           abortController,
-          persistSession: false,
         },
       });
 
@@ -182,8 +145,7 @@ export class StreamingClaudeExecutor {
             });
           } else {
             const errors = 'errors' in resultMsg ? resultMsg.errors : [];
-            const errorStr =
-              errors?.join('; ') || `Execution ended with status: ${resultMsg.subtype}`;
+            const errorStr = errors?.join('; ') || `Execution ended with status: ${resultMsg.subtype}`;
             logger.warn('Claude SDK execution ended with non-success', {
               subtype: resultMsg.subtype,
               errors,
@@ -206,7 +168,7 @@ export class StreamingClaudeExecutor {
     }
   }
 
-  private buildPromptWithContext(command: string, context: ClaudeExecutionContext): string {
+  private buildPromptWithContext(command: string, context: AIExecutionContext): string {
     let fullPrompt = '';
 
     // Add context information if available
@@ -247,19 +209,20 @@ export class StreamingClaudeExecutor {
       case 'assistant': {
         const assistantMsg = message as SDKAssistantMessage;
         if (assistantMsg.message?.content) {
+          let textProgress = '';
           for (const block of assistantMsg.message.content) {
             if ('type' in block && block.type === 'tool_use' && 'name' in block) {
               return `⚙️ Using tool: ${block.name}`;
             }
-          }
-          // Check for text content
-          for (const block of assistantMsg.message.content) {
-            if ('text' in block && typeof block.text === 'string') {
+            if (!textProgress && 'text' in block && typeof block.text === 'string') {
               const text = block.text.trim();
               if (text.length > 10 && text.length < 200) {
-                return `🤖 ${text}`;
+                textProgress = `🤖 ${text}`;
               }
             }
+          }
+          if (textProgress) {
+            return textProgress;
           }
         }
         break;
@@ -289,90 +252,4 @@ export class StreamingClaudeExecutor {
     }
   }
 
-  private async commitAndPushChanges(
-    projectPath: string,
-    context: ClaudeExecutionContext,
-    changes: FileChange[],
-    callback: StreamingProgressCallback
-  ): Promise<void> {
-    try {
-      await callback.onProgress('📤 Committing and pushing changes...', false);
-
-      const commitMessage = `Claude: ${context.instruction.substring(0, 50)}${context.instruction.length > 50 ? '...' : ''}\n\n🤖 Generated with Claude Code Webhook`;
-
-      // Use switchToAndPushBranch for Claude branches, commitAndPush for existing branches
-      if (context.branch.startsWith('claude-')) {
-        await this.projectManager.switchToAndPushBranch(projectPath, context.branch, commitMessage);
-      } else {
-        await this.projectManager.commitAndPush(projectPath, commitMessage, context.branch);
-      }
-
-      await callback.onProgress(
-        `✅ Successfully pushed ${changes.length} file changes to ${context.branch}`,
-        false
-      );
-
-      logger.info('Changes committed and pushed', {
-        changesCount: changes.length,
-        branch: context.branch,
-      });
-    } catch (error) {
-      logger.error('Failed to commit and push changes:', error);
-      const errorMessage = `Failed to push changes: ${error instanceof Error ? error.message : String(error)}`;
-      await callback.onError(errorMessage);
-      throw error;
-    }
-  }
-}
-
-// Compatibility wrapper for non-streaming execution
-export class ClaudeExecutor {
-  private streamingExecutor: StreamingClaudeExecutor;
-
-  constructor() {
-    this.streamingExecutor = new StreamingClaudeExecutor();
-  }
-
-  public async execute(
-    command: string,
-    projectPath: string,
-    context: ClaudeExecutionContext
-  ): Promise<ProcessResult> {
-    // Create a simple callback that collects all messages
-    let finalOutput = '';
-
-    const callback: StreamingProgressCallback = {
-      onProgress: async (message: string) => {
-        finalOutput += message + '\n';
-        logger.info('Claude progress:', message);
-      },
-      onError: async (error: string) => {
-        finalOutput += `ERROR: ${error}\n`;
-        logger.error('Claude error:', error);
-      },
-    };
-
-    const result = await this.streamingExecutor.executeWithStreaming(
-      command,
-      projectPath,
-      context,
-      callback
-    );
-
-    // Include progress messages in output
-    if (finalOutput && result.success) {
-      result.output = `${finalOutput}\n${result.output || ''}`;
-    }
-
-    return result;
-  }
-
-  public async executeWithCommit(
-    command: string,
-    projectPath: string,
-    context: ClaudeExecutionContext
-  ): Promise<ProcessResult> {
-    // For backward compatibility, use the streaming version
-    return this.execute(command, projectPath, context);
-  }
 }
