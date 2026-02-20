@@ -60,7 +60,13 @@ export class StreamingClaudeExecutor {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('Streaming Claude execution failed:', error);
 
-      await callback.onError(`❌ Claude execution failed: ${errorMessage}`);
+      // Avoid duplicate error reporting if timeout already sent an error callback
+      const isAbortError = error instanceof Error && error.name === 'AbortError';
+      if (!isAbortError) {
+        await callback.onError(`❌ Claude execution failed: ${errorMessage}`).catch(err => {
+          logger.error('Failed to send error callback:', err);
+        });
+      }
 
       return {
         success: false,
@@ -79,8 +85,12 @@ export class StreamingClaudeExecutor {
     const model = context.model || config.anthropic.defaultModel;
     const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
 
-    const env: Record<string, string | undefined> = {
-      ...process.env,
+    const env: Record<string, string> = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined
+        )
+      ),
       ANTHROPIC_BASE_URL: config.anthropic.baseUrl,
       ANTHROPIC_API_KEY: config.anthropic.authToken,
     };
@@ -92,9 +102,13 @@ export class StreamingClaudeExecutor {
     });
 
     const abortController = new AbortController();
+    let timedOut = false;
     const timeoutHandle = setTimeout(() => {
+      timedOut = true;
       abortController.abort();
-      callback.onError('⏰ Claude execution timed out').catch(() => {});
+      callback.onError('⏰ Claude execution timed out').catch(err => {
+        logger.error('Failed to send timeout error callback:', err);
+      });
     }, timeoutMs);
 
     let output = '';
@@ -111,13 +125,11 @@ export class StreamingClaudeExecutor {
           allowDangerouslySkipPermissions: true,
           allowedTools: [
             'Bash',
-            'Read',
-            'Write',
-            'Edit',
+            'FileRead',
+            'FileWrite',
+            'FileEdit',
             'Glob',
             'Grep',
-            'LS',
-            'MultiEdit',
             'NotebookEdit',
           ],
           systemPrompt: {
@@ -157,8 +169,8 @@ export class StreamingClaudeExecutor {
         if (message.type === 'result') {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === 'success') {
-            if ('result' in resultMsg && resultMsg.result) {
-              output = resultMsg.result;
+            if ('result' in resultMsg && resultMsg.result && String(resultMsg.result).trim()) {
+              output = String(resultMsg.result);
             }
             logger.info('Claude SDK execution completed successfully', {
               cost: resultMsg.total_cost_usd,
@@ -183,7 +195,7 @@ export class StreamingClaudeExecutor {
       clearTimeout(timeoutHandle);
       if (queryHandle) {
         try {
-          queryHandle.close();
+          await queryHandle.return(undefined);
         } catch {
           // Query may already be closed
         }
