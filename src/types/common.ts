@@ -18,6 +18,8 @@ export interface StreamingProgressCallback {
   onError: (error: string) => Promise<void>;
 }
 
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 export interface Config {
   anthropic: {
     baseUrl: string;
@@ -28,7 +30,7 @@ export interface Config {
     baseUrl: string;
     apiKey: string;
     defaultModel: string;
-    reasoningEffort: string;
+    reasoningEffort: ReasoningEffort;
   };
   gitlab: {
     baseUrl: string;

@@ -1,3 +1,4 @@
+import type { ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 // Use dynamic import for ESM-only packages in a CommonJS project
 // This bypasses the 'require' limitation for packages that don't export a CJS main
 let CodexSDK: any;
@@ -111,14 +112,12 @@ export class CodexExecutor {
       sandboxMode: 'danger-full-access',
       approvalPolicy: 'never',
       skipGitRepoCheck: true,
-      modelReasoningEffort: reasoningEffort as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+      modelReasoningEffort: reasoningEffort,
     });
 
     // Set up abort handling
     const abortController = new AbortController();
-    // let timedOut = false;
     const timeoutHandle = setTimeout(() => {
-      // timedOut = true;
       abortController.abort();
       callback.onError('⏰ Codex execution timed out').catch(err => {
         logger.error('Failed to send timeout error callback:', err);
@@ -196,7 +195,7 @@ export class CodexExecutor {
     return fullPrompt;
   }
 
-  private extractProgressFromEvent(event: any): string {
+  private extractProgressFromEvent(event: ThreadEvent): string {
     switch (event.type) {
       case 'thread.started':
         return '🔄 Started processing...';
@@ -224,7 +223,7 @@ export class CodexExecutor {
     return '';
   }
 
-  private extractProgressFromItem(item: any, isCompleted: boolean): string {
+  private extractProgressFromItem(item: ThreadItem, isCompleted: boolean): string {
     switch (item.type) {
       case 'reasoning':
         return item.text ? `💭 ${item.text}` : '';

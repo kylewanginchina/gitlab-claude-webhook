@@ -1,4 +1,4 @@
-import { Config, AIProvider } from '../types/common';
+import { Config, AIProvider, ReasoningEffort } from '../types/common';
 
 /**
  * Expand environment variables in a string
@@ -32,6 +32,18 @@ function getAIProvider(key: string, defaultValue: AIProvider): AIProvider {
   return defaultValue;
 }
 
+/**
+ * Get reasoning effort from environment with validation
+ */
+function getReasoningEffort(key: string, defaultValue: ReasoningEffort): ReasoningEffort {
+  const value = getEnvVar(key, defaultValue) as ReasoningEffort;
+  const validEfforts: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+  if (validEfforts.includes(value)) {
+    return value;
+  }
+  return defaultValue;
+}
+
 export const config: Config = {
   anthropic: {
     baseUrl: getEnvVar('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
@@ -42,7 +54,7 @@ export const config: Config = {
     baseUrl: getEnvVar('OPENAI_BASE_URL', 'https://api.openai.com'),
     apiKey: getEnvVar('OPENAI_API_KEY'),
     defaultModel: getEnvVar('CODEX_DEFAULT_MODEL', 'gpt-5.1-codex-max'),
-    reasoningEffort: getEnvVar('CODEX_REASONING_EFFORT', 'high'),
+    reasoningEffort: getReasoningEffort('CODEX_REASONING_EFFORT', 'high'),
   },
   gitlab: {
     baseUrl: getEnvVar('GITLAB_BASE_URL', 'https://gitlab.com'),

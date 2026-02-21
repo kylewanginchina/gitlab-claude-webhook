@@ -1,4 +1,5 @@
-// Load environment variables first, before any other imports
+// This module must be imported first in the application entry point (index.ts)
+// so that dotenv runs before any other module reads from process.env at initialization time.
 import dotenv from 'dotenv';
 import path from 'path';
 

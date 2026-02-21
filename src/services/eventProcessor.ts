@@ -430,7 +430,7 @@ export class EventProcessor {
   }
 
   private async reportError(event: GitLabWebhookEvent, error: any): Promise<void> {
-    const responseMessage = `🚨 Internal error occurred while processing your Claude request:\n\n\`\`\`\n${error.message}\n\`\`\``;
+    const responseMessage = `🚨 Internal error occurred while processing your AI request:\n\n\`\`\`\n${error.message}\n\`\`\``;
 
     try {
       await this.postComment(event, responseMessage);
