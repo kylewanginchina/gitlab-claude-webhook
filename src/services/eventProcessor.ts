@@ -134,6 +134,7 @@ export class EventProcessor {
       branch,
       provider: aiInstruction.provider,
       model: aiInstruction.model,
+      timeoutMs: aiInstruction.timeout ? aiInstruction.timeout * 60 * 1000 : undefined,
     };
   }
 
@@ -289,6 +290,7 @@ export class EventProcessor {
             event,
             instruction: instruction.command,
             model: instruction.model,
+            timeoutMs: instruction.timeoutMs,
           },
           callback
         );
@@ -304,6 +306,7 @@ export class EventProcessor {
             event,
             instruction: instruction.command,
             model: instruction.model,
+            timeoutMs: instruction.timeoutMs,
           },
           callback
         );

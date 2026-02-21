@@ -6,6 +6,7 @@ import { AIProvider } from '../types/common';
 export interface AIInstructionResult {
   provider: AIProvider;
   model?: string;
+  timeout?: number;
   command: string;
 }
 
@@ -74,33 +75,59 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
 }
 
 /**
- * Extract AI instructions from text with provider and optional model selection.
+ * Extract AI instructions from text with provider and optional parameter selection.
  * Supports:
  * - @claude instruction (uses Claude provider)
  * - @codex instruction (uses Codex provider)
- * - @claude[model=xxx] instruction (uses Claude with specific model)
- * - @codex[model=xxx] instruction (uses Codex with specific model)
+ * - @claude[model=xxx,timeout=20] instruction (uses Claude with specific model and 20 min timeout)
+ * - @codex[timeout=30] instruction (uses Codex with 30 min timeout)
  */
 export function extractAIInstructions(text: string): AIInstructionResult | null {
   if (!text) return null;
 
-  // Pattern to match @claude or @codex with optional [model=xxx] parameter
+  // Pattern to match @claude or @codex with optional parameters in brackets
   // Group 1: provider (claude or codex)
-  // Group 2: optional model parameter (e.g., [model=claude-sonnet-4-20250514])
+  // Group 2: optional parameters (e.g., [model=xxx,timeout=20])
   // Group 3: the actual command/instruction
-  const aiPattern = /@(claude|codex)(?:\[model=([^\]]+)\])?\s+([\s\S]*?)(?=@\w+|$)/i;
+  const aiPattern = /@(claude|codex)(?:\[([^\]]+)\])?\s+([\s\S]*?)(?=@\w+|$)/i;
   const match = text.match(aiPattern);
 
   if (match) {
     const provider = match[1].toLowerCase() as AIProvider;
-    const model = match[2] || undefined;
+    const paramsStr = match[2];
     const command = match[3].trim();
 
+    let model: string | undefined;
+    let timeout: number | undefined;
+
+    if (paramsStr) {
+      const params = paramsStr.split(',').map(p => p.trim());
+      for (const param of params) {
+        const [key, value] = param.split('=').map(s => s.trim());
+        if (!key || !value) continue;
+
+        if (key.toLowerCase() === 'model') {
+          model = value;
+        } else if (key.toLowerCase() === 'timeout') {
+          const t = parseInt(value, 10);
+          if (!isNaN(t)) {
+            timeout = t;
+          }
+        }
+      }
+    }
+
     if (command) {
-      logger.debug('Extracted AI instruction', { provider, model, commandLength: command.length });
+      logger.debug('Extracted AI instruction', {
+        provider,
+        model,
+        timeout,
+        commandLength: command.length,
+      });
       return {
         provider,
         model,
+        timeout,
         command,
       };
     }
