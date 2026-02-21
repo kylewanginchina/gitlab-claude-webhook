@@ -1,4 +1,4 @@
-import { Codex, type ThreadEvent, type ThreadItem } from '@openai/codex-sdk';
+import * as CodexSDK from '@openai/codex-sdk';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import {
@@ -89,7 +89,7 @@ export class CodexExecutor {
     });
 
     // Create Codex SDK instance
-    const codex = new Codex({
+    const codex = new (CodexSDK.Codex || (CodexSDK as any).default || CodexSDK)({
       apiKey: config.openai.apiKey,
       baseUrl: config.openai.baseUrl,
     });
@@ -186,7 +186,7 @@ export class CodexExecutor {
     return fullPrompt;
   }
 
-  private extractProgressFromEvent(event: ThreadEvent): string {
+  private extractProgressFromEvent(event: any): string {
     switch (event.type) {
       case 'thread.started':
         return '🔄 Started processing...';
@@ -214,7 +214,7 @@ export class CodexExecutor {
     return '';
   }
 
-  private extractProgressFromItem(item: ThreadItem, isCompleted: boolean): string {
+  private extractProgressFromItem(item: any, isCompleted: boolean): string {
     switch (item.type) {
       case 'reasoning':
         return item.text ? `💭 ${item.text}` : '';
@@ -229,7 +229,7 @@ export class CodexExecutor {
 
       case 'file_change':
         if (isCompleted && item.changes) {
-          const paths = item.changes.map(c => c.path).join(', ');
+          const paths = (item.changes as any[]).map((c: any) => c.path).join(', ');
           return `📝 Files changed: ${paths}`;
         }
         return '📝 File changed';
