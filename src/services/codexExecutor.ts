@@ -1,4 +1,13 @@
-import * as CodexSDK from '@openai/codex-sdk';
+// Use dynamic import for ESM-only packages in a CommonJS project
+// This bypasses the 'require' limitation for packages that don't export a CJS main
+let CodexSDK: any;
+const loadCodexSDK = async () => {
+  if (!CodexSDK) {
+    CodexSDK = await import('@openai/codex-sdk');
+  }
+  return CodexSDK;
+};
+
 import { config } from '../utils/config';
 import logger from '../utils/logger';
 import {
@@ -89,7 +98,8 @@ export class CodexExecutor {
     });
 
     // Create Codex SDK instance
-    const codex = new (CodexSDK.Codex || (CodexSDK as any).default || CodexSDK)({
+    const sdk = await loadCodexSDK();
+    const codex = new (sdk.Codex || sdk.default?.Codex || sdk.default || sdk)({
       apiKey: config.openai.apiKey,
       baseUrl: config.openai.baseUrl,
     });
