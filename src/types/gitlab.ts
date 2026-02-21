@@ -108,4 +108,5 @@ export interface AIInstruction {
   tag?: string;
   provider: AIProvider;
   model?: string;
+  timeoutMs?: number;
 }
