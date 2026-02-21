@@ -105,7 +105,7 @@ export function extractAIInstructions(text: string): AIInstructionResult | null 
       for (const param of params) {
         const [key, value] = param.split('=').map(s => s.trim());
         if (!key || !value) continue;
-        
+
         if (key.toLowerCase() === 'model') {
           model = value;
         } else if (key.toLowerCase() === 'timeout') {
