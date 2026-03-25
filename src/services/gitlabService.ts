@@ -179,6 +179,37 @@ export class GitLabService {
     }
   }
 
+  public async getMergeRequestDiffVersions(
+    projectId: number,
+    mergeRequestIid: number
+  ): Promise<any[]> {
+    try {
+      const versions = await this.gitlab.MergeRequests.versions(projectId, mergeRequestIid);
+      return versions;
+    } catch (error) {
+      logger.error('Failed to get merge request diff versions:', error);
+      throw new Error(
+        `Failed to get merge request diff versions: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  public async getMergeRequestDiffVersion(
+    projectId: number,
+    mergeRequestIid: number,
+    versionId: number
+  ): Promise<any> {
+    try {
+      const version = await this.gitlab.MergeRequests.version(projectId, mergeRequestIid, versionId);
+      return version;
+    } catch (error) {
+      logger.error('Failed to get merge request diff version:', error);
+      throw new Error(
+        `Failed to get merge request diff version: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   public async createMergeRequest(
     projectId: number,
     options: {
@@ -238,6 +269,46 @@ export class GitLabService {
       logger.error('Failed to get merge request discussions:', error);
       throw new Error(
         `Failed to get merge request discussions: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  public async createMergeRequestDiscussion(
+    projectId: number,
+    mergeRequestIid: number,
+    body: string,
+    options?: {
+      position?: {
+        base_sha: string;
+        start_sha: string;
+        head_sha: string;
+        position_type: 'text';
+        old_path: string;
+        new_path: string;
+        old_line?: string;
+        new_line?: string;
+      };
+    }
+  ): Promise<any> {
+    try {
+      const discussion = await this.gitlab.MergeRequestDiscussions.create(
+        projectId,
+        mergeRequestIid,
+        body,
+        options
+      );
+
+      logger.info('Created merge request discussion', {
+        projectId,
+        mergeRequestIid,
+        hasPosition: Boolean(options?.position),
+      });
+
+      return discussion;
+    } catch (error) {
+      logger.error('Failed to create merge request discussion:', error);
+      throw new Error(
+        `Failed to create merge request discussion: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -356,35 +427,63 @@ export class GitLabService {
   }
 
   public async addIssueDiscussionReply(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _projectId: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _issueIid: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _discussionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _body: string
+    projectId: number,
+    issueIid: number,
+    discussionId: string,
+    body: string
   ): Promise<any> {
-    // Discussion reply is not yet implemented, silently fail to use fallback
-    // This avoids noisy error logs while still maintaining fallback behavior
-    logger.debug('Discussion reply not implemented, using fallback to regular comment');
-    throw new Error('Discussion reply not implemented');
+    try {
+      const note = await this.postDiscussionReply(
+        `/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(
+          String(issueIid)
+        )}/discussions/${encodeURIComponent(discussionId)}/notes`,
+        body
+      );
+
+      logger.info('Created issue discussion reply', {
+        projectId,
+        issueIid,
+        discussionId,
+        noteId: note?.id,
+      });
+
+      return note;
+    } catch (error) {
+      logger.error('Failed to create issue discussion reply:', error);
+      throw new Error(
+        `Failed to create issue discussion reply: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   public async addMergeRequestDiscussionReply(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _projectId: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _mergeRequestIid: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _discussionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _body: string
+    projectId: number,
+    mergeRequestIid: number,
+    discussionId: string,
+    body: string
   ): Promise<any> {
-    // Discussion reply is not yet implemented, silently fail to use fallback
-    // This avoids noisy error logs while still maintaining fallback behavior
-    logger.debug('Discussion reply not implemented, using fallback to regular comment');
-    throw new Error('Discussion reply not implemented');
+    try {
+      const note = await this.postDiscussionReply(
+        `/projects/${encodeURIComponent(String(projectId))}/merge_requests/${encodeURIComponent(
+          String(mergeRequestIid)
+        )}/discussions/${encodeURIComponent(discussionId)}/notes`,
+        body
+      );
+
+      logger.info('Created merge request discussion reply', {
+        projectId,
+        mergeRequestIid,
+        discussionId,
+        noteId: note?.id,
+      });
+
+      return note;
+    } catch (error) {
+      logger.error('Failed to create merge request discussion reply:', error);
+      throw new Error(
+        `Failed to create merge request discussion reply: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   public async testConnection(): Promise<boolean> {
@@ -396,5 +495,23 @@ export class GitLabService {
       logger.error('GitLab API connection test failed:', error);
       return false;
     }
+  }
+
+  private async postDiscussionReply(path: string, body: string): Promise<any> {
+    const url = new URL(`/api/v4${path}`, config.gitlab.baseUrl).toString();
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'PRIVATE-TOKEN': config.gitlab.token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ body }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitLab API returned ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
   }
 }

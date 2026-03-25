@@ -136,6 +136,25 @@ export function extractAIInstructions(text: string): AIInstructionResult | null 
   return null;
 }
 
+export function isCodeReviewCommand(command: string): boolean {
+  if (!command) {
+    return false;
+  }
+
+  const normalized = command.trim().toLowerCase();
+  return normalized === '/code-review' || normalized.startsWith('/code-review ');
+}
+
+export function extractCodeReviewFocus(command: string): string | undefined {
+  if (!isCodeReviewCommand(command)) {
+    return undefined;
+  }
+
+  const trimmed = command.trim();
+  const focus = trimmed.slice('/code-review'.length).trim();
+  return focus || undefined;
+}
+
 /**
  * Legacy function for backward compatibility.
  * Extracts Claude instructions from text.

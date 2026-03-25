@@ -2,6 +2,8 @@ import {
   verifyGitLabSignature,
   extractClaudeInstructions,
   extractAIInstructions,
+  isCodeReviewCommand,
+  extractCodeReviewFocus,
 } from '../utils/webhook';
 
 // Mock the config
@@ -122,6 +124,31 @@ describe('Webhook Utils', () => {
       expect(result?.provider).toBe('claude');
       expect(result?.command).toContain('fix the bug');
       expect(result?.command).toContain('add tests');
+    });
+  });
+
+  describe('isCodeReviewCommand', () => {
+    it('should detect the official code review slash command', () => {
+      expect(isCodeReviewCommand('/code-review')).toBe(true);
+      expect(isCodeReviewCommand('/code-review focus on bugs')).toBe(true);
+    });
+
+    it('should reject non-review commands', () => {
+      expect(isCodeReviewCommand('review this merge request')).toBe(false);
+      expect(isCodeReviewCommand('fix the bug')).toBe(false);
+    });
+  });
+
+  describe('extractCodeReviewFocus', () => {
+    it('should extract trailing review focus text', () => {
+      expect(extractCodeReviewFocus('/code-review focus on auth edge cases')).toBe(
+        'focus on auth edge cases'
+      );
+    });
+
+    it('should return undefined when no extra focus is provided', () => {
+      expect(extractCodeReviewFocus('/code-review')).toBeUndefined();
+      expect(extractCodeReviewFocus('fix the bug')).toBeUndefined();
     });
   });
 });

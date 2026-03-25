@@ -43,7 +43,7 @@ export class StreamingClaudeExecutor {
       const result = await this.runClaudeWithSDK(command, projectPath, context, callback);
 
       // Check for file changes
-      const changes = await this.getFileChanges(projectPath);
+      const changes = context.mode === 'review' ? [] : await this.getFileChanges(projectPath);
 
       if (changes.length > 0) {
         await callback.onProgress(`📝 Claude made changes to ${changes.length} file(s)`, false);
@@ -84,6 +84,7 @@ export class StreamingClaudeExecutor {
     const fullPrompt = this.buildPromptWithContext(command, context);
     const model = context.model || config.anthropic.defaultModel;
     const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
+    const isReviewMode = context.mode === 'review';
 
     const env: Record<string, string> = {
       ...Object.fromEntries(
@@ -121,20 +122,16 @@ export class StreamingClaudeExecutor {
           model,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
-          allowedTools: [
-            'Bash',
-            'FileRead',
-            'FileWrite',
-            'FileEdit',
-            'Glob',
-            'Grep',
-            'NotebookEdit',
-          ],
+          allowedTools: isReviewMode
+            ? ['Bash', 'FileRead', 'Glob', 'Grep']
+            : ['Bash', 'FileRead', 'FileWrite', 'FileEdit', 'Glob', 'Grep', 'NotebookEdit'],
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
             append:
-              'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+              isReviewMode
+                ? 'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. For merge request contexts, use git commands to inspect changes, history, and blame when needed. Return a concise, structured review result.'
+                : 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
           },
           env,
           abortController,
@@ -214,6 +211,11 @@ export class StreamingClaudeExecutor {
 
     if (isMRContext) {
       fullPrompt += `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`;
+    }
+
+    if (context.mode === 'review') {
+      fullPrompt +=
+        '**Execution Mode:** Review only. Do not edit files, do not create commits, and do not change repository state.\n\n';
     }
 
     // Add the main command/instruction

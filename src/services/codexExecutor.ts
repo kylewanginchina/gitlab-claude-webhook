@@ -48,7 +48,7 @@ export class CodexExecutor {
       const result = await this.runCodexWithSDK(command, projectPath, context, callback);
 
       // Check for file changes
-      const changes = await this.getFileChanges(projectPath);
+      const changes = context.mode === 'review' ? [] : await this.getFileChanges(projectPath);
 
       if (changes.length > 0) {
         await callback.onProgress(`📝 Codex made changes to ${changes.length} file(s)`, false);
@@ -180,7 +180,11 @@ export class CodexExecutor {
     }
 
     // Add automation context
-    fullPrompt += `You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.\n\n`;
+    if (context.mode === 'review') {
+      fullPrompt += `You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Focus on identifying real issues in the merge request and return a structured review result.\n\n`;
+    } else {
+      fullPrompt += `You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.\n\n`;
+    }
 
     // Add the main command/instruction
     fullPrompt += `**Request:** ${command}`;

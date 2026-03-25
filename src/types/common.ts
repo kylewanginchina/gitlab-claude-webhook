@@ -11,6 +11,7 @@ export interface AIExecutionContext {
   event: GitLabWebhookEvent;
   instruction: string;
   model?: string;
+  mode?: 'edit' | 'review';
 }
 
 export interface StreamingProgressCallback {

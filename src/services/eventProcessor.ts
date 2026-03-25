@@ -1,18 +1,29 @@
 import { GitLabWebhookEvent, AIInstruction } from '../types/gitlab';
-import { extractAIInstructions } from '../utils/webhook';
+import {
+  extractAIInstructions,
+  isCodeReviewCommand,
+  extractCodeReviewFocus,
+} from '../utils/webhook';
 import logger from '../utils/logger';
 import { ProjectManager } from './projectManager';
 import { StreamingClaudeExecutor } from './streamingClaudeExecutor';
-import { StreamingProgressCallback } from '../types/common';
+import { AIExecutionContext, StreamingProgressCallback } from '../types/common';
 import { CodexExecutor } from './codexExecutor';
 import { GitLabService } from './gitlabService';
 import { MRGenerator } from '../utils/mrGenerator';
+import {
+  GitLabReviewService,
+  PreparedReviewContext,
+  ReviewFinding,
+  ReviewPassResult,
+} from './gitlabReviewService';
 
 export class EventProcessor {
   private projectManager: ProjectManager;
   private claudeExecutor: StreamingClaudeExecutor;
   private codexExecutor: CodexExecutor;
   private gitlabService: GitLabService;
+  private gitlabReviewService: GitLabReviewService;
   private currentCommentId: number | null = null;
   private currentDiscussionId: string | null = null;
 
@@ -21,6 +32,7 @@ export class EventProcessor {
     this.claudeExecutor = new StreamingClaudeExecutor();
     this.codexExecutor = new CodexExecutor();
     this.gitlabService = new GitLabService();
+    this.gitlabReviewService = new GitLabReviewService(this.gitlabService);
   }
 
   public async processEvent(event: GitLabWebhookEvent): Promise<void> {
@@ -275,42 +287,26 @@ export class EventProcessor {
         },
       };
 
-      let result;
-
-      // Select executor based on provider
-      if (instruction.provider === 'codex') {
-        // Execute with Codex
-        result = await this.codexExecutor.executeWithStreaming(
-          instruction.command,
-          projectPath,
-          {
-            context: instruction.context,
-            projectUrl: event.project.web_url,
-            branch: baseBranch,
-            event,
-            instruction: instruction.command,
-            model: instruction.model,
-            timeoutMs: instruction.timeoutMs,
-          },
-          callback
-        );
-      } else {
-        // Execute with Claude (default)
-        result = await this.claudeExecutor.executeWithStreaming(
-          instruction.command,
-          projectPath,
-          {
-            context: instruction.context,
-            projectUrl: event.project.web_url,
-            branch: baseBranch,
-            event,
-            instruction: instruction.command,
-            model: instruction.model,
-            timeoutMs: instruction.timeoutMs,
-          },
-          callback
-        );
+      if (isCodeReviewCommand(instruction.command)) {
+        await this.executeCodeReview(event, instruction, baseBranch, projectPath, callback);
+        return;
       }
+
+      const result = await this.executeWithProvider(
+        instruction,
+        instruction.command,
+        projectPath,
+        {
+          context: instruction.context,
+          projectUrl: event.project.web_url,
+          branch: baseBranch,
+          event,
+          instruction: instruction.command,
+          model: instruction.model,
+          timeoutMs: instruction.timeoutMs,
+        },
+        callback
+      );
 
       if (result.success) {
         await this.handleSuccess(event, instruction, result, baseBranch, projectPath);
@@ -320,6 +316,373 @@ export class EventProcessor {
     } finally {
       await this.projectManager.cleanup(projectPath);
     }
+  }
+
+  private async executeCodeReview(
+    event: GitLabWebhookEvent,
+    instruction: AIInstruction,
+    baseBranch: string,
+    projectPath: string,
+    callback: StreamingProgressCallback
+  ): Promise<void> {
+    if (!event.merge_request) {
+      await this.postComment(
+        event,
+        'Code review is only supported on merge requests or merge request comments.'
+      );
+      await this.updateProgressComment(event, 'Skipped code review: unsupported event type.', true);
+      return;
+    }
+
+    await this.updateProgressComment(event, 'Preparing GitLab merge request review context...');
+
+    const reviewContext = await this.gitlabReviewService.prepareReviewContext(projectPath, event);
+    const userFocus = extractCodeReviewFocus(instruction.command);
+
+    if (reviewContext.mergeRequestState !== 'opened') {
+      const message = `Skipped code review: merge request is ${reviewContext.mergeRequestState}.`;
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    if (reviewContext.draft || reviewContext.workInProgress) {
+      const message = 'Skipped code review: merge request is draft/WIP.';
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    if (reviewContext.diffs.length === 0) {
+      const message = 'Skipped code review: merge request has no diff content to review.';
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    const alreadyReviewed = await this.gitlabReviewService.hasExistingReview(
+      reviewContext.projectId,
+      reviewContext.mergeRequestIid,
+      reviewContext.headSha
+    );
+
+    if (alreadyReviewed) {
+      const message = 'Skipped code review: this merge request SHA already has a Claude review.';
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    const executionContext: AIExecutionContext = {
+      context: instruction.context,
+      projectUrl: event.project.web_url,
+      branch: baseBranch,
+      event,
+      instruction: instruction.command,
+      model: instruction.model,
+      timeoutMs: instruction.timeoutMs,
+      mode: 'review' as const,
+    };
+
+    const reviewPasses = this.gitlabReviewService.buildReviewPasses(reviewContext, userFocus);
+    await this.updateProgressComment(
+      event,
+      `Launching ${reviewPasses.length} GitLab review pass(es)...`
+    );
+
+    const passResults = await Promise.allSettled(
+      reviewPasses.map(pass =>
+        this.executeReviewPass(
+          instruction,
+          pass.id,
+          pass.label,
+          pass.prompt,
+          projectPath,
+          executionContext,
+          callback
+        )
+      )
+    );
+
+    const successfulPasses: ReviewPassResult[] = [];
+    const passErrors: string[] = [];
+    const passErrorLabels: string[] = [];
+
+    for (const result of passResults) {
+      if (result.status === 'fulfilled') {
+        if (result.value) {
+          successfulPasses.push(result.value);
+        }
+      } else {
+        const message =
+          result.reason instanceof Error ? result.reason.message : String(result.reason);
+        passErrors.push(message);
+        passErrorLabels.push(this.summarizeStageFailure(message));
+      }
+    }
+
+    if (successfulPasses.length === 0) {
+      await this.handleFailure(event, instruction, {
+        error:
+          passErrors.length > 0
+            ? `All code review passes failed: ${passErrors.join('; ')}`
+            : 'All code review passes failed.',
+      });
+      return;
+    }
+
+    const candidateFindings = this.gitlabReviewService.mergeCandidateFindings(
+      successfulPasses.flatMap(pass =>
+        pass.findings.map((finding: ReviewFinding) => ({
+          ...finding,
+          sources: [pass.label],
+        }))
+      )
+    );
+
+    if (candidateFindings.length === 0) {
+      if (passErrors.length > 0) {
+        await this.postComment(
+          event,
+          this.gitlabReviewService.buildIncompleteReviewMessage(reviewContext.headSha, {
+            completedStages: successfulPasses.map(pass => pass.label),
+            failedStages: passErrorLabels,
+            note:
+              'No candidate issues were found in the completed review passes. This should not be interpreted as a full clean review because some review passes did not finish.',
+          })
+        );
+        await this.updateProgressComment(
+          event,
+          'Code review completed with partial coverage; some review passes timed out or failed.',
+          true
+        );
+        return;
+      }
+
+      await this.postComment(event, this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha));
+      await this.updateProgressComment(
+        event,
+        'Code review completed. No candidate issues were found across review passes.',
+        true
+      );
+      return;
+    }
+
+    await this.updateProgressComment(
+      event,
+      `Scoring ${candidateFindings.length} candidate finding(s)...`
+    );
+
+    const scoredResults = await Promise.allSettled(
+      candidateFindings.map((finding, index) =>
+        this.executeReviewScore(
+          instruction,
+          finding,
+          index + 1,
+          projectPath,
+          executionContext,
+          reviewContext,
+          userFocus,
+          callback
+        )
+      )
+    );
+
+    const scoringErrors: string[] = [];
+    const scoringErrorLabels: string[] = [];
+    const scoredFindings = scoredResults
+      .filter(result => {
+        if (result.status === 'fulfilled') {
+          return true;
+        }
+
+        const message =
+          result.reason instanceof Error ? result.reason.message : String(result.reason);
+        scoringErrors.push(message);
+        scoringErrorLabels.push(this.summarizeStageFailure(message));
+        return false;
+      })
+      .map(result => (result as PromiseFulfilledResult<ReviewFinding | null>).value)
+      .filter((finding: ReviewFinding | null): finding is ReviewFinding => Boolean(finding))
+      .filter((finding: ReviewFinding) => finding.confidence >= 80);
+
+    if (scoredFindings.length === 0) {
+      if (passErrors.length > 0 || scoringErrors.length > 0) {
+        await this.postComment(
+          event,
+          this.gitlabReviewService.buildIncompleteReviewMessage(reviewContext.headSha, {
+            completedStages: successfulPasses.map(pass => pass.label),
+            failedStages: [...passErrorLabels, ...scoringErrorLabels],
+            note:
+              'No high-confidence issues were confirmed from the completed stages. This should not be interpreted as a full clean review because part of the review timed out or failed.',
+          })
+        );
+        await this.updateProgressComment(
+          event,
+          'Code review completed with partial coverage; some review or scoring stages timed out or failed.',
+          true
+        );
+        return;
+      }
+
+      await this.postComment(event, this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha));
+      await this.updateProgressComment(
+        event,
+        'Code review completed. Candidate issues were rescored below the confidence threshold.',
+        true
+      );
+      return;
+    }
+
+    const latestMergeRequest = await this.gitlabService.getMergeRequest(
+      reviewContext.projectId,
+      reviewContext.mergeRequestIid
+    );
+
+    if (latestMergeRequest.state !== 'opened' || latestMergeRequest.draft || latestMergeRequest.work_in_progress) {
+      const message = 'Skipped posting code review: merge request is no longer eligible.';
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    if (latestMergeRequest.sha && latestMergeRequest.sha !== reviewContext.headSha) {
+      const message = 'Skipped posting code review: merge request head changed while review was running.';
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    const alreadyReviewedLatest = await this.gitlabReviewService.hasExistingReview(
+      reviewContext.projectId,
+      reviewContext.mergeRequestIid,
+      reviewContext.headSha
+    );
+
+    if (alreadyReviewedLatest) {
+      const message = 'Skipped posting code review: another Claude review was already posted.';
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
+
+    const finalReview = this.gitlabReviewService.buildFinalReview(
+      successfulPasses,
+      scoredFindings,
+      candidateFindings.length
+    );
+
+    if (passErrors.length > 0 || scoringErrors.length > 0) {
+      const partialCoverageSummary = [
+        `Partial coverage: ${passErrors.length} review pass(es) and ${scoringErrors.length} scoring stage(s) timed out or failed.`,
+        `Affected stages: ${[...passErrorLabels, ...scoringErrorLabels].join(', ')}.`,
+        finalReview.summary,
+      ].join('\n\n');
+
+      finalReview.summary = partialCoverageSummary;
+    }
+
+    await this.gitlabReviewService.postReview(event, reviewContext, finalReview);
+    await this.updateProgressComment(
+      event,
+      `Code review completed with ${finalReview.findings.length} high-confidence finding(s).`,
+      true
+    );
+  }
+
+  private async executeReviewPass(
+    instruction: AIInstruction,
+    passId: string,
+    passLabel: string,
+    prompt: string,
+    projectPath: string,
+    executionContext: AIExecutionContext,
+    callback: StreamingProgressCallback
+  ): Promise<ReviewPassResult | null> {
+    const result = await this.executeWithProvider(
+      instruction,
+      prompt,
+      projectPath,
+      executionContext,
+      this.buildReviewStageCallback(passLabel, callback)
+    );
+
+    if (!result.success) {
+      throw new Error(`${passLabel} failed: ${result.error || 'Unknown error'}`);
+    }
+
+    const parsed = this.gitlabReviewService.parseReviewOutput(result.output || '', 0);
+    return {
+      passId,
+      label: passLabel,
+      summary: parsed.summary,
+      findings: parsed.findings,
+    };
+  }
+
+  private async executeReviewScore(
+    instruction: AIInstruction,
+    finding: ReviewFinding,
+    index: number,
+    projectPath: string,
+    executionContext: AIExecutionContext,
+    reviewContext: PreparedReviewContext,
+    userFocus: string | undefined,
+    callback: StreamingProgressCallback
+  ): Promise<ReviewFinding | null> {
+    const stageLabel = `Scorer ${index}`;
+    const prompt = this.gitlabReviewService.buildScoringPrompt(reviewContext, finding, userFocus);
+
+    const result = await this.executeWithProvider(
+      instruction,
+      prompt,
+      projectPath,
+      executionContext,
+      this.buildReviewStageCallback(stageLabel, callback)
+    );
+
+    if (!result.success) {
+      throw new Error(`${stageLabel} failed: ${result.error || 'Unknown error'}`);
+    }
+
+    return this.gitlabReviewService.parseScoredFinding(result.output || '', finding);
+  }
+
+  private async executeWithProvider(
+    instruction: AIInstruction,
+    command: string,
+    projectPath: string,
+    context: AIExecutionContext,
+    callback: StreamingProgressCallback
+  ): Promise<any> {
+    if (instruction.provider === 'codex') {
+      return this.codexExecutor.executeWithStreaming(command, projectPath, context, callback);
+    }
+
+    return this.claudeExecutor.executeWithStreaming(command, projectPath, context, callback);
+  }
+
+  private buildReviewStageCallback(
+    label: string,
+    callback: StreamingProgressCallback
+  ): StreamingProgressCallback {
+    return {
+      onProgress: async (message: string) => {
+        await callback.onProgress(`[${label}] ${message}`, false);
+      },
+      onError: async (error: string) => {
+        await callback.onProgress(`[${label}] ${error}`, false);
+      },
+    };
+  }
+
+  private summarizeStageFailure(message: string): string {
+    const match = message.match(/^(.*?) failed:/);
+    if (match?.[1]) {
+      return match[1];
+    }
+
+    return message.length > 120 ? `${message.slice(0, 117)}...` : message;
   }
 
   private async handleSuccess(
