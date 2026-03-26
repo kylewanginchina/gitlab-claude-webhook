@@ -200,6 +200,7 @@ export class GitLabReviewService {
       '',
       'You are performing the confidence-scoring stage of a multi-pass code review.',
       'Verify the finding against the merge request diff, relevant CLAUDE.md files, and git history as needed.',
+      'Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools.',
       'Only score issues introduced or made worse by this merge request.',
       'If this is a CLAUDE.md-related issue, confirm that an applicable CLAUDE.md explicitly calls it out.',
       'Ignore lint, formatting, type errors, imports, and test failures that CI would catch separately.',
@@ -401,24 +402,47 @@ export class GitLabReviewService {
     }
   }
 
-  public buildNoIssuesMessage(headSha: string): string {
-    return `${this.buildReviewMarker(headSha)}
-### Code review
+  public buildNoIssuesMessage(
+    headSha: string,
+    options?: {
+      context?: PreparedReviewContext;
+      completedPasses?: ReviewPassResult[];
+      note?: string;
+    }
+  ): string {
+    const lines = [this.buildReviewMarker(headSha), '### Code review', ''];
 
-No high-confidence issues found. Checked for bugs, history/context, local contracts, and CLAUDE.md compliance.
+    if (options?.context) {
+      lines.push(...this.buildCoverageDetails(options.context, options.completedPasses));
+      lines.push('');
+    }
 
-Generated with Claude Code`;
+    lines.push(
+      options?.note ||
+        'No high-confidence issues found. Checked for bugs, history/context, local contracts, and CLAUDE.md compliance.'
+    );
+    lines.push('');
+    lines.push('Generated with Claude Code');
+
+    return lines.join('\n');
   }
 
   public buildIncompleteReviewMessage(
     headSha: string,
     options: {
+      context?: PreparedReviewContext;
+      completedPasses?: ReviewPassResult[];
       completedStages?: string[];
       failedStages?: string[];
       note: string;
     }
   ): string {
     const lines = [this.buildReviewMarker(headSha), '### Code review', '', 'Review completed with partial coverage.', ''];
+
+    if (options.context) {
+      lines.push(...this.buildCoverageDetails(options.context, options.completedPasses));
+      lines.push('');
+    }
 
     if (options.completedStages && options.completedStages.length > 0) {
       lines.push('Completed stages:');
@@ -443,6 +467,43 @@ Generated with Claude Code`;
     return lines.join('\n');
   }
 
+  private buildCoverageDetails(
+    context: PreparedReviewContext,
+    completedPasses?: ReviewPassResult[]
+  ): string[] {
+    const lines = [
+      `Merge request: ${context.mergeRequestTitle}`,
+      `Files reviewed: ${context.diffs.length}`,
+    ];
+
+    const files = context.diffs
+      .map(diff => diff.new_path || diff.old_path)
+      .filter((file): file is string => Boolean(file))
+      .slice(0, 8);
+
+    if (files.length > 0) {
+      lines.push('');
+      lines.push('Touched files reviewed:');
+      files.forEach(file => {
+        lines.push(`- ${file}`);
+      });
+
+      if (context.diffs.length > files.length) {
+        lines.push(`- ...and ${context.diffs.length - files.length} more file(s)`);
+      }
+    }
+
+    if (completedPasses && completedPasses.length > 0) {
+      lines.push('');
+      lines.push('Completed stage summaries:');
+      completedPasses.forEach(pass => {
+        lines.push(`- ${pass.label}: ${pass.summary}`);
+      });
+    }
+
+    return lines;
+  }
+
   private buildReviewPassPrompt(
     context: PreparedReviewContext,
     template: ReviewPassTemplate,
@@ -454,6 +515,8 @@ Generated with Claude Code`;
       `Review pass: ${template.label}`,
       ...template.focus.map((line, index) => `${index + 1}. ${line}`),
       'Do not modify files, commit, or change git state.',
+      'Do not use Task, Agent, WebFetch, or WebSearch.',
+      'Use only local repository inspection tools and keep exploration narrow.',
       'Review only issues introduced or made worse by this merge request.',
       'Ignore formatting, lint, type errors, missing imports, tests, or other CI/build output.',
       'Prefer fewer, high-signal issues instead of broad feedback.',

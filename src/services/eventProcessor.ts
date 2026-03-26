@@ -445,6 +445,8 @@ export class EventProcessor {
         await this.postComment(
           event,
           this.gitlabReviewService.buildIncompleteReviewMessage(reviewContext.headSha, {
+            context: reviewContext,
+            completedPasses: successfulPasses,
             completedStages: successfulPasses.map(pass => pass.label),
             failedStages: passErrorLabels,
             note:
@@ -459,7 +461,13 @@ export class EventProcessor {
         return;
       }
 
-      await this.postComment(event, this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha));
+      await this.postComment(
+        event,
+        this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha, {
+          context: reviewContext,
+          completedPasses: successfulPasses,
+        })
+      );
       await this.updateProgressComment(
         event,
         'Code review completed. No candidate issues were found across review passes.',
@@ -511,6 +519,8 @@ export class EventProcessor {
         await this.postComment(
           event,
           this.gitlabReviewService.buildIncompleteReviewMessage(reviewContext.headSha, {
+            context: reviewContext,
+            completedPasses: successfulPasses,
             completedStages: successfulPasses.map(pass => pass.label),
             failedStages: [...passErrorLabels, ...scoringErrorLabels],
             note:
@@ -525,7 +535,15 @@ export class EventProcessor {
         return;
       }
 
-      await this.postComment(event, this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha));
+      await this.postComment(
+        event,
+        this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha, {
+          context: reviewContext,
+          completedPasses: successfulPasses,
+          note:
+            'No high-confidence issues remained after rescoring the candidate findings from the completed review stages.',
+        })
+      );
       await this.updateProgressComment(
         event,
         'Code review completed. Candidate issues were rescored below the confidence threshold.',

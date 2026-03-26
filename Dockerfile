@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Install git, curl and other dependencies
-RUN apk add --no-cache git curl
+# Install shell and repository tooling used by review/edit workflows
+RUN apk add --no-cache bash git curl ripgrep
 
 # Create app directory
 WORKDIR /app

@@ -134,15 +134,49 @@ describe('GitLabReviewService', () => {
   describe('buildIncompleteReviewMessage', () => {
     it('should mention partial coverage and failed stages', () => {
       const message = service.buildIncompleteReviewMessage('head-sha', {
+        context,
+        completedPasses: [
+          {
+            passId: 'bug-scan',
+            label: 'Shallow bug scan',
+            summary: 'Read the changed files and did not find obvious correctness issues.',
+            findings: [],
+          },
+        ],
         completedStages: ['History and blame context'],
         failedStages: ['Shallow bug scan', 'CLAUDE.md compliance'],
         note: 'Some stages timed out.',
       });
 
       expect(message).toContain('Review completed with partial coverage.');
+      expect(message).toContain('Touched files reviewed:');
+      expect(message).toContain('src/a.ts');
+      expect(message).toContain('Completed stage summaries:');
+      expect(message).toContain('Read the changed files');
       expect(message).toContain('Shallow bug scan');
       expect(message).toContain('CLAUDE.md compliance');
       expect(message).toContain('Some stages timed out.');
+    });
+  });
+
+  describe('buildNoIssuesMessage', () => {
+    it('should include reviewed files and completed pass summaries', () => {
+      const message = service.buildNoIssuesMessage('head-sha', {
+        context,
+        completedPasses: [
+          {
+            passId: 'contracts',
+            label: 'Comments and local contracts',
+            summary: 'Checked the touched files for local invariants and comments.',
+            findings: [],
+          },
+        ],
+      });
+
+      expect(message).toContain('Files reviewed: 1');
+      expect(message).toContain('Touched files reviewed:');
+      expect(message).toContain('Completed stage summaries:');
+      expect(message).toContain('Checked the touched files for local invariants and comments.');
     });
   });
 });

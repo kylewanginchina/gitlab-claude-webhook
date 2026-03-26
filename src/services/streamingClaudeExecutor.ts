@@ -111,7 +111,24 @@ export class StreamingClaudeExecutor {
     }, timeoutMs);
 
     let output = '';
+    const startedAt = Date.now();
     let lastProgressTime = Date.now();
+    let lastActivityDescription = 'Claude is analyzing the request';
+    const heartbeatHandle = setInterval(() => {
+      const now = Date.now();
+      if (now - lastProgressTime < 120000) {
+        return;
+      }
+
+      const heartbeat = `⏳ Still working: ${this.normalizeProgressForHeartbeat(
+        lastActivityDescription
+      )} (${this.formatElapsed((now - startedAt) / 1000)} elapsed)`;
+
+      callback.onProgress(heartbeat, false).catch(err => {
+        logger.error('Failed to send Claude heartbeat callback:', err);
+      });
+      lastProgressTime = now;
+    }, 30000);
     let queryHandle: Query | undefined;
 
     try {
@@ -122,15 +139,30 @@ export class StreamingClaudeExecutor {
           model,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
-          allowedTools: isReviewMode
-            ? ['Bash', 'FileRead', 'Glob', 'Grep']
-            : ['Bash', 'FileRead', 'FileWrite', 'FileEdit', 'Glob', 'Grep', 'NotebookEdit'],
+          tools: isReviewMode
+            ? ['Bash', 'Read', 'Glob', 'Grep']
+            : { type: 'preset', preset: 'claude_code' },
+          ...(isReviewMode
+            ? {
+                disallowedTools: [
+                  'Task',
+                  'Agent',
+                  'WebFetch',
+                  'WebSearch',
+                  'Write',
+                  'Edit',
+                  'MultiEdit',
+                  'NotebookEdit',
+                  'TodoWrite',
+                ],
+              }
+            : {}),
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
             append:
               isReviewMode
-                ? 'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. For merge request contexts, use git commands to inspect changes, history, and blame when needed. Return a concise, structured review result.'
+                ? 'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. Return a concise, structured review result.'
                 : 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
           },
           env,
@@ -142,6 +174,7 @@ export class StreamingClaudeExecutor {
         const progressMessage = this.extractProgressFromMessage(message);
         if (progressMessage) {
           const now = Date.now();
+          lastActivityDescription = progressMessage;
           if (now - lastProgressTime > 2000) {
             await callback.onProgress(progressMessage, false);
             lastProgressTime = now;
@@ -188,6 +221,7 @@ export class StreamingClaudeExecutor {
       return { output: output.trim() };
     } finally {
       clearTimeout(timeoutHandle);
+      clearInterval(heartbeatHandle);
       if (queryHandle) {
         try {
           await queryHandle.return(undefined);
@@ -238,6 +272,15 @@ export class StreamingClaudeExecutor {
           if (message.subtype === 'init') {
             return '🔧 Claude session initialized';
           }
+          if (message.subtype === 'task_started') {
+            const description = 'description' in message ? String(message.description || '') : '';
+            return description ? `🧩 Started subtask: ${description}` : '🧩 Started subtask';
+          }
+          if (message.subtype === 'task_notification') {
+            const summary = 'summary' in message ? String(message.summary || '') : '';
+            const status = 'status' in message ? String(message.status || '') : 'completed';
+            return summary ? `🧩 Subtask ${status}: ${summary}` : `🧩 Subtask ${status}`;
+          }
         }
         break;
 
@@ -247,7 +290,8 @@ export class StreamingClaudeExecutor {
           let textProgress = '';
           for (const block of assistantMsg.message.content) {
             if ('type' in block && block.type === 'tool_use' && 'name' in block) {
-              return `⚙️ Using tool: ${block.name}`;
+              const input = 'input' in block ? block.input : undefined;
+              return this.formatToolProgress(String(block.name), input);
             }
             if (!textProgress && 'text' in block && typeof block.text === 'string') {
               const text = block.text.trim();
@@ -265,12 +309,99 @@ export class StreamingClaudeExecutor {
 
       case 'tool_progress':
         if ('tool_name' in message) {
+          const elapsedSeconds =
+            'elapsed_time_seconds' in message ? Number(message.elapsed_time_seconds) : 0;
+          if (elapsedSeconds >= 60) {
+            return `⏳ ${message.tool_name} still running (${this.formatElapsed(elapsedSeconds)})`;
+          }
           return `⚙️ Running: ${message.tool_name}`;
+        }
+        break;
+
+      case 'tool_use_summary':
+        if ('summary' in message && typeof message.summary === 'string') {
+          return `📝 ${message.summary.trim()}`;
         }
         break;
     }
 
     return '';
+  }
+
+  private formatToolProgress(name: string, input: unknown): string {
+    const record = input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+
+    switch (name) {
+      case 'Read': {
+        const filePath = this.truncateValue(record.file_path);
+        return filePath ? `📖 Read ${filePath}` : '📖 Read file';
+      }
+
+      case 'Glob': {
+        const pattern = this.truncateValue(record.pattern);
+        const basePath = this.truncateValue(record.path);
+        if (pattern && basePath) {
+          return `🗂️ Glob ${pattern} in ${basePath}`;
+        }
+        return pattern ? `🗂️ Glob ${pattern}` : '🗂️ Glob files';
+      }
+
+      case 'Grep': {
+        const pattern = this.truncateValue(record.pattern);
+        const basePath = this.truncateValue(record.path);
+        if (pattern && basePath) {
+          return `🔎 Grep ${pattern} in ${basePath}`;
+        }
+        return pattern ? `🔎 Grep ${pattern}` : '🔎 Grep files';
+      }
+
+      case 'Bash': {
+        const command = this.truncateValue(record.command, 100);
+        return command ? `💻 Bash ${command}` : '💻 Bash command';
+      }
+
+      case 'WebFetch': {
+        const url = this.truncateValue(record.url, 100);
+        return url ? `🌐 WebFetch ${url}` : '🌐 WebFetch';
+      }
+
+      case 'Task':
+      case 'Agent': {
+        const description = this.truncateValue(record.description);
+        return description ? `🧩 ${name} ${description}` : `🧩 ${name}`;
+      }
+
+      default:
+        return `⚙️ Using tool: ${name}`;
+    }
+  }
+
+  private truncateValue(value: unknown, maxLength = 80): string | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 3)}...` : trimmed;
+  }
+
+  private formatElapsed(elapsedSeconds: number): string {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = Math.floor(elapsedSeconds % 60);
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  }
+
+  private normalizeProgressForHeartbeat(message: string): string {
+    return message
+      .replace(/^[^\p{L}\p{N}]+/u, '')
+      .replace(/^Still working:\s*/i, '')
+      .trim();
   }
 
   private async getFileChanges(projectPath: string): Promise<FileChange[]> {
