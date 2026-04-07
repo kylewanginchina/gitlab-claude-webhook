@@ -59,3 +59,10 @@ export interface FileChange {
   type: 'modified' | 'created' | 'deleted';
   diff?: string;
 }
+
+// Processing context for event handling - provides request-level state isolation
+export interface ProcessingContext {
+  commentId: number | null;
+  discussionId: string | null;
+  progressMessages: string[];
+}
