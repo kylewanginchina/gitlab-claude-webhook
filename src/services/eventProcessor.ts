@@ -660,15 +660,20 @@ export class EventProcessor {
       // Only add if not duplicate
       if (!isDuplicate) {
         context.progressMessages.push(formattedMessage);
+        if (context.progressMessages.length > 10) {
+          context.progressMessages.shift();
+        }
       }
 
       // Build the complete comment body
-      let commentBody = `🤖 **AI Agent Progress Report**\n\n`;
+      let commentBody = `🤖 **AI Agent Progress Report**
 
-      // Add the latest messages (keep last 10 to avoid too long comments)
-      const recentMessages = context.progressMessages.slice(-10);
-      recentMessages.forEach(msg => {
-        commentBody += `- ${msg}\n`;
+`;
+
+      // Add the latest messages (already capped to 10 entries)
+      context.progressMessages.forEach(msg => {
+        commentBody += `- ${msg}
+`;
       });
 
       if (isComplete) {
@@ -685,7 +690,7 @@ export class EventProcessor {
       commentBody += `\n\n---\n*Last updated: ${new Date().toISOString()}*`;
 
       // Update the comment
-      await this.updateComment(event, context.commentId, commentBody);
+      await this.updateComment(event, context.commentId, commentBody, context);
     } catch (error) {
       logger.error('Failed to update progress comment:', error);
     }
@@ -694,7 +699,8 @@ export class EventProcessor {
   private async updateComment(
     event: GitLabWebhookEvent,
     commentId: number,
-    body: string
+    body: string,
+    context: ProcessingContext
   ): Promise<void> {
     try {
       switch (event.object_kind) {
@@ -745,6 +751,14 @@ export class EventProcessor {
       });
     } catch (error) {
       logger.error('Failed to update comment:', error);
+      // Fallback: create a new comment if update fails
+      await this.postComment(
+        event,
+        `**Updated Progress:**
+
+${body}`,
+        context
+      );
     }
   }
 }
