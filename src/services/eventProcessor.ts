@@ -3,7 +3,7 @@ import { extractAIInstructions } from '../utils/webhook';
 import logger from '../utils/logger';
 import { ProjectManager } from './projectManager';
 import { StreamingClaudeExecutor } from './streamingClaudeExecutor';
-import { StreamingProgressCallback } from '../types/common';
+import { StreamingProgressCallback, ProcessingContext } from '../types/common';
 import { CodexExecutor } from './codexExecutor';
 import { GitLabService } from './gitlabService';
 import { MRGenerator } from '../utils/mrGenerator';
@@ -13,8 +13,6 @@ export class EventProcessor {
   private claudeExecutor: StreamingClaudeExecutor;
   private codexExecutor: CodexExecutor;
   private gitlabService: GitLabService;
-  private currentCommentId: number | null = null;
-  private currentDiscussionId: string | null = null;
 
   constructor() {
     this.projectManager = new ProjectManager();
@@ -24,8 +22,15 @@ export class EventProcessor {
   }
 
   public async processEvent(event: GitLabWebhookEvent): Promise<void> {
+    // Create independent context for each event processing request
+    const context: ProcessingContext = {
+      commentId: null,
+      discussionId: null,
+      progressMessages: [],
+    };
+
     try {
-      const instruction = await this.extractInstruction(event);
+      const instruction = await this.extractInstruction(event, context);
 
       if (!instruction) {
         logger.debug('No Claude instruction found in event', {
@@ -42,26 +47,27 @@ export class EventProcessor {
         instruction: instruction.command.substring(0, 100),
       });
 
-      await this.executeInstruction(event, instruction);
+      await this.executeInstruction(event, instruction, context);
     } catch (error) {
       logger.error('Error processing event:', error);
-      await this.reportError(event, error);
-    } finally {
-      // Reset state after processing
-      this.currentDiscussionId = null;
+      await this.reportError(event, error, context);
     }
+    // No need to reset context - each request has its own independent context
   }
 
-  private async extractInstruction(event: GitLabWebhookEvent): Promise<AIInstruction | null> {
+  private async extractInstruction(
+    event: GitLabWebhookEvent,
+    context: ProcessingContext
+  ): Promise<AIInstruction | null> {
     let content = '';
     let branch = '';
-    let context = '';
+    let ctx = '';
 
     switch (event.object_kind) {
       case 'issue':
         if (event.issue) {
           content = event.issue.description || '';
-          context = `Issue #${event.issue.iid}: ${event.issue.title}`;
+          ctx = `Issue #${event.issue.iid}: ${event.issue.title}`;
           branch = event.project.default_branch;
         }
         break;
@@ -69,7 +75,7 @@ export class EventProcessor {
       case 'merge_request':
         if (event.merge_request) {
           content = event.merge_request.description || '';
-          context = await this.buildMergeRequestContext(event.merge_request, event.project.id);
+          ctx = await this.buildMergeRequestContext(event.merge_request, event.project.id);
           branch = event.merge_request.source_branch;
         }
         break;
@@ -81,7 +87,7 @@ export class EventProcessor {
 
           if (event.issue) {
             // Build enhanced context for issue comments
-            context = `Issue #${event.issue.iid}: ${event.issue.title}\n\n**Issue Description:** ${event.issue.description ? (event.issue.description.length > 200 ? event.issue.description.substring(0, 200) + '...' : event.issue.description) : 'No description provided'}`;
+            ctx = `Issue #${event.issue.iid}: ${event.issue.title}\n\n**Issue Description:** ${event.issue.description ? (event.issue.description.length > 200 ? event.issue.description.substring(0, 200) + '...' : event.issue.description) : 'No description provided'}`;
             branch = event.project.default_branch;
 
             // Check if this is a reply in a discussion thread
@@ -90,15 +96,16 @@ export class EventProcessor {
                 'issue',
                 event.project.id,
                 event.issue.iid,
-                noteId
+                noteId,
+                context
               );
               if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `${context}\n\n${threadInfo}`;
+                ctx = `${ctx}\n\n${threadInfo}`;
               }
             }
           } else if (event.merge_request) {
             // Build enhanced context for merge request comments including code changes
-            context = await this.buildMergeRequestContext(event.merge_request, event.project.id);
+            ctx = await this.buildMergeRequestContext(event.merge_request, event.project.id);
             branch = event.merge_request.source_branch;
 
             // Check if this is a reply in a discussion thread
@@ -107,10 +114,11 @@ export class EventProcessor {
                 'merge_request',
                 event.project.id,
                 event.merge_request.iid,
-                noteId
+                noteId,
+                context
               );
               if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `${context}\n\n${threadInfo}`;
+                ctx = `${ctx}\n\n${threadInfo}`;
               }
             }
           }
@@ -130,7 +138,7 @@ export class EventProcessor {
 
     return {
       command: aiInstruction.command,
-      context,
+      context: ctx,
       branch,
       provider: aiInstruction.provider,
       model: aiInstruction.model,
@@ -142,7 +150,8 @@ export class EventProcessor {
     type: 'issue' | 'merge_request',
     projectId: number,
     itemIid: number,
-    noteId: number
+    noteId: number,
+    context: ProcessingContext
   ): Promise<string | null> {
     try {
       let discussions: any[];
@@ -156,8 +165,8 @@ export class EventProcessor {
       const result = await this.gitlabService.findNoteInDiscussions(discussions, noteId);
 
       if (result) {
-        // Store discussion ID for later use in replies
-        this.currentDiscussionId = result.discussionId;
+        // Store discussion ID in context for later use in replies
+        context.discussionId = result.discussionId;
 
         logger.info('Found thread context for note', {
           projectId,
@@ -247,10 +256,10 @@ export class EventProcessor {
 
   private async executeInstruction(
     event: GitLabWebhookEvent,
-    instruction: AIInstruction
+    instruction: AIInstruction,
+    context: ProcessingContext
   ): Promise<void> {
-    // Clear previous progress messages for this new instruction
-    this.progressMessages = [];
+    // Clear previous progress messages for this new instruction (already initialized in context)
 
     // Determine provider name for messages
     const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
@@ -258,7 +267,7 @@ export class EventProcessor {
     // Create initial progress comment
     const initialMessage = `🚀 ${providerName} is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
 
-    this.currentCommentId = await this.createProgressComment(event, initialMessage);
+    context.commentId = await this.createProgressComment(event, initialMessage, context);
 
     const baseBranch = instruction.branch || event.project.default_branch;
 
@@ -267,11 +276,11 @@ export class EventProcessor {
     try {
       // Create streaming callback for real-time updates
       const callback: StreamingProgressCallback = {
-        onProgress: async (message: string, isComplete?: boolean) => {
-          await this.updateProgressComment(event, message, isComplete);
+        onProgress: async (message: string) => {
+          await this.updateProgressComment(event, message, context, false, false);
         },
         onError: async (error: string) => {
-          await this.updateProgressComment(event, error, true, true);
+          await this.updateProgressComment(event, error, context, true, true);
         },
       };
 
@@ -313,9 +322,9 @@ export class EventProcessor {
       }
 
       if (result.success) {
-        await this.handleSuccess(event, instruction, result, baseBranch, projectPath);
+        await this.handleSuccess(event, instruction, result, baseBranch, projectPath, context);
       } else {
-        await this.handleFailure(event, instruction, result);
+        await this.handleFailure(event, instruction, result, context);
       }
     } finally {
       await this.projectManager.cleanup(projectPath);
@@ -327,7 +336,8 @@ export class EventProcessor {
     instruction: AIInstruction,
     result: any,
     baseBranch: string,
-    projectPath: string
+    projectPath: string,
+    context: ProcessingContext
   ): Promise<void> {
     const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
 
@@ -360,7 +370,13 @@ export class EventProcessor {
         // Create new branch for Claude changes
         await this.gitlabService.createBranch(event.project.id, claudeBranch, baseBranch);
 
-        await this.updateProgressComment(event, `Created branch: ${claudeBranch}`);
+        await this.updateProgressComment(
+          event,
+          `Created branch: ${claudeBranch}`,
+          context,
+          false,
+          false
+        );
 
         // Generate MR info first to get the commit message
         const mrInfo = MRGenerator.generateMR({
@@ -387,7 +403,13 @@ export class EventProcessor {
         responseMessage += `[Click here to review and merge the changes →](${mrUrl})\n\n`;
         responseMessage += `**Branch:** \`${claudeBranch}\` → \`${baseBranch}\`\n`;
 
-        await this.updateProgressComment(event, `Created merge request: ${mrUrl}`);
+        await this.updateProgressComment(
+          event,
+          `Created merge request: ${mrUrl}`,
+          context,
+          false,
+          false
+        );
       } catch (error) {
         logger.error('Failed to create branch or merge request:', error);
         responseMessage += `⚠️ **Note:** Changes were made but could not create merge request: ${error instanceof Error ? error.message : String(error)}\n\n`;
@@ -397,7 +419,14 @@ export class EventProcessor {
       responseMessage += '📋 No file changes were made.\n';
     }
 
-    await this.postComment(event, responseMessage);
+    await this.postComment(event, responseMessage, context);
+    await this.updateProgressComment(
+      event,
+      `✅ ${providerName} processed your request successfully.`,
+      context,
+      true,
+      false
+    );
   }
 
   private async commitAndPushToNewBranch(
@@ -418,7 +447,8 @@ export class EventProcessor {
   private async handleFailure(
     event: GitLabWebhookEvent,
     instruction: AIInstruction,
-    result: any
+    result: any,
+    context: ProcessingContext
   ): Promise<void> {
     const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
 
@@ -429,48 +459,63 @@ export class EventProcessor {
     });
 
     const responseMessage = `❌ ${providerName} encountered an error while processing your request:\n\n\`\`\`\n${result.error}\n\`\`\``;
-    await this.postComment(event, responseMessage);
+    await this.postComment(event, responseMessage, context);
+    await this.updateProgressComment(
+      event,
+      `✅ ${providerName} processed your request successfully.`,
+      context,
+      true,
+      false
+    );
   }
 
-  private async reportError(event: GitLabWebhookEvent, error: any): Promise<void> {
+  private async reportError(
+    event: GitLabWebhookEvent,
+    error: any,
+    context: ProcessingContext
+  ): Promise<void> {
     const responseMessage = `🚨 Internal error occurred while processing your AI request:\n\n\`\`\`\n${error.message}\n\`\`\``;
 
     try {
-      await this.postComment(event, responseMessage);
+      await this.postComment(event, responseMessage, context);
+      await this.updateProgressComment(
+        event,
+        '🚨 Internal error occurred while processing your AI request.',
+        context,
+        true,
+        true
+      );
     } catch (commentError) {
       logger.error('Failed to post error comment:', commentError);
     }
   }
 
-  private async postComment(event: GitLabWebhookEvent, message: string): Promise<void> {
-    // If we have a discussion ID, try to post as a reply to that discussion
-    if (this.currentDiscussionId) {
+  private async postComment(
+    event: GitLabWebhookEvent,
+    message: string,
+    context: ProcessingContext
+  ): Promise<void> {
+    // If we have a discussion ID in context, try to post as a reply to that discussion
+    if (context.discussionId) {
       try {
-        switch (event.object_kind) {
-          case 'issue':
-          case 'note':
-            if (event.issue) {
-              await this.gitlabService.addIssueDiscussionReply(
-                event.project.id,
-                event.issue.iid,
-                this.currentDiscussionId,
-                message
-              );
-              return;
-            }
-            break;
+        if (event.issue) {
+          await this.gitlabService.addIssueDiscussionReply(
+            event.project.id,
+            event.issue.iid,
+            context.discussionId,
+            message
+          );
+          return;
+        }
 
-          case 'merge_request':
-            if (event.merge_request) {
-              await this.gitlabService.addMergeRequestDiscussionReply(
-                event.project.id,
-                event.merge_request.iid,
-                this.currentDiscussionId,
-                message
-              );
-              return;
-            }
-            break;
+        if (event.merge_request) {
+          await this.gitlabService.addMergeRequestDiscussionReply(
+            event.project.id,
+            event.merge_request.iid,
+            context.discussionId,
+            message
+          );
+          return;
         }
       } catch (error) {
         // Silently fallback for known unimplemented features
@@ -516,41 +561,35 @@ export class EventProcessor {
 
   private async createProgressComment(
     event: GitLabWebhookEvent,
-    message: string
+    message: string,
+    context: ProcessingContext
   ): Promise<number | null> {
     try {
       let commentId: number | null = null;
 
-      // If we have a discussion ID, try to create progress comment as a reply to that discussion
-      if (this.currentDiscussionId) {
+      // If we have a discussion ID in context, try to create progress comment as a reply to that discussion
+      if (context.discussionId) {
         try {
-          switch (event.object_kind) {
-            case 'issue':
-            case 'note':
-              if (event.issue) {
-                const comment = await this.gitlabService.addIssueDiscussionReply(
-                  event.project.id,
-                  event.issue.iid,
-                  this.currentDiscussionId,
-                  message
-                );
-                commentId = comment?.id || null;
-                return commentId;
-              }
-              break;
+          if (event.issue) {
+            const comment = await this.gitlabService.addIssueDiscussionReply(
+              event.project.id,
+              event.issue.iid,
+              context.discussionId,
+              message
+            );
+            commentId = comment?.id || null;
+            return commentId;
+          }
 
-            case 'merge_request':
-              if (event.merge_request) {
-                const comment = await this.gitlabService.addMergeRequestDiscussionReply(
-                  event.project.id,
-                  event.merge_request.iid,
-                  this.currentDiscussionId,
-                  message
-                );
-                commentId = comment?.id || null;
-                return commentId;
-              }
-              break;
+          if (event.merge_request) {
+            const comment = await this.gitlabService.addMergeRequestDiscussionReply(
+              event.project.id,
+              event.merge_request.iid,
+              context.discussionId,
+              message
+            );
+            commentId = comment?.id || null;
+            return commentId;
           }
         } catch (error) {
           // Silently fallback for known unimplemented features
@@ -615,15 +654,14 @@ export class EventProcessor {
     }
   }
 
-  private progressMessages: string[] = [];
-
   private async updateProgressComment(
     event: GitLabWebhookEvent,
     message: string,
+    context: ProcessingContext,
     isComplete?: boolean,
     isError?: boolean
   ): Promise<void> {
-    if (!this.currentCommentId) {
+    if (!context.commentId) {
       return;
     }
 
@@ -633,7 +671,7 @@ export class EventProcessor {
       const formattedMessage = `[${timestamp}] ${message}`;
 
       // Check for duplicate messages (ignore timestamp, only check the message content)
-      const isDuplicate = this.progressMessages.some(existingMsg => {
+      const isDuplicate = context.progressMessages.some(existingMsg => {
         // Extract the message part after the timestamp
         const existingMessageContent = existingMsg.substring(11); // Remove "[HH:MM:SS] "
         const newMessageContent = formattedMessage.substring(11);
@@ -642,16 +680,21 @@ export class EventProcessor {
 
       // Only add if not duplicate
       if (!isDuplicate) {
-        this.progressMessages.push(formattedMessage);
+        context.progressMessages.push(formattedMessage);
+        if (context.progressMessages.length > 10) {
+          context.progressMessages.shift();
+        }
       }
 
       // Build the complete comment body
-      let commentBody = `🤖 **AI Agent Progress Report**\n\n`;
+      let commentBody = `🤖 **AI Agent Progress Report**
 
-      // Add the latest messages (keep last 10 to avoid too long comments)
-      const recentMessages = this.progressMessages.slice(-10);
-      recentMessages.forEach(msg => {
-        commentBody += `- ${msg}\n`;
+`;
+
+      // Add the latest messages (already capped to 10 entries)
+      context.progressMessages.forEach(msg => {
+        commentBody += `- ${msg}
+`;
       });
 
       if (isComplete) {
@@ -668,7 +711,7 @@ export class EventProcessor {
       commentBody += `\n\n---\n*Last updated: ${new Date().toISOString()}*`;
 
       // Update the comment
-      await this.updateComment(event, this.currentCommentId, commentBody);
+      await this.updateComment(event, context.commentId, commentBody, context);
     } catch (error) {
       logger.error('Failed to update progress comment:', error);
     }
@@ -677,7 +720,8 @@ export class EventProcessor {
   private async updateComment(
     event: GitLabWebhookEvent,
     commentId: number,
-    body: string
+    body: string,
+    context: ProcessingContext
   ): Promise<void> {
     try {
       switch (event.object_kind) {
@@ -727,9 +771,15 @@ export class EventProcessor {
         messageLength: body.length,
       });
     } catch (error) {
-      logger.error('Failed to update progress comment:', error);
+      logger.error('Failed to update comment:', error);
       // Fallback: create a new comment if update fails
-      await this.postComment(event, `**Updated Progress:**\n\n${body}`);
+      await this.postComment(
+        event,
+        `**Updated Progress:**
+
+${body}`,
+        context
+      );
     }
   }
 }

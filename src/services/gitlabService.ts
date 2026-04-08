@@ -356,35 +356,73 @@ export class GitLabService {
   }
 
   public async addIssueDiscussionReply(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _projectId: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _issueIid: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _discussionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _body: string
+    projectId: number,
+    issueIid: number,
+    discussionId: string,
+    body: string
   ): Promise<any> {
-    // Discussion reply is not yet implemented, silently fail to use fallback
-    // This avoids noisy error logs while still maintaining fallback behavior
-    logger.debug('Discussion reply not implemented, using fallback to regular comment');
-    throw new Error('Discussion reply not implemented');
+    try {
+      const discussion = await this.gitlab.IssueDiscussions.addNote(
+        projectId,
+        issueIid,
+        discussionId,
+        0,
+        body
+      );
+      const reply = Array.isArray(discussion?.notes)
+        ? discussion.notes[discussion.notes.length - 1]
+        : discussion;
+
+      logger.info('Added reply to issue discussion', {
+        projectId,
+        issueIid,
+        discussionId,
+        bodyLength: body.length,
+        noteId: reply?.id,
+      });
+
+      return reply;
+    } catch (error) {
+      logger.error('Failed to add issue discussion reply:', error);
+      throw new Error(
+        `Failed to add issue discussion reply: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   public async addMergeRequestDiscussionReply(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _projectId: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _mergeRequestIid: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _discussionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _body: string
+    projectId: number,
+    mergeRequestIid: number,
+    discussionId: string,
+    body: string
   ): Promise<any> {
-    // Discussion reply is not yet implemented, silently fail to use fallback
-    // This avoids noisy error logs while still maintaining fallback behavior
-    logger.debug('Discussion reply not implemented, using fallback to regular comment');
-    throw new Error('Discussion reply not implemented');
+    try {
+      const discussion = await this.gitlab.MergeRequestDiscussions.addNote(
+        projectId,
+        mergeRequestIid,
+        discussionId,
+        0,
+        body
+      );
+      const reply = Array.isArray(discussion?.notes)
+        ? discussion.notes[discussion.notes.length - 1]
+        : discussion;
+
+      logger.info('Added reply to merge request discussion', {
+        projectId,
+        mergeRequestIid,
+        discussionId,
+        bodyLength: body.length,
+        noteId: reply?.id,
+      });
+
+      return reply;
+    } catch (error) {
+      logger.error('Failed to add merge request discussion reply:', error);
+      throw new Error(
+        `Failed to add merge request discussion reply: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   public async testConnection(): Promise<boolean> {
