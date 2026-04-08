@@ -478,6 +478,13 @@ export class EventProcessor {
 
     try {
       await this.postComment(event, responseMessage, context);
+      await this.updateProgressComment(
+        event,
+        '🚨 Internal error occurred while processing your AI request.',
+        context,
+        true,
+        true
+      );
     } catch (commentError) {
       logger.error('Failed to post error comment:', commentError);
     }
