@@ -276,8 +276,8 @@ export class EventProcessor {
     try {
       // Create streaming callback for real-time updates
       const callback: StreamingProgressCallback = {
-        onProgress: async (message: string, isComplete?: boolean) => {
-          await this.updateProgressComment(event, message, context, isComplete, false);
+        onProgress: async (message: string) => {
+          await this.updateProgressComment(event, message, context, false, false);
         },
         onError: async (error: string) => {
           await this.updateProgressComment(event, error, context, true, true);
@@ -420,6 +420,13 @@ export class EventProcessor {
     }
 
     await this.postComment(event, responseMessage, context);
+    await this.updateProgressComment(
+      event,
+      `✅ ${providerName} processed your request successfully.`,
+      context,
+      true,
+      false
+    );
   }
 
   private async commitAndPushToNewBranch(
@@ -453,6 +460,13 @@ export class EventProcessor {
 
     const responseMessage = `❌ ${providerName} encountered an error while processing your request:\n\n\`\`\`\n${result.error}\n\`\`\``;
     await this.postComment(event, responseMessage, context);
+    await this.updateProgressComment(
+      event,
+      `✅ ${providerName} processed your request successfully.`,
+      context,
+      true,
+      false
+    );
   }
 
   private async reportError(

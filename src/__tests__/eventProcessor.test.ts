@@ -100,7 +100,8 @@ describe('EventProcessor', () => {
     mockCreateIssueComment
       .mockResolvedValueOnce({ id: 101 })
       .mockResolvedValueOnce({ id: 202 })
-      .mockResolvedValue({ id: 303 });
+      .mockResolvedValueOnce({ id: 303 })
+      .mockResolvedValue({ id: 304 });
     mockCreateMergeRequestComment.mockResolvedValue({ id: 404 });
     mockAddIssueComment.mockResolvedValue(undefined);
     mockAddMergeRequestComment.mockResolvedValue(undefined);
