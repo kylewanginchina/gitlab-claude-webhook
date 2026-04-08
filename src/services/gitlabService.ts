@@ -362,13 +362,16 @@ export class GitLabService {
     body: string
   ): Promise<any> {
     try {
-      const reply = await this.gitlab.IssueDiscussions.addNote(
+      const discussion = await this.gitlab.IssueDiscussions.addNote(
         projectId,
         issueIid,
         discussionId,
         0,
         body
       );
+      const reply = Array.isArray(discussion?.notes)
+        ? discussion.notes[discussion.notes.length - 1]
+        : discussion;
 
       logger.info('Added reply to issue discussion', {
         projectId,
@@ -394,13 +397,16 @@ export class GitLabService {
     body: string
   ): Promise<any> {
     try {
-      const reply = await this.gitlab.MergeRequestDiscussions.addNote(
+      const discussion = await this.gitlab.MergeRequestDiscussions.addNote(
         projectId,
         mergeRequestIid,
         discussionId,
         0,
         body
       );
+      const reply = Array.isArray(discussion?.notes)
+        ? discussion.notes[discussion.notes.length - 1]
+        : discussion;
 
       logger.info('Added reply to merge request discussion', {
         projectId,

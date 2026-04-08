@@ -42,8 +42,11 @@ jest.mock('../utils/logger', () => ({
 describe('GitLabService discussion replies', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockIssueDiscussionsAddNote.mockResolvedValue({ id: 11 });
-    mockMergeRequestDiscussionsAddNote.mockResolvedValue({ id: 22 });
+    mockIssueDiscussionsAddNote.mockResolvedValue({ id: 'discussion-1', notes: [{ id: 11 }] });
+    mockMergeRequestDiscussionsAddNote.mockResolvedValue({
+      id: 'discussion-2',
+      notes: [{ id: 22 }],
+    });
     mockUsersCurrent.mockResolvedValue({ id: 1 });
   });
 
