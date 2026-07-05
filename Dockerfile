@@ -31,8 +31,8 @@ RUN npm --prefix frontend run build
 RUN npm prune --omit=dev
 RUN npm --prefix frontend prune --omit=dev
 
-# Create work directory
-RUN mkdir -p /tmp/gitlab-claude-work /app/data
+# Create writable runtime directories
+RUN mkdir -p /tmp/gitlab-claude-work /app/data /app/logs
 
 # Create non-root user
 RUN addgroup -g 1001 -S claude && \
@@ -42,8 +42,9 @@ RUN addgroup -g 1001 -S claude && \
 RUN mkdir -p /home/claude/.codex && \
     chown -R claude:claude /home/claude/.codex
 
-# Change ownership of work directory
-RUN chown -R claude:claude /tmp/gitlab-claude-work /app
+# Change ownership of writable runtime directories only. Application files remain
+# root-owned but readable, which avoids a slow recursive chown over node_modules.
+RUN chown -R claude:claude /tmp/gitlab-claude-work /app/data /app/logs
 
 # Switch to non-root user
 USER claude
