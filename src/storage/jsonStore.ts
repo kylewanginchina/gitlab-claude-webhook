@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -26,7 +27,7 @@ export class JsonStore<T> {
     const dir = path.dirname(this.filePath);
     await fs.mkdir(dir, { recursive: true });
 
-    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    const tempPath = `${this.filePath}.${randomUUID()}.tmp`;
     const serialized = `${JSON.stringify(value, null, 2)}\n`;
 
     await fs.writeFile(tempPath, serialized, { encoding: 'utf8', mode: 0o600 });

@@ -45,4 +45,27 @@ describe('JsonStore', () => {
       `Failed to parse JSON store ${filePath}`
     );
   });
+
+  it('uses unique temp paths when two writes start in the same millisecond', async () => {
+    const filePath = await tempFile();
+    const store = new JsonStore<SampleRecord>(filePath);
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1710000000000);
+    const writeFileSpy = jest.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+    const renameSpy = jest.spyOn(fs, 'rename').mockResolvedValue(undefined);
+
+    try {
+      await Promise.all([
+        store.write({ name: 'first', count: 1 }),
+        store.write({ name: 'second', count: 2 }),
+      ]);
+
+      const tempPaths = writeFileSpy.mock.calls.map(([tempPath]) => tempPath as string);
+      expect(new Set(tempPaths).size).toBe(2);
+      expect(tempPaths[0]).not.toBe(tempPaths[1]);
+    } finally {
+      nowSpy.mockRestore();
+      writeFileSpy.mockRestore();
+      renameSpy.mockRestore();
+    }
+  });
 });
