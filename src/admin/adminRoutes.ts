@@ -7,6 +7,36 @@ export interface CreateAdminRouterOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+const RUNTIME_CONFIG_VALIDATION_ERRORS = new Set([
+  'GITLAB_TOKEN is required',
+  'WEBHOOK_SECRET is required',
+  'ANTHROPIC_AUTH_TOKEN or OPENAI_API_KEY is required',
+  'webhook.port must be between 1 and 65535',
+  'review.minConfidence must be between 0 and 100',
+]);
+
+function providerTestResult(
+  provider: 'gitlab' | 'claude' | 'codex',
+  configured: boolean,
+  baseUrl: string
+) {
+  return {
+    provider,
+    ok: Boolean(baseUrl && configured),
+    message: configured
+      ? `${provider === 'gitlab' ? 'GitLab' : provider === 'claude' ? 'Claude' : 'Codex'} ${
+          provider === 'gitlab' ? 'token' : provider === 'claude' ? 'token' : 'API key'
+        } is configured`
+      : `${provider === 'gitlab' ? 'GitLab' : provider === 'claude' ? 'Claude' : 'Codex'} ${
+          provider === 'gitlab' ? 'token' : provider === 'claude' ? 'token' : 'API key'
+        } is missing`,
+  };
+}
+
+function isRuntimeConfigValidationError(message: string): boolean {
+  return RUNTIME_CONFIG_VALIDATION_ERRORS.has(message);
+}
+
 export function createAdminRouter(options: CreateAdminRouterOptions): express.Router {
   const router = express.Router();
   const { runtimeConfigService } = options;
@@ -49,36 +79,24 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
   });
 
   router.post('/test/gitlab', (_req, res) => {
-    const config = runtimeConfigService.getConfig();
-    res.json({
-      provider: 'gitlab',
-      ok: Boolean(config.gitlab.baseUrl && config.gitlab.token),
-      message: config.gitlab.token ? 'GitLab token is configured' : 'GitLab token is missing',
-    });
+    const config = runtimeConfigService.getPublicConfig();
+    res.json(providerTestResult('gitlab', config.gitlab.token.configured, config.gitlab.baseUrl));
   });
 
   router.post('/test/claude', (_req, res) => {
-    const config = runtimeConfigService.getConfig();
-    res.json({
-      provider: 'claude',
-      ok: Boolean(config.claude.baseUrl && config.claude.authToken),
-      message: config.claude.authToken ? 'Claude token is configured' : 'Claude token is missing',
-    });
+    const config = runtimeConfigService.getPublicConfig();
+    res.json(providerTestResult('claude', config.claude.authToken.configured, config.claude.baseUrl));
   });
 
   router.post('/test/codex', (_req, res) => {
-    const config = runtimeConfigService.getConfig();
-    res.json({
-      provider: 'codex',
-      ok: Boolean(config.codex.baseUrl && config.codex.apiKey),
-      message: config.codex.apiKey ? 'Codex API key is configured' : 'Codex API key is missing',
-    });
+    const config = runtimeConfigService.getPublicConfig();
+    res.json(providerTestResult('codex', config.codex.apiKey.configured, config.codex.baseUrl));
   });
 
   router.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(400).json({ error: message });
+      res.status(isRuntimeConfigValidationError(message) ? 400 : 500).json({ error: message });
     }
   );
 
