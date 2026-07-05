@@ -1,19 +1,36 @@
 import express, { Request, Response } from 'express';
+import path from 'path';
+import { createAdminRouter } from '../admin/adminRoutes';
+import { RuntimeConfigService } from '../admin/runtimeConfigService';
 import { config } from '../utils/config';
+import { runtimeConfigService as defaultRuntimeConfigService } from '../utils/runtimeConfig';
 import { verifyGitLabSignature } from '../utils/webhook';
 import logger from '../utils/logger';
 import { GitLabWebhookEvent } from '../types/gitlab';
 import { EventProcessor } from '../services/eventProcessor';
 
+export interface WebhookServerOptions {
+  runtimeConfigService?: RuntimeConfigService;
+  env?: NodeJS.ProcessEnv;
+}
+
 export class WebhookServer {
   private app: express.Application;
   private eventProcessor: EventProcessor;
+  private runtimeConfigService: RuntimeConfigService;
+  private env: NodeJS.ProcessEnv;
 
-  constructor() {
+  constructor(options: WebhookServerOptions = {}) {
     this.app = express();
     this.eventProcessor = new EventProcessor();
+    this.runtimeConfigService = options.runtimeConfigService || defaultRuntimeConfigService;
+    this.env = options.env || process.env;
     this.setupMiddleware();
     this.setupRoutes();
+  }
+
+  public getApp(): express.Application {
+    return this.app;
   }
 
   private setupMiddleware(): void {
@@ -24,6 +41,20 @@ export class WebhookServer {
 
   private setupRoutes(): void {
     this.app.post('/webhook', this.handleWebhook.bind(this));
+
+    this.app.use(
+      '/api/admin',
+      createAdminRouter({
+        runtimeConfigService: this.runtimeConfigService,
+        env: this.env,
+      })
+    );
+
+    const adminStaticPath = path.resolve(process.cwd(), 'dist/public/admin');
+    this.app.use('/admin', express.static(adminStaticPath));
+    this.app.get('/admin/*', (_req: Request, res: Response) => {
+      res.sendFile(path.join(adminStaticPath, 'index.html'));
+    });
 
     this.app.get('/health', (req: Request, res: Response) => {
       const health = {
