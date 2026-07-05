@@ -198,4 +198,27 @@ describe('RuntimeConfigService', () => {
     expect(result.requiresRestart).toEqual(['workDir']);
     expect(service.getConfig().workDir).toBe('/tmp/alternate-workdir');
   });
+
+  it('returns a defensive copy from getConfig', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    const config = service.getConfig();
+    config.review.minConfidence = 5;
+    config.review.allowedCommands.push('/admin');
+    config.gitlab.token = 'mutated-secret';
+
+    expect(service.getConfig().review.minConfidence).toBe(80);
+    expect(service.getConfig().review.allowedCommands).toEqual(['/code-review']);
+    expect(service.getConfig().gitlab.token).toBe('glpat-secret');
+  });
 });

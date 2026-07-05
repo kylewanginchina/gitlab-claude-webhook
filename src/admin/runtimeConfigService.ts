@@ -102,7 +102,7 @@ export class RuntimeConfigService {
   }
 
   public getConfig(): RuntimeConfig {
-    return this.config;
+    return this.cloneConfig(this.config);
   }
 
   public getPublicConfig(): PublicRuntimeConfig {
@@ -229,5 +229,9 @@ export class RuntimeConfigService {
       fields.push('workDir');
     }
     return fields;
+  }
+
+  private cloneConfig(config: RuntimeConfig): RuntimeConfig {
+    return JSON.parse(JSON.stringify(config)) as RuntimeConfig;
   }
 }
