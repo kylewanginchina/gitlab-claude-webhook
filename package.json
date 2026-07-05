@@ -5,6 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "build:admin": "npm --prefix frontend install && npm --prefix frontend run build",
+    "build:all": "npm run build && npm run build:admin",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "lint": "eslint src/**/*.ts",

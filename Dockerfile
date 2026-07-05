@@ -9,22 +9,30 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 COPY tsconfig.json ./
+COPY frontend/package*.json ./frontend/
+COPY frontend/tsconfig.json ./frontend/
+COPY frontend/vite.config.ts ./frontend/
+COPY frontend/index.html ./frontend/
 
 # Install dependencies (skip prepare script to avoid premature build)
 RUN npm ci --ignore-scripts
+RUN npm --prefix frontend ci --ignore-scripts
 
 # Copy source code and .env.example
 COPY src/ ./src/
+COPY frontend/src/ ./frontend/src/
 COPY .env.example ./
 
 # Build the application
 RUN npm run build
+RUN npm --prefix frontend run build
 
 # Remove dev dependencies after build
 RUN npm prune --omit=dev
+RUN npm --prefix frontend prune --omit=dev
 
 # Create work directory
-RUN mkdir -p /tmp/gitlab-claude-work
+RUN mkdir -p /tmp/gitlab-claude-work /app/data
 
 # Create non-root user
 RUN addgroup -g 1001 -S claude && \
@@ -42,6 +50,7 @@ USER claude
 
 # Set HOME environment for the claude user
 ENV HOME=/home/claude
+ENV DATA_DIR=/app/data
 
 # Expose port
 EXPOSE 3000

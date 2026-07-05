@@ -31,6 +31,18 @@ GITLAB_TOKEN=glpat-your-token-here
 WEBHOOK_SECRET=your-secret-here
 PORT=3000
 
+# 管理后台配置
+ADMIN_TOKEN=change-me-admin-token
+DATA_DIR=/app/data
+
+# 运行时默认配置
+CLAUDE_DEFAULT_TIMEOUT_MINUTES=30
+CODEX_DEFAULT_TIMEOUT_MINUTES=30
+REVIEW_ENABLED=true
+REVIEW_MIN_CONFIDENCE=80
+REVIEW_MAX_CANDIDATE_FINDINGS=12
+REVIEW_MAX_FINAL_FINDINGS=8
+
 # 其他配置
 WORK_DIR=/tmp/gitlab-claude-work
 LOG_LEVEL=info
@@ -155,6 +167,12 @@ GitLab Token: ***h7i8j9k0
 | `CLAUDE_DEFAULT_MODEL` | Claude 默认模型 | `claude-sonnet-4-20250514` |
 | `CODEX_DEFAULT_MODEL` | Codex 默认模型 | `gpt-5.1-codex-max` |
 | `CODEX_REASONING_EFFORT` | Codex 推理等级 | `high` |
+| `CLAUDE_DEFAULT_TIMEOUT_MINUTES` | Claude 默认超时时间（分钟） | `30` |
+| `CODEX_DEFAULT_TIMEOUT_MINUTES` | Codex 默认超时时间（分钟） | `30` |
+| `REVIEW_ENABLED` | 是否默认启用 review | `true` |
+| `REVIEW_MIN_CONFIDENCE` | review 置信度阈值 | `80` |
+| `REVIEW_MAX_CANDIDATE_FINDINGS` | review 候选问题上限 | `12` |
+| `REVIEW_MAX_FINAL_FINDINGS` | review 最终问题上限 | `8` |
 
 ### 7. 配置模板
 
@@ -166,3 +184,32 @@ cp .env.example .env
 ```
 
 这样可以确保包含所有必要的配置项。
+
+## 管理后台配置
+
+管理后台路径为 `/admin`，管理 API 前缀为 `/api/admin`。
+
+必需变量：
+
+| 配置项 | 说明 |
+|--------|------|
+| `ADMIN_TOKEN` | 管理后台登录密钥，请使用长随机字符串 |
+| `DATA_DIR` | 运行时配置目录，Docker 默认 `/app/data` |
+
+保存到管理后台的运行时配置位于 `${DATA_DIR}/runtime-config.json`。第一次启动时如果文件不存在，服务会从 `.env` 生成初始配置。
+
+保存后立即影响新任务的配置包括：
+
+- 默认 Claude/Codex 模型
+- 默认 Claude/Codex 超时时间
+- Codex reasoning effort
+- 默认 AI provider
+- review confidence 阈值
+- review candidate/final finding 数量
+- GitLab/Claude/Codex token
+
+以下配置需要重启服务后生效：
+
+- webhook 监听端口
+- 工作目录
+- Docker volume 和 Docker network
