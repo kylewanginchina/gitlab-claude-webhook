@@ -7,14 +7,6 @@ export interface CreateAdminRouterOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-const RUNTIME_CONFIG_VALIDATION_ERRORS = new Set([
-  'GITLAB_TOKEN is required',
-  'WEBHOOK_SECRET is required',
-  'ANTHROPIC_AUTH_TOKEN or OPENAI_API_KEY is required',
-  'webhook.port must be between 1 and 65535',
-  'review.minConfidence must be between 0 and 100',
-]);
-
 function providerTestResult(
   provider: 'gitlab' | 'claude' | 'codex',
   configured: boolean,
@@ -34,7 +26,11 @@ function providerTestResult(
 }
 
 function isRuntimeConfigValidationError(message: string): boolean {
-  return RUNTIME_CONFIG_VALIDATION_ERRORS.has(message);
+  if (/^[A-Z0-9_]+(?:\s+or\s+[A-Z0-9_]+)* is required$/.test(message)) {
+    return true;
+  }
+
+  return /^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+ (?:must|is required)\b/.test(message);
 }
 
 export function createAdminRouter(options: CreateAdminRouterOptions): express.Router {

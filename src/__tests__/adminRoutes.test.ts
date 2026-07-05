@@ -328,6 +328,49 @@ describe('admin routes', () => {
     expect(JSON.stringify(response.body)).not.toContain('masked');
   });
 
+  it('tests Codex config from public secret metadata without reading raw config', async () => {
+    const getConfig = jest.fn(() => {
+      throw new Error('raw config should not be used');
+    });
+    const app = buildAppWithStubbedService({
+      getConfig,
+      getPublicConfig: jest.fn(() =>
+        buildPublicConfig({
+          codex: {
+            baseUrl: 'https://openai.example.com/v1',
+            apiKey: { configured: true, masked: '********ikey' },
+            defaultModel: 'gpt-5.1-codex-max',
+            reasoningEffort: 'high',
+            defaultTimeoutMinutes: 30,
+          },
+        })
+      ),
+    });
+
+    const response = await request(app)
+      .post('/api/admin/test/codex')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      provider: 'codex',
+      ok: true,
+      message: 'Codex API key is configured',
+    });
+    expect(getConfig).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.body)).not.toContain('openai.example.com');
+    expect(JSON.stringify(response.body)).not.toContain('********ikey');
+    expect(JSON.stringify(response.body)).not.toContain('apikey');
+  });
+
+  it('rejects missing admin key on provider test routes', async () => {
+    const app = buildAppWithStubbedService({
+      getPublicConfig: jest.fn(() => buildPublicConfig()),
+    });
+
+    await request(app).post('/api/admin/test/codex').expect(401, { error: 'Unauthorized' });
+  });
+
   it('returns 400 for runtime config validation failures', async () => {
     const app = buildAppWithStubbedService({
       updateConfig: jest.fn(async () => {
@@ -340,6 +383,35 @@ describe('admin routes', () => {
       .set('X-Admin-Key', 'admin-secret')
       .send({ webhook: { port: 70000 } })
       .expect(400, { error: 'webhook.port must be between 1 and 65535' });
+  });
+
+  it('returns 400 for future runtime config validation-style failures', async () => {
+    const app = buildAppWithStubbedService({
+      updateConfig: jest.fn(async () => {
+        throw new Error('review.passConcurrency must be at least 1');
+      }),
+    });
+
+    await request(app)
+      .put('/api/admin/config')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ review: { passConcurrency: 0 } })
+      .expect(400, { error: 'review.passConcurrency must be at least 1' });
+  });
+
+  it('returns 500 for parse/store failures instead of misclassifying them as validation errors', async () => {
+    const app = buildAppWithStubbedService({
+      reload: jest.fn(async () => {
+        throw new Error('Failed to parse JSON store /tmp/runtime-config.json: Unexpected token }');
+      }),
+    });
+
+    await request(app)
+      .post('/api/admin/config/reload')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(500, {
+        error: 'Failed to parse JSON store /tmp/runtime-config.json: Unexpected token }',
+      });
   });
 
   it('returns 500 for unexpected reload failures', async () => {
