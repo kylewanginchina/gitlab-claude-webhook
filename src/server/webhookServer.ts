@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { createAdminRouter } from '../admin/adminRoutes';
 import { RuntimeConfigService } from '../admin/runtimeConfigService';
-import { config } from '../utils/config';
 import { runtimeConfigService as defaultRuntimeConfigService } from '../utils/runtimeConfig';
 import { verifyGitLabSignature } from '../utils/webhook';
 import logger from '../utils/logger';
@@ -12,6 +11,7 @@ import { EventProcessor } from '../services/eventProcessor';
 export interface WebhookServerOptions {
   runtimeConfigService?: RuntimeConfigService;
   env?: NodeJS.ProcessEnv;
+  adminStaticPath?: string;
 }
 
 export class WebhookServer {
@@ -19,12 +19,15 @@ export class WebhookServer {
   private eventProcessor: EventProcessor;
   private runtimeConfigService: RuntimeConfigService;
   private env: NodeJS.ProcessEnv;
+  private adminStaticPath: string;
 
   constructor(options: WebhookServerOptions = {}) {
     this.app = express();
     this.eventProcessor = new EventProcessor();
     this.runtimeConfigService = options.runtimeConfigService || defaultRuntimeConfigService;
     this.env = options.env || process.env;
+    this.adminStaticPath =
+      options.adminStaticPath || path.resolve(process.cwd(), 'dist/public/admin');
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -50,10 +53,9 @@ export class WebhookServer {
       })
     );
 
-    const adminStaticPath = path.resolve(process.cwd(), 'dist/public/admin');
-    this.app.use('/admin', express.static(adminStaticPath));
+    this.app.use('/admin', express.static(this.adminStaticPath));
     this.app.get('/admin/*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(adminStaticPath, 'index.html'));
+      res.sendFile(path.join(this.adminStaticPath, 'index.html'));
     });
 
     this.app.get('/health', (req: Request, res: Response) => {
@@ -111,8 +113,9 @@ export class WebhookServer {
 
   public start(): void {
     try {
-      this.app.listen(config.webhook.port, () => {
-        logger.info(`GitLab Claude Webhook server started on port ${config.webhook.port}`);
+      const port = this.runtimeConfigService.getConfig().webhook.port;
+      this.app.listen(port, () => {
+        logger.info(`GitLab Claude Webhook server started on port ${port}`);
       });
     } catch (error) {
       logger.error('Failed to start server:', error);
