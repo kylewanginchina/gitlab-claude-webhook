@@ -207,6 +207,14 @@ For detailed configuration instructions including environment variable expansion
 
 📋 **[Environment Configuration Guide](docs/CONFIG.md)**
 
+### Admin Console
+
+The service includes an authenticated admin console at `/admin` for runtime configuration, masked secret visibility, and basic provider status checks.
+
+Set `ADMIN_TOKEN` before enabling the console in production. Runtime settings are stored in `${DATA_DIR}/runtime-config.json` and are initialized from environment variables on first startup.
+
+See [Admin Console Guide](docs/admin-console.md).
+
 ### Environment Variables
 
 **Core Required:**
