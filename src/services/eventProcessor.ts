@@ -17,6 +17,7 @@ import {
   ReviewFinding,
   ReviewPassResult,
 } from './gitlabReviewService';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 export class EventProcessor {
   private projectManager: ProjectManager;
@@ -498,6 +499,7 @@ export class EventProcessor {
 
     const scoringErrors: string[] = [];
     const scoringErrorLabels: string[] = [];
+    const minConfidence = runtimeConfigService.getConfig().review.minConfidence;
     const scoredFindings = scoredResults
       .filter(result => {
         if (result.status === 'fulfilled') {
@@ -512,7 +514,7 @@ export class EventProcessor {
       })
       .map(result => (result as PromiseFulfilledResult<ReviewFinding | null>).value)
       .filter((finding: ReviewFinding | null): finding is ReviewFinding => Boolean(finding))
-      .filter((finding: ReviewFinding) => finding.confidence >= 80);
+      .filter((finding: ReviewFinding) => finding.confidence >= minConfidence);
 
     if (scoredFindings.length === 0) {
       if (passErrors.length > 0 || scoringErrors.length > 0) {

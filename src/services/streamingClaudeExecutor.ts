@@ -5,7 +5,6 @@ import {
   type SDKAssistantMessage,
   type Query,
 } from '@anthropic-ai/claude-agent-sdk';
-import { config } from '../utils/config';
 import logger from '../utils/logger';
 import {
   ProcessResult,
@@ -14,10 +13,10 @@ import {
   StreamingProgressCallback,
 } from '../types/common';
 import { ProjectManager } from './projectManager';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 export class StreamingClaudeExecutor {
   private projectManager: ProjectManager;
-  private defaultTimeoutMs = 1800000; // 30 minutes
 
   constructor() {
     this.projectManager = new ProjectManager();
@@ -82,8 +81,10 @@ export class StreamingClaudeExecutor {
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
     const fullPrompt = this.buildPromptWithContext(command, context);
-    const model = context.model || config.anthropic.defaultModel;
-    const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
+    const runtimeConfig = runtimeConfigService.getConfig();
+    const model = context.model || runtimeConfig.claude.defaultModel;
+    const timeoutMs =
+      context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
     const isReviewMode = context.mode === 'review';
 
     const env: Record<string, string> = {
@@ -92,8 +93,8 @@ export class StreamingClaudeExecutor {
           (entry): entry is [string, string] => entry[1] !== undefined
         )
       ),
-      ANTHROPIC_BASE_URL: config.anthropic.baseUrl,
-      ANTHROPIC_API_KEY: config.anthropic.authToken,
+      ANTHROPIC_BASE_URL: runtimeConfig.claude.baseUrl,
+      ANTHROPIC_API_KEY: runtimeConfig.claude.authToken,
     };
 
     logger.info('Executing Claude via Agent SDK', {

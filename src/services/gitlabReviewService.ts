@@ -3,6 +3,7 @@ import path from 'path';
 import { simpleGit } from 'simple-git';
 import { GitLabWebhookEvent } from '../types/gitlab';
 import logger from '../utils/logger';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 import { GitLabService } from './gitlabService';
 
 interface MergeRequestDiff {
@@ -69,8 +70,6 @@ interface ReviewPassTemplate {
 
 export class GitLabReviewService {
   private readonly reviewMarkerPrefix = 'gitlab-claude-code-review';
-  private readonly maxCandidateFindings = 12;
-  private readonly maxFinalFindings = 8;
   private readonly reviewPassTemplates: ReviewPassTemplate[] = [
     {
       id: 'claude-guidelines',
@@ -111,6 +110,10 @@ export class GitLabReviewService {
   ];
 
   constructor(private gitlabService: GitLabService = new GitLabService()) {}
+
+  private getReviewConfig() {
+    return runtimeConfigService.getConfig().review;
+  }
 
   public async prepareReviewContext(
     projectPath: string,
@@ -339,7 +342,7 @@ export class GitLabReviewService {
 
         return b.confidence - a.confidence;
       })
-      .slice(0, this.maxCandidateFindings);
+      .slice(0, this.getReviewConfig().maxCandidateFindings);
   }
 
   public buildFinalReview(
@@ -349,7 +352,7 @@ export class GitLabReviewService {
   ): ParsedReviewResult {
     const keptFindings = [...findings]
       .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, this.maxFinalFindings);
+      .slice(0, this.getReviewConfig().maxFinalFindings);
 
     const summary =
       keptFindings.length === 0

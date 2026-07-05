@@ -9,7 +9,6 @@ const loadCodexSDK = async () => {
   return CodexSDK;
 };
 
-import { config } from '../utils/config';
 import logger from '../utils/logger';
 import {
   ProcessResult,
@@ -18,10 +17,10 @@ import {
   StreamingProgressCallback,
 } from '../types/common';
 import { ProjectManager } from './projectManager';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 export class CodexExecutor {
   private projectManager: ProjectManager;
-  private defaultTimeoutMs = 1800000; // 30 minutes
 
   constructor() {
     this.projectManager = new ProjectManager();
@@ -87,9 +86,11 @@ export class CodexExecutor {
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
     const fullPrompt = this.buildPromptWithContext(command, context);
-    const model = context.model || config.openai.defaultModel;
-    const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
-    const reasoningEffort = config.openai.reasoningEffort;
+    const runtimeConfig = runtimeConfigService.getConfig();
+    const model = context.model || runtimeConfig.codex.defaultModel;
+    const timeoutMs =
+      context.timeoutMs || runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000;
+    const reasoningEffort = runtimeConfig.codex.reasoningEffort;
 
     logger.info('Executing Codex via SDK', {
       model,
@@ -101,8 +102,8 @@ export class CodexExecutor {
     // Create Codex SDK instance
     const sdk = await loadCodexSDK();
     const codex = new (sdk.Codex || sdk.default?.Codex || sdk.default || sdk)({
-      apiKey: config.openai.apiKey,
-      baseUrl: config.openai.baseUrl,
+      apiKey: runtimeConfig.codex.apiKey,
+      baseUrl: runtimeConfig.codex.baseUrl,
     });
 
     // Start a thread with full-auto equivalent settings

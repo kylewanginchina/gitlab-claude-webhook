@@ -1,14 +1,15 @@
 import { Gitlab } from '@gitbeaker/node';
-import { config } from '../utils/config';
 import logger from '../utils/logger';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 export class GitLabService {
   private gitlab: InstanceType<typeof Gitlab>;
 
   constructor() {
+    const runtimeConfig = runtimeConfigService.getConfig();
     this.gitlab = new Gitlab({
-      host: config.gitlab.baseUrl,
-      token: config.gitlab.token,
+      host: runtimeConfig.gitlab.baseUrl,
+      token: runtimeConfig.gitlab.token,
     });
   }
 
@@ -498,11 +499,12 @@ export class GitLabService {
   }
 
   private async postDiscussionReply(path: string, body: string): Promise<any> {
-    const url = new URL(`/api/v4${path}`, config.gitlab.baseUrl).toString();
+    const runtimeConfig = runtimeConfigService.getConfig();
+    const url = new URL(`/api/v4${path}`, runtimeConfig.gitlab.baseUrl).toString();
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'PRIVATE-TOKEN': config.gitlab.token,
+        'PRIVATE-TOKEN': runtimeConfig.gitlab.token,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ body }),
