@@ -30,7 +30,15 @@ function isRuntimeConfigValidationError(message: string): boolean {
     return true;
   }
 
-  return /^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+ (?:must|is required)\b/.test(message);
+  if (message === 'runtime config patch must be an object') {
+    return true;
+  }
+
+  if (/^[a-z][a-zA-Z0-9]* section must be an object$/.test(message)) {
+    return true;
+  }
+
+  return /^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)? (?:must|is required)\b/.test(message);
 }
 
 export function createAdminRouter(options: CreateAdminRouterOptions): express.Router {

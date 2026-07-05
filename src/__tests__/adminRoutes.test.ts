@@ -399,6 +399,24 @@ describe('admin routes', () => {
       .expect(400, { error: 'review.passConcurrency must be at least 1' });
   });
 
+  it.each([
+    ['root patch', 'runtime config patch must be an object', []],
+    ['section patch', 'claude section must be an object', { claude: 'invalid' }],
+    ['top-level field', 'logLevel must be one of: debug, info, warn, error', { logLevel: 'trace' }],
+  ])('returns 400 for malformed runtime config payloads: %s', async (_label, message, payload) => {
+    const app = buildAppWithStubbedService({
+      updateConfig: jest.fn(async () => {
+        throw new Error(message);
+      }),
+    });
+
+    await request(app)
+      .put('/api/admin/config')
+      .set('X-Admin-Key', 'admin-secret')
+      .send(payload)
+      .expect(400, { error: message });
+  });
+
   it('returns 500 for parse/store failures instead of misclassifying them as validation errors', async () => {
     const app = buildAppWithStubbedService({
       reload: jest.fn(async () => {
