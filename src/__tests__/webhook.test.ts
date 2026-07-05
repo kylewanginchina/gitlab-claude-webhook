@@ -187,6 +187,12 @@ describe('Webhook Utils', () => {
       expect(isCodeReviewCommand('/code-review focus on bugs')).toBe(true);
     });
 
+    it('should use configured review commands with exact-or-whitespace matching', () => {
+      expect(isCodeReviewCommand('/review-me', ['/review-me'])).toBe(true);
+      expect(isCodeReviewCommand('/review-me auth edge cases', ['/review-me'])).toBe(true);
+      expect(isCodeReviewCommand('/review-me-now', ['/review-me'])).toBe(false);
+    });
+
     it('should reject non-review commands', () => {
       expect(isCodeReviewCommand('review this merge request')).toBe(false);
       expect(isCodeReviewCommand('fix the bug')).toBe(false);
@@ -197,6 +203,12 @@ describe('Webhook Utils', () => {
     it('should extract trailing review focus text', () => {
       expect(extractCodeReviewFocus('/code-review focus on auth edge cases')).toBe(
         'focus on auth edge cases'
+      );
+    });
+
+    it('should extract focus from the matched configured review command', () => {
+      expect(extractCodeReviewFocus('/review-me auth edge cases', ['/review-me'])).toBe(
+        'auth edge cases'
       );
     });
 

@@ -11,6 +11,11 @@ export interface AIInstructionResult {
   command: string;
 }
 
+interface CodeReviewCommandMatch {
+  matchedCommand: string;
+  focus?: string;
+}
+
 function getWebhookSecret(): string {
   if (runtimeConfigService.isLoaded()) {
     return runtimeConfigService.getConfig().webhook.secret;
@@ -147,23 +152,46 @@ export function extractAIInstructions(text: string): AIInstructionResult | null 
   return null;
 }
 
-export function isCodeReviewCommand(command: string): boolean {
+function findCodeReviewCommandMatch(
+  command: string,
+  allowedCommands: string[] = ['/code-review']
+): CodeReviewCommandMatch | null {
   if (!command) {
-    return false;
+    return null;
   }
 
-  const normalized = command.trim().toLowerCase();
-  return normalized === '/code-review' || normalized.startsWith('/code-review ');
+  const trimmedCommand = command.trim();
+  const normalizedCommand = trimmedCommand.toLowerCase();
+
+  for (const configuredCommand of allowedCommands) {
+    const trimmedConfiguredCommand = configuredCommand.trim();
+    if (!trimmedConfiguredCommand) {
+      continue;
+    }
+
+    const normalizedConfiguredCommand = trimmedConfiguredCommand.toLowerCase();
+    if (
+      normalizedCommand === normalizedConfiguredCommand ||
+      (normalizedCommand.startsWith(normalizedConfiguredCommand) &&
+        /\s/.test(trimmedCommand.charAt(trimmedConfiguredCommand.length)))
+    ) {
+      const focus = trimmedCommand.slice(trimmedConfiguredCommand.length).trim();
+      return {
+        matchedCommand: trimmedConfiguredCommand,
+        focus: focus || undefined,
+      };
+    }
+  }
+
+  return null;
 }
 
-export function extractCodeReviewFocus(command: string): string | undefined {
-  if (!isCodeReviewCommand(command)) {
-    return undefined;
-  }
+export function isCodeReviewCommand(command: string, allowedCommands?: string[]): boolean {
+  return Boolean(findCodeReviewCommandMatch(command, allowedCommands));
+}
 
-  const trimmed = command.trim();
-  const focus = trimmed.slice('/code-review'.length).trim();
-  return focus || undefined;
+export function extractCodeReviewFocus(command: string, allowedCommands?: string[]): string | undefined {
+  return findCodeReviewCommandMatch(command, allowedCommands)?.focus;
 }
 
 /**

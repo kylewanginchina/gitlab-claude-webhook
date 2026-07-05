@@ -4,21 +4,25 @@ import { Config, AIProvider, ReasoningEffort } from '../types/common';
  * Expand environment variables in a string
  * Supports ${VAR} and $VAR syntax
  */
-function expandEnvVars(str: string): string {
+export function expandEnvVars(str: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!str) return str;
 
   return str.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/gi, (match, braced, unbraced) => {
     const varName = braced || unbraced;
-    return process.env[varName] || match;
+    return env[varName] || match;
   });
 }
 
 /**
  * Get environment variable with expansion support
  */
-function getEnvVar(key: string, defaultValue: string = ''): string {
-  const value = process.env[key] || defaultValue;
-  return expandEnvVars(value);
+function getEnvVar(
+  key: string,
+  defaultValue: string = '',
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const value = env[key] || defaultValue;
+  return expandEnvVars(value, env);
 }
 
 /**

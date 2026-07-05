@@ -30,6 +30,20 @@ describe('RuntimeConfigService', () => {
     expect(config.review.maxFinalFindings).toBe(8);
   });
 
+  it('expands environment variable references from the injected env when creating config', () => {
+    const config = createConfigFromEnv({
+      TOKEN_SOURCE: 'anthropic-expanded-token',
+      SECRET_SOURCE: 'expanded-webhook-secret',
+      GITLAB_TOKEN: 'glpat-secret',
+      WEBHOOK_SECRET: '$SECRET_SOURCE',
+      ANTHROPIC_AUTH_TOKEN: '${TOKEN_SOURCE}',
+      OPENAI_API_KEY: 'openai-secret',
+    } as NodeJS.ProcessEnv);
+
+    expect(config.claude.authToken).toBe('anthropic-expanded-token');
+    expect(config.webhook.secret).toBe('expanded-webhook-secret');
+  });
+
   it('initializes from env and writes runtime config file', async () => {
     const dir = await tempDir();
     const service = new RuntimeConfigService({
@@ -106,6 +120,53 @@ describe('RuntimeConfigService', () => {
     expect(service.getConfig().review.minConfidence).toBe(85);
   });
 
+  it('keeps existing secrets on blank secret patches and drops unknown nested fields', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    await service.updateConfig(
+      {
+        claude: {
+          authToken: '',
+          defaultModel: 'claude-opus-test',
+          unexpectedField: 'ignored',
+        } as any,
+        review: {
+          allowedCommands: ['/review-me'],
+          extraSetting: true,
+        } as any,
+        webhook: {
+          secret: '',
+          anotherUnknownField: 'ignored',
+        } as any,
+      } as any,
+      'admin'
+    );
+
+    const config = service.getConfig();
+    const persisted = await fs.readFile(path.join(dir, 'runtime-config.json'), 'utf8');
+
+    expect(config.claude.authToken).toBe('anthropic-secret');
+    expect(config.claude.defaultModel).toBe('claude-opus-test');
+    expect(config.webhook.secret).toBe('webhook-secret');
+    expect(config.review.allowedCommands).toEqual(['/review-me']);
+    expect((config.claude as any).unexpectedField).toBeUndefined();
+    expect((config.review as any).extraSetting).toBeUndefined();
+    expect((config.webhook as any).anotherUnknownField).toBeUndefined();
+    expect(persisted).not.toContain('unexpectedField');
+    expect(persisted).not.toContain('extraSetting');
+    expect(persisted).not.toContain('anotherUnknownField');
+  });
+
   it('reports restart-required fields when webhook port changes', async () => {
     const dir = await tempDir();
     const service = new RuntimeConfigService({
@@ -145,6 +206,94 @@ describe('RuntimeConfigService', () => {
     await service.reload();
 
     expect(service.getConfig().logLevel).toBe('warn');
+  });
+
+  it.each([
+    ['claude', 'claude section must be an object', { claude: 'bad' }],
+    ['codex', 'codex section must be an object', { codex: 'bad' }],
+    ['gitlab', 'gitlab section must be an object', { gitlab: 'bad' }],
+    ['webhook', 'webhook section must be an object', { webhook: 'bad' }],
+    ['ai', 'ai section must be an object', { ai: 'bad' }],
+    ['review', 'review section must be an object', { review: 'bad' }],
+    ['ai.defaultProvider', 'ai.defaultProvider must be one of: claude, codex', { ai: { defaultProvider: 'other' } }],
+    [
+      'review.defaultProvider',
+      'review.defaultProvider must be one of: claude-multipass, codex-multipass',
+      { review: { defaultProvider: 'other' } },
+    ],
+    [
+      'codex.reasoningEffort',
+      'codex.reasoningEffort must be one of: minimal, low, medium, high, xhigh',
+      { codex: { reasoningEffort: 'ultra' } },
+    ],
+    [
+      'claude.defaultTimeoutMinutes',
+      'claude.defaultTimeoutMinutes must be at least 1',
+      { claude: { defaultTimeoutMinutes: 0 } },
+    ],
+    [
+      'codex.defaultTimeoutMinutes',
+      'codex.defaultTimeoutMinutes must be at least 1',
+      { codex: { defaultTimeoutMinutes: 0 } },
+    ],
+    [
+      'review.maxCandidateFindings',
+      'review.maxCandidateFindings must be at least 1',
+      { review: { maxCandidateFindings: 0 } },
+    ],
+    [
+      'review.maxFinalFindings',
+      'review.maxFinalFindings must be at least 1',
+      { review: { maxFinalFindings: 0 } },
+    ],
+    [
+      'review.passConcurrency',
+      'review.passConcurrency must be at least 1',
+      { review: { passConcurrency: 0 } },
+    ],
+    [
+      'review.scoringConcurrency',
+      'review.scoringConcurrency must be at least 1',
+      { review: { scoringConcurrency: 0 } },
+    ],
+    ['review.enabled', 'review.enabled must be a boolean', { review: { enabled: 'true' } }],
+    ['review.skipDraft', 'review.skipDraft must be a boolean', { review: { skipDraft: 'true' } }],
+    [
+      'review.skipExistingSha',
+      'review.skipExistingSha must be a boolean',
+      { review: { skipExistingSha: 'true' } },
+    ],
+    [
+      'review.allowedCommands',
+      'review.allowedCommands must be an array of strings',
+      { review: { allowedCommands: '/code-review' } },
+    ],
+    [
+      'review.allowedCommands item',
+      'review.allowedCommands must be an array of strings',
+      { review: { allowedCommands: ['/code-review', 4] } },
+    ],
+    ['logLevel', 'logLevel must be one of: debug, info, warn, error', { logLevel: 'trace' }],
+    ['webhook.port', 'webhook.port must be between 1 and 65535', { webhook: { port: 0 } }],
+    [
+      'review.minConfidence',
+      'review.minConfidence must be between 0 and 100',
+      { review: { minConfidence: 101 } },
+    ],
+  ])('rejects invalid runtime config patch for %s', async (_label, errorMessage, patch) => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    await expect(service.updateConfig(patch as any, 'admin')).rejects.toThrow(errorMessage);
   });
 
   it('keeps in-memory config unchanged when persistence fails during update', async () => {

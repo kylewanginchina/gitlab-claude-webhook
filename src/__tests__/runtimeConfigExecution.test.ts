@@ -11,6 +11,7 @@ jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
 }));
 
 jest.mock('../utils/config', () => ({
+  expandEnvVars: (value: string) => value,
   config: {
     anthropic: {
       baseUrl: 'https://claude.static.example',
@@ -188,6 +189,31 @@ function createReviewContext(): PreparedReviewContext {
     headSha: 'head-sha',
     diffs: [{ old_path: 'src/a.ts', new_path: 'src/a.ts' }],
     claudeGuidelineFiles: ['CLAUDE.md'],
+  };
+}
+
+function createMergeRequestEvent(): GitLabWebhookEvent {
+  return {
+    object_kind: 'merge_request',
+    user: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
+    project: {
+      id: 1,
+      name: 'project',
+      web_url: 'https://gitlab.example.com/group/project',
+      default_branch: 'main',
+    },
+    object_attributes: {},
+    merge_request: {
+      id: 2,
+      iid: 2,
+      title: 'Test MR',
+      description: '',
+      state: 'opened',
+      web_url: 'https://gitlab.example.com/group/project/-/merge_requests/2',
+      source_branch: 'feature/runtime-config',
+      target_branch: 'main',
+      author: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
+    },
   };
 }
 
@@ -564,28 +590,7 @@ describe('runtime config execution paths', () => {
       confidence: 85,
     });
 
-    const event: GitLabWebhookEvent = {
-      object_kind: 'merge_request',
-      user: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
-      project: {
-        id: 1,
-        name: 'project',
-        web_url: 'https://gitlab.example.com/group/project',
-        default_branch: 'main',
-      },
-      object_attributes: {},
-      merge_request: {
-        id: 2,
-        iid: 2,
-        title: 'Test MR',
-        description: '',
-        state: 'opened',
-        web_url: 'https://gitlab.example.com/group/project/-/merge_requests/2',
-        source_branch: 'feature/runtime-config',
-        target_branch: 'main',
-        author: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
-      },
-    };
+    const event = createMergeRequestEvent();
     const instruction: AIInstruction = {
       command: '/code-review',
       context: 'MR #2',
@@ -604,5 +609,381 @@ describe('runtime config execution paths', () => {
     expect(mockReviewService.buildNoIssuesMessage).toHaveBeenCalled();
     expect((processor as any).postComment).toHaveBeenCalledWith(event, 'NO_ISSUES');
     expect(mockReviewService.postReview).not.toHaveBeenCalled();
+  });
+
+  it('skips review commands when runtime review is disabled', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      review: {
+        enabled: false,
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    const processor = new EventProcessor();
+    (processor as any).createProgressComment = jest.fn().mockResolvedValue(101);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeCodeReview = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeWithProvider = jest.fn();
+    (processor as any).projectManager = {
+      prepareProject: jest.fn(),
+      cleanup: jest.fn(),
+    };
+
+    const event = createMergeRequestEvent();
+    const instruction: AIInstruction = {
+      command: '/code-review',
+      context: 'MR #2',
+      branch: 'feature/runtime-config',
+      provider: 'claude',
+    };
+
+    await (processor as any).executeInstruction(event, instruction);
+
+    expect((processor as any).projectManager.prepareProject).not.toHaveBeenCalled();
+    expect((processor as any).executeCodeReview).not.toHaveBeenCalled();
+    expect((processor as any).executeWithProvider).not.toHaveBeenCalled();
+    expect((processor as any).postComment).toHaveBeenCalledWith(
+      event,
+      'Skipped code review: review commands are currently disabled in runtime settings.'
+    );
+    expect((processor as any).updateProgressComment).toHaveBeenCalledWith(
+      event,
+      'Skipped code review: review commands are currently disabled in runtime settings.',
+      true
+    );
+  });
+
+  it('uses configured review commands and extracts focus from the matched command', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      review: {
+        allowedCommands: ['/review-me'],
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    const reviewContext = createReviewContext();
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest.fn().mockReturnValue([
+        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
+      ]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([]),
+      buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn(),
+      postReview: jest.fn(),
+    };
+
+    const processor = new EventProcessor();
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).createProgressComment = jest.fn().mockResolvedValue(101);
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+    (processor as any).projectManager = {
+      prepareProject: jest.fn().mockResolvedValue('/tmp/project'),
+      cleanup: jest.fn().mockResolvedValue(undefined),
+    };
+    (processor as any).executeReviewPass = jest.fn().mockResolvedValue({
+      passId: 'pass-1',
+      label: 'Pass 1',
+      summary: 'Summary',
+      findings: [],
+    });
+
+    await (processor as any).executeInstruction(createMergeRequestEvent(), {
+      command: '/review-me auth edge cases',
+      context: 'MR #2',
+      branch: 'feature/runtime-config',
+      provider: 'claude',
+    });
+
+    expect(mockReviewService.buildReviewPasses).toHaveBeenCalledWith(
+      reviewContext,
+      'auth edge cases'
+    );
+  });
+
+  it('allows draft merge requests when review.skipDraft is false', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      review: {
+        skipDraft: false,
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    const reviewContext = {
+      ...createReviewContext(),
+      draft: true,
+      workInProgress: true,
+    };
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest.fn().mockReturnValue([
+        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
+      ]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([]),
+      buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn(),
+      postReview: jest.fn(),
+    };
+
+    const processor = new EventProcessor();
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeReviewPass = jest.fn().mockResolvedValue({
+      passId: 'pass-1',
+      label: 'Pass 1',
+      summary: 'Summary',
+      findings: [],
+    });
+
+    await (processor as any).executeCodeReview(
+      createMergeRequestEvent(),
+      {
+        command: '/code-review',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      'main',
+      '/tmp/project',
+      createCallback()
+    );
+
+    expect(mockReviewService.buildReviewPasses).toHaveBeenCalled();
+    expect((processor as any).postComment).toHaveBeenCalledWith(createMergeRequestEvent(), 'NO_ISSUES');
+  });
+
+  it('allows duplicate review SHAs when review.skipExistingSha is false', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      review: {
+        skipExistingSha: false,
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    const reviewContext = createReviewContext();
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(true),
+      buildReviewPasses: jest.fn().mockReturnValue([
+        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
+      ]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([]),
+      buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn(),
+      postReview: jest.fn(),
+    };
+
+    const processor = new EventProcessor();
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeReviewPass = jest.fn().mockResolvedValue({
+      passId: 'pass-1',
+      label: 'Pass 1',
+      summary: 'Summary',
+      findings: [],
+    });
+
+    await (processor as any).executeCodeReview(
+      createMergeRequestEvent(),
+      {
+        command: '/code-review',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      'main',
+      '/tmp/project',
+      createCallback()
+    );
+
+    expect(mockReviewService.hasExistingReview).toHaveBeenCalled();
+    expect(mockReviewService.buildReviewPasses).toHaveBeenCalled();
+  });
+
+  it('uses the configured review provider for review passes and scoring', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      review: {
+        defaultProvider: 'codex-multipass',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    const reviewContext = createReviewContext();
+    const candidateFinding: ReviewFinding = {
+      title: 'Possible bug',
+      body: 'Needs validation',
+      confidence: 40,
+      path: 'src/a.ts',
+      line: 10,
+      lineType: 'new',
+      sources: ['Pass 1'],
+    };
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest.fn().mockReturnValue([
+        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
+      ]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([candidateFinding]),
+      buildNoIssuesMessage: jest.fn(),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn().mockReturnValue({
+        summary: 'Summary',
+        findings: [candidateFinding],
+      }),
+      postReview: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const processor = new EventProcessor();
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+
+    const executeReviewPassSpy = jest
+      .spyOn(processor as any, 'executeReviewPass')
+      .mockResolvedValue({
+        passId: 'pass-1',
+        label: 'Pass 1',
+        summary: 'Summary',
+        findings: [candidateFinding],
+      });
+    const executeReviewScoreSpy = jest
+      .spyOn(processor as any, 'executeReviewScore')
+      .mockResolvedValue({
+        ...candidateFinding,
+        confidence: 95,
+      });
+
+    await (processor as any).executeCodeReview(
+      createMergeRequestEvent(),
+      {
+        command: '/code-review',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      'main',
+      '/tmp/project',
+      createCallback()
+    );
+
+    expect((executeReviewPassSpy.mock.calls[0]?.[0] as AIInstruction).provider).toBe('codex');
+    expect((executeReviewScoreSpy.mock.calls[0]?.[0] as AIInstruction).provider).toBe('codex');
+  });
+
+  it('limits review pass and scoring concurrency from runtime settings', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      review: {
+        passConcurrency: 2,
+        scoringConcurrency: 1,
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    const reviewContext = createReviewContext();
+    const candidateFindings: ReviewFinding[] = [1, 2, 3].map(index => ({
+      title: `Issue ${index}`,
+      body: `Needs validation ${index}`,
+      confidence: 50,
+      path: `src/${index}.ts`,
+      line: index,
+      lineType: 'new',
+      sources: [`Pass ${index}`],
+    }));
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest.fn().mockReturnValue([
+        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt 1' },
+        { id: 'pass-2', label: 'Pass 2', prompt: 'Prompt 2' },
+        { id: 'pass-3', label: 'Pass 3', prompt: 'Prompt 3' },
+      ]),
+      mergeCandidateFindings: jest.fn().mockReturnValue(candidateFindings),
+      buildNoIssuesMessage: jest.fn(),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn().mockImplementation((_passes, findings) => ({
+        summary: 'Summary',
+        findings,
+      })),
+      postReview: jest.fn().mockResolvedValue(undefined),
+    };
+
+    let activePasses = 0;
+    let maxActivePasses = 0;
+    let activeScores = 0;
+    let maxActiveScores = 0;
+
+    const processor = new EventProcessor();
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeReviewPass = jest.fn().mockImplementation(async (_instruction, passId, label) => {
+      activePasses += 1;
+      maxActivePasses = Math.max(maxActivePasses, activePasses);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      activePasses -= 1;
+      return {
+        passId,
+        label,
+        summary: 'Summary',
+        findings: [],
+      };
+    });
+    (processor as any).executeReviewScore = jest.fn().mockImplementation(async (_instruction, finding) => {
+      activeScores += 1;
+      maxActiveScores = Math.max(maxActiveScores, activeScores);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      activeScores -= 1;
+      return {
+        ...finding,
+        confidence: 95,
+      };
+    });
+
+    await (processor as any).executeCodeReview(
+      createMergeRequestEvent(),
+      {
+        command: '/code-review',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      'main',
+      '/tmp/project',
+      createCallback()
+    );
+
+    expect(maxActivePasses).toBeLessThanOrEqual(2);
+    expect(maxActiveScores).toBeLessThanOrEqual(1);
   });
 });

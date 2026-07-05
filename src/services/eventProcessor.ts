@@ -11,6 +11,7 @@ import { AIExecutionContext, StreamingProgressCallback } from '../types/common';
 import { CodexExecutor } from './codexExecutor';
 import { GitLabService } from './gitlabService';
 import { MRGenerator } from '../utils/mrGenerator';
+import { RuntimeConfig } from '../admin/adminTypes';
 import {
   GitLabReviewService,
   PreparedReviewContext,
@@ -265,8 +266,20 @@ export class EventProcessor {
     // Clear previous progress messages for this new instruction
     this.progressMessages = [];
 
+    const reviewSettings = runtimeConfigService.getConfig().review;
+    const isReviewCommand = isCodeReviewCommand(
+      instruction.command,
+      reviewSettings.allowedCommands
+    );
+
     // Determine provider name for messages
-    const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
+    const providerName = (
+      isReviewCommand
+        ? this.resolveReviewExecutionProvider(reviewSettings.defaultProvider)
+        : instruction.provider
+    ) === 'codex'
+      ? 'Codex'
+      : 'Claude';
 
     // Create initial progress comment
     const initialMessage = `🚀 ${providerName} is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
@@ -274,6 +287,18 @@ export class EventProcessor {
     this.currentCommentId = await this.createProgressComment(event, initialMessage);
 
     const baseBranch = instruction.branch || event.project.default_branch;
+
+    if (isReviewCommand && !reviewSettings.enabled) {
+      const message =
+        'Skipped code review: review commands are currently disabled in runtime settings.';
+      logger.info(message, {
+        projectId: event.project.id,
+        command: instruction.command,
+      });
+      await this.postComment(event, message);
+      await this.updateProgressComment(event, message, true);
+      return;
+    }
 
     const projectPath = await this.projectManager.prepareProject(event.project, baseBranch);
 
@@ -288,8 +313,16 @@ export class EventProcessor {
         },
       };
 
-      if (isCodeReviewCommand(instruction.command)) {
-        await this.executeCodeReview(event, instruction, baseBranch, projectPath, callback);
+      if (isReviewCommand) {
+        await this.executeCodeReview(
+          event,
+          instruction,
+          baseBranch,
+          projectPath,
+          callback,
+          reviewSettings,
+          extractCodeReviewFocus(instruction.command, reviewSettings.allowedCommands)
+        );
         return;
       }
 
@@ -324,7 +357,12 @@ export class EventProcessor {
     instruction: AIInstruction,
     baseBranch: string,
     projectPath: string,
-    callback: StreamingProgressCallback
+    callback: StreamingProgressCallback,
+    reviewSettings: RuntimeConfig['review'] = runtimeConfigService.getConfig().review,
+    userFocus: string | undefined = extractCodeReviewFocus(
+      instruction.command,
+      reviewSettings.allowedCommands
+    )
   ): Promise<void> {
     if (!event.merge_request) {
       await this.postComment(
@@ -338,7 +376,10 @@ export class EventProcessor {
     await this.updateProgressComment(event, 'Preparing GitLab merge request review context...');
 
     const reviewContext = await this.gitlabReviewService.prepareReviewContext(projectPath, event);
-    const userFocus = extractCodeReviewFocus(instruction.command);
+    const reviewInstruction: AIInstruction = {
+      ...instruction,
+      provider: this.resolveReviewExecutionProvider(reviewSettings.defaultProvider),
+    };
 
     if (reviewContext.mergeRequestState !== 'opened') {
       const message = `Skipped code review: merge request is ${reviewContext.mergeRequestState}.`;
@@ -347,7 +388,7 @@ export class EventProcessor {
       return;
     }
 
-    if (reviewContext.draft || reviewContext.workInProgress) {
+    if (reviewSettings.skipDraft && (reviewContext.draft || reviewContext.workInProgress)) {
       const message = 'Skipped code review: merge request is draft/WIP.';
       await this.postComment(event, message);
       await this.updateProgressComment(event, message, true);
@@ -367,8 +408,9 @@ export class EventProcessor {
       reviewContext.headSha
     );
 
-    if (alreadyReviewed) {
-      const message = 'Skipped code review: this merge request SHA already has a Claude review.';
+    if (reviewSettings.skipExistingSha && alreadyReviewed) {
+      const message =
+        'Skipped code review: this merge request SHA already has a recorded review.';
       await this.postComment(event, message);
       await this.updateProgressComment(event, message, true);
       return;
@@ -391,10 +433,12 @@ export class EventProcessor {
       `Launching ${reviewPasses.length} GitLab review pass(es)...`
     );
 
-    const passResults = await Promise.allSettled(
-      reviewPasses.map(pass =>
+    const passResults = await this.runWithConcurrency(
+      reviewPasses,
+      reviewSettings.passConcurrency,
+      pass =>
         this.executeReviewPass(
-          instruction,
+          reviewInstruction,
           pass.id,
           pass.label,
           pass.prompt,
@@ -402,7 +446,6 @@ export class EventProcessor {
           executionContext,
           callback
         )
-      )
     );
 
     const successfulPasses: ReviewPassResult[] = [];
@@ -423,7 +466,7 @@ export class EventProcessor {
     }
 
     if (successfulPasses.length === 0) {
-      await this.handleFailure(event, instruction, {
+      await this.handleFailure(event, reviewInstruction, {
         error:
           passErrors.length > 0
             ? `All code review passes failed: ${passErrors.join('; ')}`
@@ -482,10 +525,12 @@ export class EventProcessor {
       `Scoring ${candidateFindings.length} candidate finding(s)...`
     );
 
-    const scoredResults = await Promise.allSettled(
-      candidateFindings.map((finding, index) =>
+    const scoredResults = await this.runWithConcurrency(
+      candidateFindings,
+      reviewSettings.scoringConcurrency,
+      (finding, index) =>
         this.executeReviewScore(
-          instruction,
+          reviewInstruction,
           finding,
           index + 1,
           projectPath,
@@ -494,12 +539,11 @@ export class EventProcessor {
           userFocus,
           callback
         )
-      )
     );
 
     const scoringErrors: string[] = [];
     const scoringErrorLabels: string[] = [];
-    const minConfidence = runtimeConfigService.getConfig().review.minConfidence;
+    const minConfidence = reviewSettings.minConfidence;
     const scoredFindings = scoredResults
       .filter(result => {
         if (result.status === 'fulfilled') {
@@ -559,7 +603,11 @@ export class EventProcessor {
       reviewContext.mergeRequestIid
     );
 
-    if (latestMergeRequest.state !== 'opened' || latestMergeRequest.draft || latestMergeRequest.work_in_progress) {
+    if (
+      latestMergeRequest.state !== 'opened' ||
+      (reviewSettings.skipDraft &&
+        (latestMergeRequest.draft || latestMergeRequest.work_in_progress))
+    ) {
       const message = 'Skipped posting code review: merge request is no longer eligible.';
       await this.postComment(event, message);
       await this.updateProgressComment(event, message, true);
@@ -579,8 +627,8 @@ export class EventProcessor {
       reviewContext.headSha
     );
 
-    if (alreadyReviewedLatest) {
-      const message = 'Skipped posting code review: another Claude review was already posted.';
+    if (reviewSettings.skipExistingSha && alreadyReviewedLatest) {
+      const message = 'Skipped posting code review: another review was already posted.';
       await this.postComment(event, message);
       await this.updateProgressComment(event, message, true);
       return;
@@ -703,6 +751,48 @@ export class EventProcessor {
     }
 
     return message.length > 120 ? `${message.slice(0, 117)}...` : message;
+  }
+
+  private resolveReviewExecutionProvider(
+    provider: RuntimeConfig['review']['defaultProvider']
+  ): AIInstruction['provider'] {
+    return provider === 'codex-multipass' ? 'codex' : 'claude';
+  }
+
+  private async runWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<R>
+  ): Promise<Array<PromiseSettledResult<R>>> {
+    if (items.length === 0) {
+      return [];
+    }
+
+    const results: Array<PromiseSettledResult<R>> = new Array(items.length);
+    const workerCount = Math.min(Math.max(1, concurrency), items.length);
+    let nextIndex = 0;
+
+    const runners = Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        try {
+          results[currentIndex] = {
+            status: 'fulfilled',
+            value: await worker(items[currentIndex] as T, currentIndex),
+          };
+        } catch (error) {
+          results[currentIndex] = {
+            status: 'rejected',
+            reason: error,
+          };
+        }
+      }
+    });
+
+    await Promise.all(runners);
+    return results;
   }
 
   private async handleSuccess(
