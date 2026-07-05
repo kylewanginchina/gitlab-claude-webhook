@@ -30,7 +30,10 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
   router.put('/config', async (req, res, next) => {
     try {
       const result = await runtimeConfigService.updateConfig(req.body, 'admin');
-      res.json(result);
+      res.json({
+        config: runtimeConfigService.getPublicConfig(),
+        requiresRestart: result.requiresRestart,
+      });
     } catch (error) {
       next(error);
     }
