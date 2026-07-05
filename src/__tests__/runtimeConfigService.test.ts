@@ -124,4 +124,78 @@ describe('RuntimeConfigService', () => {
     expect(result.requiresRestart).toEqual(['webhook.port']);
     expect(service.getConfig().webhook.port).toBe(3999);
   });
+
+  it('reloads using env/default fallback when runtime config file is missing', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+        LOG_LEVEL: 'warn',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+    await service.updateConfig({ logLevel: 'debug' }, 'admin');
+
+    await fs.unlink(path.join(dir, 'runtime-config.json'));
+
+    await service.reload();
+
+    expect(service.getConfig().logLevel).toBe('warn');
+  });
+
+  it('keeps in-memory config unchanged when persistence fails during update', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    const before = service.getConfig();
+    const writeSpy = jest
+      .spyOn((service as unknown as { store: { write: (config: unknown) => Promise<void> } }).store, 'write')
+      .mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(
+      service.updateConfig(
+        {
+          review: {
+            minConfidence: 91,
+          },
+        },
+        'admin'
+      )
+    ).rejects.toThrow('disk full');
+
+    expect(service.getConfig()).toEqual(before);
+    writeSpy.mockRestore();
+  });
+
+  it('reports restart-required fields when workDir changes', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    const result = await service.updateConfig({ workDir: '/tmp/alternate-workdir' }, 'admin');
+
+    expect(result.requiresRestart).toEqual(['workDir']);
+    expect(service.getConfig().workDir).toBe('/tmp/alternate-workdir');
+  });
 });

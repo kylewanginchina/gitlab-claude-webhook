@@ -106,7 +106,10 @@ export class RuntimeConfigService {
   }
 
   public getPublicConfig(): PublicRuntimeConfig {
-    const config = this.config;
+    return this.toPublicConfig(this.config);
+  }
+
+  private toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
     return {
       claude: {
         baseUrl: config.claude.baseUrl,
@@ -169,18 +172,19 @@ export class RuntimeConfigService {
     };
 
     this.validateConfig(next);
-    this.config = next;
     await this.store.write(next);
+    this.config = next;
 
     return {
-      config: this.getPublicConfig(),
+      config: this.toPublicConfig(next),
       requiresRestart: this.restartRequiredFields(before, next),
     };
   }
 
   public async reload(): Promise<void> {
-    this.config = await this.store.read(this.config);
-    this.validateConfig(this.config);
+    const next = await this.store.read(createConfigFromEnv(this.options.env || process.env));
+    this.validateConfig(next);
+    this.config = next;
   }
 
   public validateConfig(config: RuntimeConfig): void {
