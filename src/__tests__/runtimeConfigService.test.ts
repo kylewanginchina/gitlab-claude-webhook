@@ -221,4 +221,30 @@ describe('RuntimeConfigService', () => {
     expect(service.getConfig().review.allowedCommands).toEqual(['/code-review']);
     expect(service.getConfig().gitlab.token).toBe('glpat-secret');
   });
+
+  it('returns a defensive copy from getPublicConfig', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    const publicConfig = service.getPublicConfig();
+    publicConfig.ai.defaultProvider = 'codex';
+    publicConfig.review.minConfidence = 5;
+    publicConfig.review.allowedCommands.push('/admin');
+
+    expect(service.getPublicConfig().ai.defaultProvider).toBe('claude');
+    expect(service.getPublicConfig().review.minConfidence).toBe(80);
+    expect(service.getPublicConfig().review.allowedCommands).toEqual(['/code-review']);
+    expect(service.getConfig().ai.defaultProvider).toBe('claude');
+    expect(service.getConfig().review.minConfidence).toBe(80);
+    expect(service.getConfig().review.allowedCommands).toEqual(['/code-review']);
+  });
 });

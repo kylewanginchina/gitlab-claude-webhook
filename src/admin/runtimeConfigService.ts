@@ -132,8 +132,13 @@ export class RuntimeConfigService {
         secret: secretStatus(config.webhook.secret),
         port: config.webhook.port,
       },
-      ai: config.ai,
-      review: config.review,
+      ai: {
+        ...config.ai,
+      },
+      review: {
+        ...config.review,
+        allowedCommands: [...config.review.allowedCommands],
+      },
       workDir: config.workDir,
       logLevel: config.logLevel,
     };
