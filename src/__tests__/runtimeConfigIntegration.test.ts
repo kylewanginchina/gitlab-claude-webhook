@@ -4,6 +4,10 @@ import path from 'path';
 import express from 'express';
 import request from 'supertest';
 import { RuntimeConfigService } from '../admin/runtimeConfigService';
+import logger from '../utils/logger';
+import { config } from '../utils/config';
+import { debugConfig } from '../utils/configDebug';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 jest.mock('../services/eventProcessor', () => ({
   EventProcessor: jest.fn().mockImplementation(() => ({
@@ -28,6 +32,10 @@ async function runtimeService(): Promise<RuntimeConfigService> {
 }
 
 describe('WebhookServer admin integration', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('starts on the persisted runtime webhook port after restart', async () => {
     const runtimeConfig = await runtimeService();
     await runtimeConfig.updateConfig({ webhook: { port: 3999 } }, 'test');
@@ -74,6 +82,7 @@ describe('WebhookServer admin integration', () => {
       adminStaticPath: adminDir,
     });
 
+    await request(server.getApp()).get('/admin').expect(200).expect(/admin-app/);
     await request(server.getApp()).get('/admin/app.js').expect(200).expect('console.log("admin-js");');
     await request(server.getApp()).get('/admin/settings').expect(200).expect(/admin-app/);
   });
@@ -89,5 +98,78 @@ describe('WebhookServer admin integration', () => {
       .set('Content-Type', 'application/json')
       .send({ object_kind: 'merge_request' })
       .expect(401, { error: 'Invalid signature' });
+  });
+
+  it('uses env-backed config debug values before runtime config initialization', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const isLoadedSpy = jest.spyOn(runtimeConfigService, 'isLoaded').mockReturnValue(false);
+    const getConfigSpy = jest
+      .spyOn(runtimeConfigService, 'getConfig')
+      .mockImplementation(() => {
+        throw new Error('getConfig should not be called before initialization');
+      });
+
+    expect(() => debugConfig()).not.toThrow();
+
+    expect(isLoadedSpy).toHaveBeenCalled();
+    expect(getConfigSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(`Port: ${config.webhook.port}`);
+    expect(logSpy).toHaveBeenCalledWith(`GitLab Token: ${config.gitlab.token ? '********' : 'NOT SET'}`);
+  });
+
+  it('uses runtime config debug values after runtime config initialization', async () => {
+    const runtimeConfig = await runtimeService();
+    await runtimeConfig.updateConfig(
+      {
+        webhook: { port: 4555 },
+        gitlab: { token: 'glpat-updated' },
+      },
+      'test'
+    );
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    jest.spyOn(runtimeConfigService, 'isLoaded').mockReturnValue(true);
+    const getConfigSpy = jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig.getConfig());
+
+    debugConfig();
+
+    expect(getConfigSpy).toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith('Port: 4555');
+    expect(logSpy).toHaveBeenCalledWith('GitLab Token: ********');
+  });
+
+  it('fails fast with a clear error when start is called before runtime config initialization', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'server-runtime-unloaded-'));
+    const unloadedRuntimeConfig = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+    const server = new WebhookServer({
+      runtimeConfigService: unloadedRuntimeConfig,
+      env: { ADMIN_TOKEN: 'admin-secret' },
+    });
+    const app = server.getApp() as express.Application & {
+      listen: (port: number, callback?: () => void) => unknown;
+    };
+    const listenSpy = jest.spyOn(app, 'listen');
+    const getConfigSpy = jest.spyOn(unloadedRuntimeConfig, 'getConfig');
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+    server.start();
+
+    expect(getConfigSpy).not.toHaveBeenCalled();
+    expect(listenSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to start server:',
+      expect.objectContaining({
+        message: 'Runtime config service must be initialized before starting the server',
+      })
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });

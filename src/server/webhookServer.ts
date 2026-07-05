@@ -53,7 +53,10 @@ export class WebhookServer {
       })
     );
 
-    this.app.use('/admin', express.static(this.adminStaticPath));
+    this.app.get('/admin', (_req: Request, res: Response) => {
+      res.sendFile(path.join(this.adminStaticPath, 'index.html'));
+    });
+    this.app.use('/admin', express.static(this.adminStaticPath, { redirect: false }));
     this.app.get('/admin/*', (_req: Request, res: Response) => {
       res.sendFile(path.join(this.adminStaticPath, 'index.html'));
     });
@@ -113,6 +116,10 @@ export class WebhookServer {
 
   public start(): void {
     try {
+      if (!this.runtimeConfigService.isLoaded()) {
+        throw new Error('Runtime config service must be initialized before starting the server');
+      }
+
       const port = this.runtimeConfigService.getConfig().webhook.port;
       this.app.listen(port, () => {
         logger.info(`GitLab Claude Webhook server started on port ${port}`);

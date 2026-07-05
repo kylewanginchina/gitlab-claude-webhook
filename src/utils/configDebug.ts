@@ -8,7 +8,36 @@ import { runtimeConfigService } from './runtimeConfig';
  * Useful for troubleshooting environment variable issues
  */
 export function debugConfig(): void {
-  const runtimeConfig = runtimeConfigService.getConfig();
+  const runtimeConfig = runtimeConfigService.isLoaded()
+    ? runtimeConfigService.getConfig()
+    : {
+        ai: {
+          defaultProvider: config.ai.defaultProvider,
+        },
+        claude: {
+          baseUrl: config.anthropic.baseUrl,
+          authToken: config.anthropic.authToken,
+          defaultModel: config.anthropic.defaultModel,
+          defaultTimeoutMinutes: 30,
+        },
+        codex: {
+          baseUrl: config.openai.baseUrl,
+          apiKey: config.openai.apiKey,
+          defaultModel: config.openai.defaultModel,
+          reasoningEffort: config.openai.reasoningEffort,
+          defaultTimeoutMinutes: 30,
+        },
+        gitlab: {
+          baseUrl: config.gitlab.baseUrl,
+          token: config.gitlab.token,
+        },
+        webhook: {
+          secret: config.webhook.secret,
+          port: config.webhook.port,
+        },
+        workDir: config.workDir,
+        logLevel: config.logLevel,
+      };
 
   console.log('🔧 Configuration Debug Information:');
   console.log('=====================================');
