@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { config } from './config';
 import logger from './logger';
 import { AIProvider } from '../types/common';
+import { runtimeConfigService } from './runtimeConfig';
 
 export interface AIInstructionResult {
   provider: AIProvider;
@@ -10,13 +11,23 @@ export interface AIInstructionResult {
   command: string;
 }
 
+function getWebhookSecret(): string {
+  if (runtimeConfigService.isLoaded()) {
+    return runtimeConfigService.getConfig().webhook.secret;
+  }
+
+  return config.webhook.secret;
+}
+
 export function verifyGitLabSignature(body: string, signature: string): boolean {
   if (!signature) {
     logger.warn('No signature provided in webhook request');
     return false;
   }
 
-  if (!config.webhook.secret) {
+  const webhookSecret = getWebhookSecret();
+
+  if (!webhookSecret) {
     logger.warn('No webhook secret configured');
     return false;
   }
@@ -26,7 +37,7 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
   // 2. SHA256 signature (starts with "sha256=")
 
   // Check if it's a direct secret token match
-  if (signature === config.webhook.secret) {
+  if (signature === webhookSecret) {
     logger.debug('Webhook verified using direct secret token');
     return true;
   }
@@ -34,7 +45,7 @@ export function verifyGitLabSignature(body: string, signature: string): boolean 
   // Check if it's a SHA256 signature
   if (signature.startsWith('sha256=')) {
     const expectedSignature = crypto
-      .createHmac('sha256', config.webhook.secret)
+      .createHmac('sha256', webhookSecret)
       .update(body, 'utf8')
       .digest('hex');
 

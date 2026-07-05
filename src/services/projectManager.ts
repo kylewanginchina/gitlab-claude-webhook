@@ -4,13 +4,14 @@ import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 import { GitLabProject } from '../types/gitlab';
 
 export class ProjectManager {
   private workDir: string;
 
   constructor() {
-    this.workDir = config.workDir;
+    this.workDir = runtimeConfigService.isLoaded() ? runtimeConfigService.getConfig().workDir : config.workDir;
   }
 
   public async prepareProject(project: GitLabProject, branch: string): Promise<string> {
@@ -108,7 +109,9 @@ export class ProjectManager {
 
     const url = new URL(httpUrl);
     url.username = 'oauth2';
-    url.password = config.gitlab.token;
+    url.password = runtimeConfigService.isLoaded()
+      ? runtimeConfigService.getConfig().gitlab.token
+      : config.gitlab.token;
     return url.toString();
   }
 

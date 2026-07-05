@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import {
   verifyGitLabSignature,
   extractClaudeInstructions,
@@ -5,6 +6,7 @@ import {
   isCodeReviewCommand,
   extractCodeReviewFocus,
 } from '../utils/webhook';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 // Mock the config
 jest.mock('../utils/config', () => ({
@@ -15,7 +17,24 @@ jest.mock('../utils/config', () => ({
   },
 }));
 
+jest.mock('../utils/runtimeConfig', () => ({
+  runtimeConfigService: {
+    isLoaded: jest.fn(),
+    getConfig: jest.fn(),
+  },
+}));
+
 describe('Webhook Utils', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (runtimeConfigService.isLoaded as jest.Mock).mockReturnValue(false);
+    (runtimeConfigService.getConfig as jest.Mock).mockReturnValue({
+      webhook: {
+        secret: 'runtime-secret',
+      },
+    });
+  });
+
   describe('verifyGitLabSignature', () => {
     it('should verify direct token signature', () => {
       const body = 'test body';
@@ -36,6 +55,41 @@ describe('Webhook Utils', () => {
       const signature = '';
 
       expect(verifyGitLabSignature(body, signature)).toBe(false);
+    });
+
+    it('should accept an updated runtime webhook secret without restart', () => {
+      const body = 'test body';
+      const runtimeSecret = 'updated-runtime-secret';
+      const signature = `sha256=${crypto
+        .createHmac('sha256', runtimeSecret)
+        .update(body, 'utf8')
+        .digest('hex')}`;
+
+      (runtimeConfigService.isLoaded as jest.Mock).mockReturnValue(true);
+      (runtimeConfigService.getConfig as jest.Mock).mockReturnValue({
+        webhook: {
+          secret: runtimeSecret,
+        },
+      });
+
+      expect(verifyGitLabSignature(body, signature)).toBe(true);
+    });
+
+    it('should preserve static config fallback before runtime config initialization', () => {
+      const body = 'test body';
+      const signature = `sha256=${crypto
+        .createHmac('sha256', 'test-secret')
+        .update(body, 'utf8')
+        .digest('hex')}`;
+
+      (runtimeConfigService.isLoaded as jest.Mock).mockReturnValue(false);
+      (runtimeConfigService.getConfig as jest.Mock).mockReturnValue({
+        webhook: {
+          secret: 'updated-runtime-secret',
+        },
+      });
+
+      expect(verifyGitLabSignature(body, signature)).toBe(true);
     });
   });
 

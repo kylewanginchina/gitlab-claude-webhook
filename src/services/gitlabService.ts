@@ -3,14 +3,40 @@ import logger from '../utils/logger';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 
 export class GitLabService {
-  private gitlab: InstanceType<typeof Gitlab>;
+  private gitlabClient: InstanceType<typeof Gitlab> | null = null;
+  private gitlabHost = '';
+  private gitlabToken = '';
 
   constructor() {
+    this.refreshGitLabClient();
+  }
+
+  private get gitlab(): InstanceType<typeof Gitlab> {
+    return this.ensureGitLabClient();
+  }
+
+  private getGitLabConfig(): { host: string; token: string } {
     const runtimeConfig = runtimeConfigService.getConfig();
-    this.gitlab = new Gitlab({
+    return {
       host: runtimeConfig.gitlab.baseUrl,
       token: runtimeConfig.gitlab.token,
-    });
+    };
+  }
+
+  private refreshGitLabClient(config = this.getGitLabConfig()): InstanceType<typeof Gitlab> {
+    this.gitlabClient = new Gitlab(config);
+    this.gitlabHost = config.host;
+    this.gitlabToken = config.token;
+    return this.gitlabClient;
+  }
+
+  private ensureGitLabClient(): InstanceType<typeof Gitlab> {
+    const config = this.getGitLabConfig();
+    if (!this.gitlabClient || config.host !== this.gitlabHost || config.token !== this.gitlabToken) {
+      return this.refreshGitLabClient(config);
+    }
+
+    return this.gitlabClient;
   }
 
   public async createIssueComment(projectId: number, issueIid: number, body: string): Promise<any> {

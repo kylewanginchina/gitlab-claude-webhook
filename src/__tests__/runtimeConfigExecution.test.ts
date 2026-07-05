@@ -10,6 +10,35 @@ jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (...args: unknown[]) => mockQuery(...args),
 }));
 
+jest.mock('../utils/config', () => ({
+  config: {
+    anthropic: {
+      baseUrl: 'https://claude.static.example',
+      authToken: 'anthropic-static-token',
+      defaultModel: 'claude-static-model',
+    },
+    openai: {
+      baseUrl: 'https://codex.static.example/v1',
+      apiKey: 'openai-static-key',
+      defaultModel: 'codex-static-model',
+      reasoningEffort: 'high',
+    },
+    gitlab: {
+      baseUrl: 'https://gitlab.static.example',
+      token: 'glpat-static-token',
+    },
+    webhook: {
+      secret: 'webhook-static-secret',
+      port: 3000,
+    },
+    ai: {
+      defaultProvider: 'claude',
+    },
+    workDir: '/tmp/static-workdir',
+    logLevel: 'info',
+  },
+}));
+
 jest.mock('@gitbeaker/node', () => ({
   Gitlab: jest.fn().mockImplementation((...args: unknown[]) => mockGitlabConstructor(...args)),
 }));
@@ -26,6 +55,7 @@ import { runtimeConfigService } from '../utils/runtimeConfig';
 import { StreamingClaudeExecutor } from '../services/streamingClaudeExecutor';
 import { CodexExecutor } from '../services/codexExecutor';
 import { GitLabService } from '../services/gitlabService';
+import { ProjectManager } from '../services/projectManager';
 import {
   GitLabReviewService,
   PreparedReviewContext,
@@ -335,6 +365,102 @@ describe('runtime config execution paths', () => {
           'PRIVATE-TOKEN': 'glpat-runtime-token',
         }),
       })
+    );
+  });
+
+  it('rebuilds a long-lived GitLab client when runtime GitLab config changes before a later API call', async () => {
+    let runtimeConfig = createRuntimeConfig({
+      gitlab: {
+        baseUrl: 'https://gitlab.initial.example',
+        token: 'glpat-initial-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockImplementation(() => runtimeConfig);
+
+    const firstClient = {
+      Users: { current: jest.fn() },
+      IssueNotes: { create: jest.fn(), edit: jest.fn() },
+      MergeRequestNotes: { create: jest.fn(), edit: jest.fn() },
+      MergeRequests: {
+        show: jest.fn(),
+        versions: jest.fn(),
+        version: jest.fn(),
+        create: jest.fn(),
+        edit: jest.fn(),
+      },
+      MergeRequestDiscussions: { all: jest.fn(), create: jest.fn() },
+      IssueDiscussions: { all: jest.fn() },
+      Projects: { show: jest.fn().mockResolvedValue({ id: 101, client: 'initial' }) },
+      Branches: { all: jest.fn(), create: jest.fn() },
+      Issues: { edit: jest.fn(), show: jest.fn() },
+    };
+    const secondClient = {
+      Users: { current: jest.fn() },
+      IssueNotes: { create: jest.fn(), edit: jest.fn() },
+      MergeRequestNotes: { create: jest.fn(), edit: jest.fn() },
+      MergeRequests: {
+        show: jest.fn(),
+        versions: jest.fn(),
+        version: jest.fn(),
+        create: jest.fn(),
+        edit: jest.fn(),
+      },
+      MergeRequestDiscussions: { all: jest.fn(), create: jest.fn() },
+      IssueDiscussions: { all: jest.fn() },
+      Projects: { show: jest.fn().mockResolvedValue({ id: 202, client: 'updated' }) },
+      Branches: { all: jest.fn(), create: jest.fn() },
+      Issues: { edit: jest.fn(), show: jest.fn() },
+    };
+    mockGitlabConstructor
+      .mockImplementationOnce(() => firstClient)
+      .mockImplementationOnce(() => secondClient);
+
+    const service = new GitLabService();
+
+    await expect(service.getProject(101)).resolves.toEqual({ id: 101, client: 'initial' });
+
+    runtimeConfig = createRuntimeConfig({
+      gitlab: {
+        baseUrl: 'https://gitlab.updated.example',
+        token: 'glpat-updated-token',
+      },
+    });
+
+    await expect(service.getProject(202)).resolves.toEqual({ id: 202, client: 'updated' });
+    expect(mockGitlabConstructor).toHaveBeenNthCalledWith(1, {
+      host: 'https://gitlab.initial.example',
+      token: 'glpat-initial-token',
+    });
+    expect(mockGitlabConstructor).toHaveBeenNthCalledWith(2, {
+      host: 'https://gitlab.updated.example',
+      token: 'glpat-updated-token',
+    });
+  });
+
+  it('uses the updated runtime GitLab token for a new clone auth URL', () => {
+    let runtimeConfig = createRuntimeConfig({
+      gitlab: {
+        token: 'glpat-initial-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'isLoaded').mockReturnValue(true);
+    jest.spyOn(runtimeConfigService, 'getConfig').mockImplementation(() => runtimeConfig);
+
+    const manager = new ProjectManager();
+    const repoUrl = 'https://gitlab.example.com/group/project.git';
+
+    expect(new URL((manager as any).getAuthenticatedUrl(repoUrl)).password).toBe(
+      'glpat-initial-token'
+    );
+
+    runtimeConfig = createRuntimeConfig({
+      gitlab: {
+        token: 'glpat-updated-token',
+      },
+    });
+
+    expect(new URL((manager as any).getAuthenticatedUrl(repoUrl)).password).toBe(
+      'glpat-updated-token'
     );
   });
 
