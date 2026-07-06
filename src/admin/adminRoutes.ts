@@ -263,6 +263,7 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
 
   router.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      void _next;
       const message = error instanceof Error ? error.message : String(error);
       const status = isNotFoundError(message)
         ? 404

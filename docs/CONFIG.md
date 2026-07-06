@@ -119,7 +119,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 该镜像会额外包含：
 
-- Rust/Cargo，用于 DeepFlow agent 相关 `cargo build`/`cargo test`
+- rustup stable 提供的 Rust/Cargo，用于 DeepFlow agent 相关 `cargo build`/`cargo test`
 - Go，用于 DeepFlow server/controller 相关构建检查
 - `protobuf-compiler`，提供 `protoc`
 - Clang/LLVM、gcc、make、cmake、`pkg-config`
@@ -143,7 +143,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 docker exec gitlab-claude-webhook sh -lc 'node --version && npm --version && cargo --version && rustc --version && go version && protoc --version && clang --version | head -n 1 && make --version | head -n 1 && pkg-config --version'
 ```
 
-该镜像基于 Debian/Node 20 安装通用构建工具，目标是让 AI review 可以执行常见 DeepFlow 编译/验证命令。若要生产级复刻 DeepFlow 官方发布构建，请仍以 DeepFlow 官方 `hub.deepflow.yunshan.net/public/rust-build` 镜像和官方构建脚本为准。
+该镜像基于 Debian/Node 20 安装通用构建工具，并通过 rustup 安装当前 stable Rust/Cargo，避免 Debian 仓库内 Rust 版本过旧导致无法解析 DeepFlow 的新版 `Cargo.lock`。目标是让 AI review 可以执行常见 DeepFlow 编译/验证命令。若要生产级复刻 DeepFlow 官方发布构建，请仍以 DeepFlow 官方 `hub.deepflow.yunshan.net/public/rust-build` 镜像和官方构建脚本为准。
 
 可选构建参数：
 
@@ -151,12 +151,24 @@ docker exec gitlab-claude-webhook sh -lc 'node --version && npm --version && car
 | --------------------------------- | -------------------------------------------- | --------------------- |
 | `DEEPFLOW_DEBIAN_MIRROR`          | `https://mirrors.aliyun.com/debian`          | Debian main/update 源 |
 | `DEEPFLOW_DEBIAN_SECURITY_MIRROR` | `https://mirrors.aliyun.com/debian-security` | Debian security 源    |
+| `DEEPFLOW_RUSTUP_INIT_URL`        | `https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init` | rustup-init 下载地址 |
+| `DEEPFLOW_RUSTUP_DIST_SERVER`     | `https://rsproxy.cn`                         | Rust toolchain dist 源 |
+| `DEEPFLOW_RUSTUP_UPDATE_ROOT`     | `https://rsproxy.cn/rustup`                  | rustup update 源      |
 
 如果构建环境访问官方 Debian 源更快，可以覆盖为：
 
 ```bash
 DEEPFLOW_DEBIAN_MIRROR=http://deb.debian.org/debian \
 DEEPFLOW_DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security \
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
+```
+
+如果构建环境访问 Rust 官方源更快，可以覆盖为：
+
+```bash
+DEEPFLOW_RUSTUP_INIT_URL=https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
+DEEPFLOW_RUSTUP_DIST_SERVER=https://static.rust-lang.org \
+DEEPFLOW_RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup \
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
 ```
 

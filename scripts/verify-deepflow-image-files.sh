@@ -27,24 +27,30 @@ require_file "$COMPOSE_FILE"
 
 require_text "$DOCKERFILE" "ARG DEBIAN_MIRROR"
 require_text "$DOCKERFILE" "ARG DEBIAN_SECURITY_MIRROR"
+require_text "$DOCKERFILE" "ARG RUSTUP_INIT_URL"
+require_text "$DOCKERFILE" "ARG RUSTUP_DIST_SERVER"
+require_text "$DOCKERFILE" "ARG RUSTUP_UPDATE_ROOT"
 
-for tool in node npm cargo rustc go protoc clang make pkg-config rg; do
+for tool in node npm rustup cargo rustc go protoc clang make pkg-config rg; do
   require_text "$DOCKERFILE" "command -v $tool"
 done
 
 for package in \
   build-essential \
-  cargo \
   clang \
   golang-go \
   llvm \
+  libssl-dev \
   libpcap-dev \
   libelf-dev \
   protobuf-compiler \
-  pkg-config \
-  rustc; do
+  pkg-config; do
   require_text "$DOCKERFILE" "$package"
 done
+
+require_text "$DOCKERFILE" "https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
+require_text "$DOCKERFILE" "rustup component add rustfmt clippy"
+require_text "$DOCKERFILE" "cargo metadata --locked --format-version=1"
 
 for volume in \
   deepflow-cargo-registry \
@@ -57,5 +63,8 @@ done
 
 require_text "$COMPOSE_FILE" "Dockerfile.deepflow"
 require_text "$COMPOSE_FILE" "gitlab-claude-webhook-deepflow"
+require_text "$COMPOSE_FILE" "DEEPFLOW_RUSTUP_INIT_URL"
+require_text "$COMPOSE_FILE" "DEEPFLOW_RUSTUP_DIST_SERVER"
+require_text "$COMPOSE_FILE" "DEEPFLOW_RUSTUP_UPDATE_ROOT"
 
 echo "DeepFlow image files look structurally valid."

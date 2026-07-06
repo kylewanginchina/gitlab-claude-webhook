@@ -433,6 +433,187 @@ describe('runtime config execution paths', () => {
     expect(callback.onError).not.toHaveBeenCalled();
   });
 
+  it('continues a normal MR review request when validation fails before producing review findings', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      claude: {
+        defaultModel: 'claude-runtime-model',
+        baseUrl: 'https://claude.runtime.example',
+        authToken: 'anthropic-runtime-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+    jest.spyOn(ProjectManager.prototype, 'getChangedFiles').mockResolvedValue([]);
+
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result:
+              '验证命令无法继续:\n\n```text\nerror: failed to parse lock file at: agent/Cargo.lock\n\nCaused by:\n  lock file version `4` was found, but this version of Cargo does not understand this lock file\n```\n\n当前工具链无法执行 cargo check。',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      )
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result: 'Static review completed after validation failure.',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      );
+
+    const executor = new StreamingClaudeExecutor();
+    const callback = createCallback();
+
+    const result = await executor.executeWithStreaming(
+      '审阅代码',
+      '/tmp/project',
+      createExecutionContext({ mode: undefined as never }),
+      callback
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        prompt: expect.stringContaining('Continue the merge request review'),
+        options: expect.objectContaining({
+          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
+        }),
+      })
+    );
+    expect(result.output).toContain('lock file version `4`');
+    expect(result.output).toContain('Static review completed');
+    expect(callback.onProgress).toHaveBeenCalledWith(
+      expect.stringContaining('continuing with static review'),
+      false
+    );
+  });
+
+  it('continues a review-mode MR request when a validation command fails without findings', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      claude: {
+        defaultModel: 'claude-runtime-model',
+        baseUrl: 'https://claude.runtime.example',
+        authToken: 'anthropic-runtime-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result:
+              'I tried to run validation first.\n\n```text\nnpm test failed with exit code 1\n```\n\nThe command did not complete.',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      )
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result: 'Static review completed in read-only mode.',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      );
+
+    const executor = new StreamingClaudeExecutor();
+    const callback = createCallback();
+
+    const result = await executor.executeWithStreaming(
+      '审阅代码',
+      '/tmp/project',
+      createExecutionContext({ mode: 'review' }),
+      callback
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        options: expect.objectContaining({
+          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
+        }),
+      })
+    );
+    expect(result.output).toContain('npm test failed with exit code 1');
+    expect(result.output).toContain('Static review completed');
+  });
+
+  it('continues a normal MR review request when the SDK reports a validation command failure as an error', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      claude: {
+        defaultModel: 'claude-runtime-model',
+        baseUrl: 'https://claude.runtime.example',
+        authToken: 'anthropic-runtime-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+    jest.spyOn(ProjectManager.prototype, 'getChangedFiles').mockResolvedValue([]);
+
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'error',
+            errors: ['Bash command failed with exit code 2: npm test'],
+          },
+        ])
+      )
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result: 'Static review completed after generic validation error fallback.',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      );
+
+    const executor = new StreamingClaudeExecutor();
+    const callback = createCallback();
+
+    const result = await executor.executeWithStreaming(
+      '审阅代码',
+      '/tmp/project',
+      createExecutionContext({ mode: undefined as never }),
+      callback
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(result.output).toContain('exit code 2');
+    expect(result.output).toContain('Static review completed');
+    expect(callback.onError).not.toHaveBeenCalled();
+  });
+
   it('uses runtime Codex model, base URL, API key, reasoning effort, and default timeout for new executions', async () => {
     const runtimeConfig = createRuntimeConfig({
       codex: {

@@ -186,6 +186,7 @@ export class RuntimeConfigService {
   }
 
   public async updateConfig(patch: RuntimeConfigPatch, _actor: string): Promise<ConfigUpdateResult> {
+    void _actor;
     const sanitizedPatch = this.sanitizePatch(patch);
     const before = this.config;
     const next: RuntimeConfig = {

@@ -94,7 +94,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
 ```
 
-The DeepFlow profile is Debian-based and adds Rust/Cargo, Go, protobuf, Clang/LLVM, `libpcap`, `libelf`, `libbpf`, `make`, `pkg-config`, and related build tools. It also mounts named caches for Cargo, Go, npm, and DeepFlow scratch work so repeated reviews do not redownload everything. It is intended for automated review validation; for release-grade DeepFlow builds, keep using DeepFlow's official build images and scripts.
+The DeepFlow profile is Debian-based and adds current stable Rust/Cargo via rustup, Go, protobuf, Clang/LLVM, `libpcap`, `libelf`, `libbpf`, `make`, `pkg-config`, and related build tools. It also mounts named caches for Cargo, Go, npm, and DeepFlow scratch work so repeated reviews do not redownload everything. It is intended for automated review validation; for release-grade DeepFlow builds, keep using DeepFlow's official build images and scripts.
 
 Verify the active container:
 
