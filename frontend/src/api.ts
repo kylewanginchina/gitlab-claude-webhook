@@ -2,7 +2,14 @@ import type {
   AdminStatus,
   ConfigUpdateResult,
   ProviderTestResult,
+  PromptOptimizationProposal,
   PublicRuntimeConfig,
+  ReviewFeedback,
+  ReviewFeedbackInput,
+  ReviewPrompt,
+  ReviewPromptPatch,
+  ReviewSkill,
+  ReviewSkillInput,
   RuntimeConfigPatch,
 } from './types';
 
@@ -60,4 +67,53 @@ export const api = {
     }),
   testProvider: (provider: 'gitlab' | 'claude' | 'codex') =>
     request<ProviderTestResult>(`/test/${provider}`, { method: 'POST' }),
+  getPrompts: () => request<{ prompts: ReviewPrompt[] }>('/prompts'),
+  getPrompt: (id: string) => request<{ prompt: ReviewPrompt }>(`/prompts/${id}`),
+  updatePrompt: (id: string, patch: ReviewPromptPatch) =>
+    request<{ prompt: ReviewPrompt }>(`/prompts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  publishPrompt: (id: string, changelog: string) =>
+    request<{ prompt: ReviewPrompt }>(`/prompts/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ changelog }),
+    }),
+  rollbackPrompt: (id: string, version: number, changelog: string) =>
+    request<{ prompt: ReviewPrompt }>(`/prompts/${id}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ version, changelog }),
+    }),
+  getSkills: () => request<{ skills: ReviewSkill[] }>('/skills'),
+  createSkill: (skill: ReviewSkillInput) =>
+    request<{ skill: ReviewSkill }>('/skills', {
+      method: 'POST',
+      body: JSON.stringify(skill),
+    }),
+  updateSkill: (id: string, patch: Partial<ReviewSkillInput>) =>
+    request<{ skill: ReviewSkill }>(`/skills/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  enableSkill: (id: string) =>
+    request<{ skill: ReviewSkill }>(`/skills/${id}/enable`, { method: 'POST' }),
+  disableSkill: (id: string) =>
+    request<{ skill: ReviewSkill }>(`/skills/${id}/disable`, { method: 'POST' }),
+  getFeedback: () => request<{ feedback: ReviewFeedback[] }>('/feedback'),
+  createFeedback: (feedback: ReviewFeedbackInput) =>
+    request<{ feedback: ReviewFeedback }>('/feedback', {
+      method: 'POST',
+      body: JSON.stringify(feedback),
+    }),
+  getProposals: () =>
+    request<{ proposals: PromptOptimizationProposal[] }>('/prompt-optimizer/proposals'),
+  analyzeFeedback: () =>
+    request<{ proposals: PromptOptimizationProposal[] }>('/prompt-optimizer/analyze', {
+      method: 'POST',
+    }),
+  applyProposal: (id: string) =>
+    request<{ proposal: PromptOptimizationProposal }>(
+      `/prompt-optimizer/proposals/${id}/apply`,
+      { method: 'POST' }
+    ),
 };

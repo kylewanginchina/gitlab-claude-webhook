@@ -1,5 +1,5 @@
 import { PropsWithChildren } from 'react';
-import { Activity, LayoutDashboard, Settings } from 'lucide-react';
+import { Activity, LayoutDashboard, Settings, WandSparkles } from 'lucide-react';
 import type { AdminPage } from '../App';
 
 interface LayoutProps extends PropsWithChildren {
@@ -31,6 +31,14 @@ export default function Layout({ page, onPageChange, children }: LayoutProps) {
           >
             <Settings size={18} />
             Runtime Settings
+          </button>
+          <button
+            className={`nav-button ${page === 'review-tuning' ? 'active' : ''}`}
+            onClick={() => onPageChange('review-tuning')}
+            type="button"
+          >
+            <WandSparkles size={18} />
+            Review Tuning
           </button>
         </nav>
         <div className="sidebar-note">

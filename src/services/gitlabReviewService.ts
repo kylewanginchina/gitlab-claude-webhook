@@ -5,6 +5,9 @@ import { GitLabWebhookEvent } from '../types/gitlab';
 import logger from '../utils/logger';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { GitLabService } from './gitlabService';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import { ReviewSkill } from '../admin/reviewCustomizationTypes';
+import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 
 interface MergeRequestDiff {
   old_path?: string;
@@ -66,6 +69,8 @@ interface ReviewPassTemplate {
   id: string;
   label: string;
   focus: string[];
+  systemInstructions?: string;
+  version?: number;
 }
 
 export class GitLabReviewService {
@@ -109,7 +114,10 @@ export class GitLabReviewService {
     },
   ];
 
-  constructor(private gitlabService: GitLabService = new GitLabService()) {}
+  constructor(
+    private gitlabService: GitLabService = new GitLabService(),
+    private reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService
+  ) {}
 
   private getReviewConfig() {
     return runtimeConfigService.getConfig().review;
@@ -186,10 +194,15 @@ export class GitLabReviewService {
     context: PreparedReviewContext,
     userFocus?: string
   ): ReviewPassDefinition[] {
-    return this.reviewPassTemplates.map(template => ({
+    return this.getReviewPassTemplates().map(template => ({
       id: template.id,
       label: template.label,
-      prompt: this.buildReviewPassPrompt(context, template, userFocus),
+      prompt: this.buildReviewPassPrompt(
+        context,
+        template,
+        userFocus,
+        this.getMatchingSkills(context, template.id)
+      ),
     }));
   }
 
@@ -510,13 +523,28 @@ export class GitLabReviewService {
   private buildReviewPassPrompt(
     context: PreparedReviewContext,
     template: ReviewPassTemplate,
-    userFocus?: string
+    userFocus?: string,
+    skills: ReviewSkill[] = []
   ): string {
     const lines = [
       'Provide a GitLab merge request code review.',
       '',
       `Review pass: ${template.label}`,
       ...template.focus.map((line, index) => `${index + 1}. ${line}`),
+    ];
+
+    if (template.systemInstructions) {
+      lines.push('', 'Admin prompt instructions:', template.systemInstructions);
+    }
+
+    if (skills.length > 0) {
+      lines.push('', 'Admin skill instructions:');
+      skills.forEach(skill => {
+        lines.push(`- ${skill.name}: ${skill.systemInstructions}`);
+      });
+    }
+
+    lines.push(
       'Do not modify files, commit, or change git state.',
       'Do not use Task, Agent, WebFetch, or WebSearch.',
       'Use only local repository inspection tools and keep exploration narrow.',
@@ -534,7 +562,7 @@ export class GitLabReviewService {
       '',
       'Relevant CLAUDE.md files:',
       this.formatGuidelineFiles(context.claudeGuidelineFiles),
-    ];
+    );
 
     if (userFocus) {
       lines.push('');
@@ -573,6 +601,28 @@ export class GitLabReviewService {
     lines.push('- If there are no worthwhile issues, return an empty findings array.');
 
     return lines.join('\n');
+  }
+
+  private getReviewPassTemplates(): ReviewPassTemplate[] {
+    if (!this.reviewCustomizationService.isLoaded()) {
+      return this.reviewPassTemplates;
+    }
+
+    return this.reviewCustomizationService.getPublishedReviewPasses().map(prompt => ({
+      id: prompt.id,
+      label: prompt.label,
+      focus: prompt.focus,
+      systemInstructions: prompt.systemInstructions,
+      version: prompt.version,
+    }));
+  }
+
+  private getMatchingSkills(context: PreparedReviewContext, passId: string): ReviewSkill[] {
+    if (!this.reviewCustomizationService.isLoaded()) {
+      return [];
+    }
+
+    return this.reviewCustomizationService.getMatchingSkills(context, passId, 'claude');
   }
 
   private async fetchTargetBranch(projectPath: string, targetBranch: string): Promise<void> {

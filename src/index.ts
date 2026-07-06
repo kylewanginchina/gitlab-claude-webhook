@@ -4,10 +4,12 @@ import logger from './utils/logger';
 import { debugConfig, validateRequiredConfig } from './utils/configDebug';
 import { generateCodexConfig } from './utils/codexConfig';
 import { runtimeConfigService } from './utils/runtimeConfig';
+import { reviewCustomizationService } from './utils/reviewCustomization';
 
 async function main(): Promise<void> {
   try {
     await runtimeConfigService.initialize();
+    await reviewCustomizationService.initialize();
 
     // Debug configuration loading in development
     if (process.env.NODE_ENV !== 'production') {
@@ -25,7 +27,7 @@ async function main(): Promise<void> {
 
     logger.info('Starting GitLab Claude Webhook Service...');
 
-    const server = new WebhookServer({ runtimeConfigService });
+    const server = new WebhookServer({ runtimeConfigService, reviewCustomizationService });
     server.start();
 
     // Graceful shutdown

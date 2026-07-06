@@ -49,6 +49,10 @@ textarea {
   resize: vertical;
 }
 
+textarea.tall {
+  min-height: 190px;
+}
+
 input:focus,
 select:focus,
 textarea:focus,
@@ -204,6 +208,10 @@ button:focus-visible {
 
 .grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.grid.wide-left {
+  grid-template-columns: minmax(260px, 0.7fr) minmax(0, 1.3fr);
 }
 
 .metrics-grid {
@@ -412,6 +420,63 @@ button:focus-visible {
   opacity: 0.6;
 }
 
+.inline-input {
+  max-width: 240px;
+}
+
+.inline-select {
+  max-width: 120px;
+}
+
+.prompt-list,
+.compact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.list-button,
+.list-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.list-button {
+  cursor: pointer;
+}
+
+.list-button:hover {
+  background: #f8fafc;
+}
+
+.list-button.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.list-button span:first-child,
+.list-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.list-button small,
+.list-row .field-meta {
+  overflow-wrap: anywhere;
+}
+
+.list-row.align-start {
+  align-items: flex-start;
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -495,6 +560,7 @@ button:focus-visible {
   }
 
   .grid.two,
+  .grid.wide-left,
   .metrics-grid,
   .grid.three,
   .field-grid.two {

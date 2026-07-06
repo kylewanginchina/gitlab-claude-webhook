@@ -3,6 +3,10 @@ import {
   PreparedReviewContext,
   ReviewFinding,
 } from '../services/gitlabReviewService';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 
 describe('GitLabReviewService', () => {
   const service = new GitLabReviewService({} as any);
@@ -31,6 +35,53 @@ describe('GitLabReviewService', () => {
 
       expect(passes).toHaveLength(4);
       expect(passes[0]?.prompt).toContain('focus on auth');
+    });
+
+    it('uses published admin prompt versions for review passes', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-service-prompts-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.updatePrompt('bug-scan', {
+        draft: {
+          focus: ['Look specifically for cache invalidation regressions.'],
+          systemInstructions: 'Prefer reproducible data flow evidence.',
+        },
+      });
+      await customization.publishPrompt('bug-scan', 'Cache focus');
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const passes = customService.buildReviewPasses(context);
+      const bugPass = passes.find(pass => pass.id === 'bug-scan');
+
+      expect(bugPass?.label).toBe('Shallow bug scan');
+      expect(bugPass?.prompt).toContain('Look specifically for cache invalidation regressions.');
+      expect(bugPass?.prompt).toContain('Prefer reproducible data flow evidence.');
+    });
+
+    it('appends matching admin skills to review pass prompts', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-service-skills-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.createSkill({
+        name: 'Security review',
+        description: 'Security focused pass instructions.',
+        provider: 'any',
+        fileGlobs: ['src/**'],
+        languageHints: ['typescript'],
+        promptIds: ['bug-scan'],
+        systemInstructions: 'Prioritize auth bypasses and leaked secrets.',
+        priority: 50,
+      });
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const passes = customService.buildReviewPasses(context);
+      const bugPass = passes.find(pass => pass.id === 'bug-scan');
+      const guidelinePass = passes.find(pass => pass.id === 'claude-guidelines');
+
+      expect(bugPass?.prompt).toContain('Admin skill instructions:');
+      expect(bugPass?.prompt).toContain('Security review');
+      expect(bugPass?.prompt).toContain('Prioritize auth bypasses and leaked secrets.');
+      expect(guidelinePass?.prompt).not.toContain('Prioritize auth bypasses');
     });
   });
 

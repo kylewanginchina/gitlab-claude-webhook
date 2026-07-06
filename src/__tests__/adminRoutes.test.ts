@@ -5,6 +5,7 @@ import path from 'path';
 import request from 'supertest';
 import { ConfigUpdateResult, PublicRuntimeConfig } from '../admin/adminTypes';
 import { createAdminRouter } from '../admin/adminRoutes';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { RuntimeConfigService } from '../admin/runtimeConfigService';
 
 async function buildApp() {
@@ -18,6 +19,8 @@ async function buildApp() {
     } as NodeJS.ProcessEnv,
   });
   await runtimeConfigService.initialize();
+  const reviewCustomizationService = new ReviewCustomizationService({ dataDir: dir });
+  await reviewCustomizationService.initialize();
 
   const app = express();
   app.use(express.json());
@@ -25,6 +28,7 @@ async function buildApp() {
     '/api/admin',
     createAdminRouter({
       runtimeConfigService,
+      reviewCustomizationService,
       env: { ADMIN_TOKEN: 'admin-secret' },
     })
   );
@@ -443,5 +447,160 @@ describe('admin routes', () => {
       .post('/api/admin/config/reload')
       .set('X-Admin-Key', 'admin-secret')
       .expect(500, { error: 'disk offline' });
+  });
+
+  it('lists review prompts', async () => {
+    const app = await buildApp();
+
+    const response = await request(app)
+      .get('/api/admin/prompts')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(response.body.prompts).toHaveLength(4);
+    expect(response.body.prompts[0]).toMatchObject({
+      id: 'claude-guidelines',
+      label: 'CLAUDE.md compliance',
+      currentVersion: 1,
+    });
+  });
+
+  it('updates and publishes a review prompt', async () => {
+    const app = await buildApp();
+
+    const update = await request(app)
+      .put('/api/admin/prompts/bug-scan')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({
+        draft: {
+          focus: ['Look for transaction regressions.'],
+          systemInstructions: 'Prefer concrete evidence.',
+        },
+      })
+      .expect(200);
+
+    expect(update.body.prompt.draft.focus).toEqual(['Look for transaction regressions.']);
+
+    const publish = await request(app)
+      .post('/api/admin/prompts/bug-scan/publish')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ changelog: 'Transaction focus' })
+      .expect(200);
+
+    expect(publish.body.prompt.currentVersion).toBe(2);
+    expect(publish.body.prompt.versions[1].changelog).toBe('Transaction focus');
+  });
+
+  it('rolls a prompt back by creating a new published version', async () => {
+    const app = await buildApp();
+
+    await request(app)
+      .put('/api/admin/prompts/bug-scan')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ draft: { focus: ['Temporary focus.'], systemInstructions: '' } })
+      .expect(200);
+    await request(app)
+      .post('/api/admin/prompts/bug-scan/publish')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ changelog: 'Temporary' })
+      .expect(200);
+
+    const response = await request(app)
+      .post('/api/admin/prompts/bug-scan/rollback')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ version: 1, changelog: 'Back to default' })
+      .expect(200);
+
+    expect(response.body.prompt.currentVersion).toBe(3);
+    expect(response.body.prompt.draft.focus[0]).toContain('Read only the merge request changes');
+  });
+
+  it('creates and toggles review skills', async () => {
+    const app = await buildApp();
+
+    const created = await request(app)
+      .post('/api/admin/skills')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({
+        name: 'Security review',
+        description: 'Security-sensitive review hints.',
+        provider: 'any',
+        fileGlobs: ['src/**'],
+        languageHints: ['typescript'],
+        promptIds: ['bug-scan'],
+        systemInstructions: 'Prioritize auth bypasses.',
+        priority: 10,
+      })
+      .expect(200);
+
+    expect(created.body.skill.enabled).toBe(true);
+
+    const disabled = await request(app)
+      .post(`/api/admin/skills/${created.body.skill.id}/disable`)
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+    expect(disabled.body.skill.enabled).toBe(false);
+
+    const enabled = await request(app)
+      .post(`/api/admin/skills/${created.body.skill.id}/enable`)
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+    expect(enabled.body.skill.enabled).toBe(true);
+  });
+
+  it('records feedback and applies an optimizer proposal', async () => {
+    const app = await buildApp();
+
+    await request(app)
+      .post('/api/admin/feedback')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({
+        promptId: 'bug-scan',
+        label: 'false_positive',
+        note: 'Generated schema noise should not be flagged.',
+        source: 'admin',
+      })
+      .expect(200);
+
+    const analyzed = await request(app)
+      .post('/api/admin/prompt-optimizer/analyze')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(analyzed.body.proposals).toHaveLength(1);
+
+    const applied = await request(app)
+      .post(`/api/admin/prompt-optimizer/proposals/${analyzed.body.proposals[0].id}/apply`)
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(applied.body.proposal.status).toBe('applied');
+
+    const prompt = await request(app)
+      .get('/api/admin/prompts/bug-scan')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(prompt.body.prompt.draft.focus.join('\n')).toContain('Generated schema noise');
+    expect(prompt.body.prompt.currentVersion).toBe(1);
+  });
+
+  it('returns 404 for missing prompt IDs and 400 for malformed customization payloads', async () => {
+    const app = await buildApp();
+
+    await request(app)
+      .put('/api/admin/prompts/missing')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ label: 'Missing' })
+      .expect(404, { error: 'prompt not found' });
+
+    await request(app)
+      .post('/api/admin/skills')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({
+        name: '',
+        systemInstructions: 'Invalid skill',
+      })
+      .expect(400, { error: 'skill.name is required' });
   });
 });

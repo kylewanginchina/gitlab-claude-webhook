@@ -1,9 +1,12 @@
 import express from 'express';
 import { createAdminAuthMiddleware } from './adminAuth';
+import { ReviewCustomizationService } from './reviewCustomizationService';
 import { RuntimeConfigService } from './runtimeConfigService';
+import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 
 export interface CreateAdminRouterOptions {
   runtimeConfigService: RuntimeConfigService;
+  reviewCustomizationService?: ReviewCustomizationService;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -41,9 +44,38 @@ function isRuntimeConfigValidationError(message: string): boolean {
   return /^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)? (?:must|is required)\b/.test(message);
 }
 
+function isReviewCustomizationValidationError(message: string): boolean {
+  if (message.includes('already exists') || message === 'proposal is not open') {
+    return true;
+  }
+
+  return /^(prompt|skill|feedback)\.[a-zA-Z0-9.]+ (?:must|is required|is invalid)\b/.test(
+    message
+  );
+}
+
+function isNotFoundError(message: string): boolean {
+  return [
+    'prompt not found',
+    'prompt version not found',
+    'skill not found',
+    'proposal not found',
+  ].includes(message);
+}
+
+function renderPromptPreview(prompt: ReturnType<ReviewCustomizationService['getPrompt']>): string {
+  const lines = [`Review pass: ${prompt.label}`, ...prompt.draft.focus.map((line, index) => `${index + 1}. ${line}`)];
+  if (prompt.draft.systemInstructions) {
+    lines.push('', 'Admin system instructions:', prompt.draft.systemInstructions);
+  }
+  return lines.join('\n');
+}
+
 export function createAdminRouter(options: CreateAdminRouterOptions): express.Router {
   const router = express.Router();
   const { runtimeConfigService } = options;
+  const reviewCustomizationService =
+    options.reviewCustomizationService || defaultReviewCustomizationService;
 
   router.use(createAdminAuthMiddleware(options.env || process.env));
 
@@ -97,10 +129,148 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
     res.json(providerTestResult('codex', config.codex.apiKey.configured, config.codex.baseUrl));
   });
 
+  router.get('/prompts', (_req, res) => {
+    res.json({ prompts: reviewCustomizationService.listPrompts() });
+  });
+
+  router.post('/prompts', async (req, res, next) => {
+    try {
+      res.json({ prompt: await reviewCustomizationService.createPrompt(req.body) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/prompts/render', (req, res, next) => {
+    try {
+      const promptId = typeof req.body?.promptId === 'string' ? req.body.promptId : '';
+      const prompt = reviewCustomizationService.getPrompt(promptId);
+      res.json({ rendered: renderPromptPreview(prompt), prompt });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/prompts/:id', (req, res, next) => {
+    try {
+      res.json({ prompt: reviewCustomizationService.getPrompt(req.params.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put('/prompts/:id', async (req, res, next) => {
+    try {
+      res.json({ prompt: await reviewCustomizationService.updatePrompt(req.params.id, req.body) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/prompts/:id/publish', async (req, res, next) => {
+    try {
+      const changelog = typeof req.body?.changelog === 'string' ? req.body.changelog : undefined;
+      res.json({
+        prompt: await reviewCustomizationService.publishPrompt(req.params.id, changelog),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/prompts/:id/rollback', async (req, res, next) => {
+    try {
+      const version = req.body?.version;
+      if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+        throw new Error('prompt.version must be at least 1');
+      }
+      const changelog = typeof req.body?.changelog === 'string' ? req.body.changelog : undefined;
+      res.json({
+        prompt: await reviewCustomizationService.rollbackPrompt(req.params.id, version, changelog),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/skills', (_req, res) => {
+    res.json({ skills: reviewCustomizationService.listSkills() });
+  });
+
+  router.post('/skills', async (req, res, next) => {
+    try {
+      res.json({ skill: await reviewCustomizationService.createSkill(req.body) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put('/skills/:id', async (req, res, next) => {
+    try {
+      res.json({ skill: await reviewCustomizationService.updateSkill(req.params.id, req.body) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/skills/:id/enable', async (req, res, next) => {
+    try {
+      res.json({ skill: await reviewCustomizationService.setSkillEnabled(req.params.id, true) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/skills/:id/disable', async (req, res, next) => {
+    try {
+      res.json({ skill: await reviewCustomizationService.setSkillEnabled(req.params.id, false) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/feedback', (_req, res) => {
+    res.json({ feedback: reviewCustomizationService.listFeedback() });
+  });
+
+  router.post('/feedback', async (req, res, next) => {
+    try {
+      res.json({ feedback: await reviewCustomizationService.createFeedback(req.body) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/prompt-optimizer/proposals', (_req, res) => {
+    res.json({ proposals: reviewCustomizationService.listProposals() });
+  });
+
+  router.post('/prompt-optimizer/analyze', async (_req, res, next) => {
+    try {
+      res.json({ proposals: await reviewCustomizationService.analyzeFeedback() });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/prompt-optimizer/proposals/:id/apply', async (req, res, next) => {
+    try {
+      res.json({ proposal: await reviewCustomizationService.applyProposal(req.params.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       const message = error instanceof Error ? error.message : String(error);
-      res.status(isRuntimeConfigValidationError(message) ? 400 : 500).json({ error: message });
+      const status = isNotFoundError(message)
+        ? 404
+        : isRuntimeConfigValidationError(message) ||
+            isReviewCustomizationValidationError(message)
+          ? 400
+          : 500;
+      res.status(status).json({ error: message });
     }
   );
 

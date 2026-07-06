@@ -203,6 +203,17 @@ cp .env.example .env
 
 保存到管理后台的运行时配置位于 `${DATA_DIR}/runtime-config.json`。第一次启动时如果文件不存在，服务会从 `.env` 生成初始配置。
 
+Prompt/Skill/反馈优化数据也位于 `${DATA_DIR}`：
+
+| 文件 | 说明 |
+|------|------|
+| `review-prompts.json` | review prompt 草稿、发布版本和回滚历史 |
+| `review-skills.json` | 可启停的 review skill 指令 |
+| `review-feedback.json` | 管理后台录入的 review 反馈 |
+| `prompt-proposals.json` | 基于反馈生成的 prompt 优化建议 |
+
+新的 review 任务会读取当前已发布 prompt 版本和启用的匹配 skill，不需要重启服务。优化建议只会应用到草稿，不会自动发布。
+
 保存后立即影响新任务的配置包括：
 
 - 默认 Claude/Codex 模型
@@ -212,6 +223,8 @@ cp .env.example .env
 - review confidence 阈值
 - review candidate/final finding 数量
 - GitLab/Claude/Codex token
+- 已发布 review prompt
+- 启用的 review skill
 
 以下配置需要重启服务后生效：
 

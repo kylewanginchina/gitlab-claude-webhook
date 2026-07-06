@@ -44,13 +44,17 @@ jest.mock('@gitbeaker/node', () => ({
   Gitlab: jest.fn().mockImplementation((...args: unknown[]) => mockGitlabConstructor(...args)),
 }));
 
-jest.mock('@openai/codex-sdk', () => ({
-  __esModule: true,
-  Codex: jest.fn().mockImplementation((...args: unknown[]) => mockCodexConstructor(...args)),
-  default: {
+jest.mock(
+  '@openai/codex-sdk',
+  () => ({
+    __esModule: true,
     Codex: jest.fn().mockImplementation((...args: unknown[]) => mockCodexConstructor(...args)),
-  },
-}), { virtual: true });
+    default: {
+      Codex: jest.fn().mockImplementation((...args: unknown[]) => mockCodexConstructor(...args)),
+    },
+  }),
+  { virtual: true }
+);
 
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { StreamingClaudeExecutor } from '../services/streamingClaudeExecutor';
@@ -298,6 +302,135 @@ describe('runtime config execution paths', () => {
       })
     );
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2460000);
+  });
+
+  it('continues a normal MR review request with read-only fallback when a validation command is missing', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      claude: {
+        defaultModel: 'claude-runtime-model',
+        baseUrl: 'https://claude.runtime.example',
+        authToken: 'anthropic-runtime-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+    jest.spyOn(ProjectManager.prototype, 'getChangedFiles').mockResolvedValue([]);
+
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result:
+              '测试命令失败原因已确认:\n\n```text\n/bin/bash: line 1: cargo: command not found\n```\n\n当前环境缺少 cargo。',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      )
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result: 'Static review continued after the missing cargo validation.',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      );
+
+    const executor = new StreamingClaudeExecutor();
+    const callback = createCallback();
+
+    const result = await executor.executeWithStreaming(
+      '审阅代码',
+      '/tmp/project',
+      createExecutionContext({ mode: undefined as never }),
+      callback
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        prompt: expect.stringContaining('Continue the merge request review'),
+        options: expect.objectContaining({
+          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
+        }),
+      })
+    );
+    expect(result.output).toContain('cargo: command not found');
+    expect(result.output).toContain('Static review continued');
+    expect(callback.onProgress).toHaveBeenCalledWith(
+      expect.stringContaining('continuing with static review'),
+      false
+    );
+  });
+
+  it('continues a normal MR review request when the SDK reports a missing validation command as an error', async () => {
+    const runtimeConfig = createRuntimeConfig({
+      claude: {
+        defaultModel: 'claude-runtime-model',
+        baseUrl: 'https://claude.runtime.example',
+        authToken: 'anthropic-runtime-token',
+      },
+    });
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+    jest.spyOn(ProjectManager.prototype, 'getChangedFiles').mockResolvedValue([]);
+
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'error',
+            errors: ['/bin/bash: line 1: cargo: command not found', 'exit code 127'],
+          },
+        ])
+      )
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result: 'Static review completed after SDK error fallback.',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ])
+      );
+
+    const executor = new StreamingClaudeExecutor();
+    const callback = createCallback();
+
+    const result = await executor.executeWithStreaming(
+      '审阅代码',
+      '/tmp/project',
+      createExecutionContext({ mode: undefined as never }),
+      callback
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        prompt: expect.stringContaining('Continue the merge request review'),
+        options: expect.objectContaining({
+          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
+        }),
+      })
+    );
+    expect(result.output).toContain('cargo: command not found');
+    expect(result.output).toContain('Static review completed');
+    expect(callback.onError).not.toHaveBeenCalled();
   });
 
   it('uses runtime Codex model, base URL, API key, reasoning effort, and default timeout for new executions', async () => {
@@ -564,9 +697,9 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
-      buildReviewPasses: jest.fn().mockReturnValue([
-        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
-      ]),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
       mergeCandidateFindings: jest.fn().mockReturnValue([candidateFinding]),
       buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
       buildIncompleteReviewMessage: jest.fn(),
@@ -666,9 +799,9 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
-      buildReviewPasses: jest.fn().mockReturnValue([
-        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
-      ]),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
       mergeCandidateFindings: jest.fn().mockReturnValue([]),
       buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
       buildIncompleteReviewMessage: jest.fn(),
@@ -722,9 +855,9 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
-      buildReviewPasses: jest.fn().mockReturnValue([
-        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
-      ]),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
       mergeCandidateFindings: jest.fn().mockReturnValue([]),
       buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
       buildIncompleteReviewMessage: jest.fn(),
@@ -758,7 +891,10 @@ describe('runtime config execution paths', () => {
     );
 
     expect(mockReviewService.buildReviewPasses).toHaveBeenCalled();
-    expect((processor as any).postComment).toHaveBeenCalledWith(createMergeRequestEvent(), 'NO_ISSUES');
+    expect((processor as any).postComment).toHaveBeenCalledWith(
+      createMergeRequestEvent(),
+      'NO_ISSUES'
+    );
   });
 
   it('allows duplicate review SHAs when review.skipExistingSha is false', async () => {
@@ -773,9 +909,9 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(true),
-      buildReviewPasses: jest.fn().mockReturnValue([
-        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
-      ]),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
       mergeCandidateFindings: jest.fn().mockReturnValue([]),
       buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
       buildIncompleteReviewMessage: jest.fn(),
@@ -833,9 +969,9 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
-      buildReviewPasses: jest.fn().mockReturnValue([
-        { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' },
-      ]),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
       mergeCandidateFindings: jest.fn().mockReturnValue([candidateFinding]),
       buildNoIssuesMessage: jest.fn(),
       buildIncompleteReviewMessage: jest.fn(),
@@ -947,28 +1083,32 @@ describe('runtime config execution paths', () => {
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
-    (processor as any).executeReviewPass = jest.fn().mockImplementation(async (_instruction, passId, label) => {
-      activePasses += 1;
-      maxActivePasses = Math.max(maxActivePasses, activePasses);
-      await new Promise(resolve => setTimeout(resolve, 10));
-      activePasses -= 1;
-      return {
-        passId,
-        label,
-        summary: 'Summary',
-        findings: [],
-      };
-    });
-    (processor as any).executeReviewScore = jest.fn().mockImplementation(async (_instruction, finding) => {
-      activeScores += 1;
-      maxActiveScores = Math.max(maxActiveScores, activeScores);
-      await new Promise(resolve => setTimeout(resolve, 10));
-      activeScores -= 1;
-      return {
-        ...finding,
-        confidence: 95,
-      };
-    });
+    (processor as any).executeReviewPass = jest
+      .fn()
+      .mockImplementation(async (_instruction, passId, label) => {
+        activePasses += 1;
+        maxActivePasses = Math.max(maxActivePasses, activePasses);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        activePasses -= 1;
+        return {
+          passId,
+          label,
+          summary: 'Summary',
+          findings: [],
+        };
+      });
+    (processor as any).executeReviewScore = jest
+      .fn()
+      .mockImplementation(async (_instruction, finding) => {
+        activeScores += 1;
+        maxActiveScores = Math.max(maxActiveScores, activeScores);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        activeScores -= 1;
+        return {
+          ...finding,
+          confidence: 95,
+        };
+      });
 
     await (processor as any).executeCodeReview(
       createMergeRequestEvent(),

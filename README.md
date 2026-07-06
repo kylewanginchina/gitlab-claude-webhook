@@ -209,9 +209,9 @@ For detailed configuration instructions including environment variable expansion
 
 ### Admin Console
 
-The service includes an authenticated admin console at `/admin` for runtime configuration, masked secret visibility, and basic provider status checks.
+The service includes an authenticated admin console at `/admin` for runtime configuration, masked secret visibility, provider status checks, review prompt management, review skill management, and feedback-driven prompt proposals.
 
-Set `ADMIN_TOKEN` before enabling the console in production. Runtime settings are stored in `${DATA_DIR}/runtime-config.json` and are initialized from environment variables on first startup.
+Set `ADMIN_TOKEN` before enabling the console in production. Runtime settings are stored in `${DATA_DIR}/runtime-config.json` and are initialized from environment variables on first startup. Prompt, skill, feedback, and proposal data are stored in JSON files under `${DATA_DIR}`.
 
 See [Admin Console Guide](docs/admin-console.md).
 

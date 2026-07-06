@@ -2,10 +2,11 @@
 
 The admin console is available at `/admin`.
 
-It provides two operator views:
+It provides three operator views:
 
 - `Dashboard` for service status, current runtime defaults, and masked secret status
 - `Settings` for editing runtime configuration used by new tasks
+- `Review Tuning` for prompt drafts, published prompt versions, skill instructions, feedback, and optimization proposals
 
 ## Authentication
 
@@ -51,13 +52,38 @@ When a save does not require restart, the UI reports:
 
 When a save changes a restart-required field, the UI reports the exact fields that require restart, and the same `requiresRestart` detail is also returned by the `PUT /api/admin/config` response.
 
+## Review Tuning
+
+Review tuning data is stored under `${DATA_DIR}`:
+
+- `review-prompts.json`
+- `review-skills.json`
+- `review-feedback.json`
+- `prompt-proposals.json`
+
+The service initializes `review-prompts.json` from the default multi-pass review prompts on first startup. New review tasks read the currently published prompt versions and enabled matching skills without a restart.
+
+Prompt edits are draft-only until published. Publishing creates an immutable version. Rollback creates a new published version copied from an earlier version.
+
+Feedback optimization is deliberately semi-automatic:
+
+1. Admin records feedback for a prompt.
+2. `Analyze feedback` creates proposal records.
+3. Admin reviews and applies a proposal.
+4. Applying a proposal updates only the prompt draft.
+5. Admin publishes the prompt when the draft is ready.
+
+The service does not auto-publish optimization output.
+
 ## Operator Notes
 
 - `GET /api/admin/status` returns service uptime, version, timestamp, and whether runtime config loaded successfully.
 - `GET /api/admin/config` returns the public runtime configuration with secrets exposed only as `{ configured, masked }`.
 - `PUT /api/admin/config` updates runtime configuration and returns `requiresRestart` for fields that need a process restart.
 - `POST /api/admin/test/gitlab`, `POST /api/admin/test/claude`, and `POST /api/admin/test/codex` report whether the backend currently considers the relevant secret configured.
-- The current admin UI does not expose prompt management, skill management, or CodeRabbit integration.
+- `GET /api/admin/prompts`, `PUT /api/admin/prompts/:id`, `POST /api/admin/prompts/:id/publish`, and `POST /api/admin/prompts/:id/rollback` manage prompt drafts and published versions.
+- `GET /api/admin/skills`, `POST /api/admin/skills`, `PUT /api/admin/skills/:id`, `POST /api/admin/skills/:id/enable`, and `POST /api/admin/skills/:id/disable` manage review skill instructions.
+- `GET /api/admin/feedback`, `POST /api/admin/feedback`, `POST /api/admin/prompt-optimizer/analyze`, `GET /api/admin/prompt-optimizer/proposals`, and `POST /api/admin/prompt-optimizer/proposals/:id/apply` manage feedback and optimization proposals.
 
 ## Manual Test Checklist
 
@@ -71,3 +97,5 @@ When a save changes a restart-required field, the UI reports the exact fields th
 8. Run `Test Claude` and `Test Codex` and verify each result reflects whether its secret is configured.
 9. Change the webhook port and save. Verify the UI save message or the API response reports `webhook.port` under `requiresRestart`.
 10. Change `workDir` and save. Verify the UI save message or the API response reports `workDir` under `requiresRestart`.
+11. Open `Review Tuning`, edit `Shallow bug scan`, save the draft, publish it, and verify the version number increments.
+12. Add feedback for the same prompt, run `Analyze feedback`, apply the proposal, and verify the prompt draft changes but the published version does not increment until manually published.

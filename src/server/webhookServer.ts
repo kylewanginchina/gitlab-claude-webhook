@@ -1,7 +1,9 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { createAdminRouter } from '../admin/adminRoutes';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { RuntimeConfigService } from '../admin/runtimeConfigService';
+import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { runtimeConfigService as defaultRuntimeConfigService } from '../utils/runtimeConfig';
 import { verifyGitLabSignature } from '../utils/webhook';
 import logger from '../utils/logger';
@@ -10,6 +12,7 @@ import { EventProcessor } from '../services/eventProcessor';
 
 export interface WebhookServerOptions {
   runtimeConfigService?: RuntimeConfigService;
+  reviewCustomizationService?: ReviewCustomizationService;
   env?: NodeJS.ProcessEnv;
   adminStaticPath?: string;
 }
@@ -18,6 +21,7 @@ export class WebhookServer {
   private app: express.Application;
   private eventProcessor: EventProcessor;
   private runtimeConfigService: RuntimeConfigService;
+  private reviewCustomizationService: ReviewCustomizationService;
   private env: NodeJS.ProcessEnv;
   private adminStaticPath: string;
 
@@ -25,6 +29,8 @@ export class WebhookServer {
     this.app = express();
     this.eventProcessor = new EventProcessor();
     this.runtimeConfigService = options.runtimeConfigService || defaultRuntimeConfigService;
+    this.reviewCustomizationService =
+      options.reviewCustomizationService || defaultReviewCustomizationService;
     this.env = options.env || process.env;
     this.adminStaticPath =
       options.adminStaticPath || path.resolve(process.cwd(), 'dist/public/admin');
@@ -49,6 +55,7 @@ export class WebhookServer {
       '/api/admin',
       createAdminRouter({
         runtimeConfigService: this.runtimeConfigService,
+        reviewCustomizationService: this.reviewCustomizationService,
         env: this.env,
       })
     );

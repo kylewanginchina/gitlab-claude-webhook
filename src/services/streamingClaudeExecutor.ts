@@ -39,7 +39,50 @@ export class StreamingClaudeExecutor {
       await callback.onProgress('🚀 Claude is analyzing your request...', false);
 
       // Execute claude command with streaming via SDK
-      const result = await this.runClaudeWithSDK(command, projectPath, context, callback);
+      let result: { output: string; error?: string };
+      let usedStaticReviewFallback = false;
+      try {
+        result = await this.runClaudeWithSDK(command, projectPath, context, callback);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!this.shouldContinueWithStaticReview(command, context, errorMessage)) {
+          throw error;
+        }
+
+        logger.warn('Continuing normal MR review with static fallback after missing tool error', {
+          error: errorMessage,
+        });
+        await callback.onProgress(
+          '⚠️ Validation command failed because a tool is missing; continuing with static review.',
+          false
+        );
+        result = await this.continueWithStaticReviewFallback(
+          command,
+          errorMessage,
+          projectPath,
+          context,
+          callback
+        );
+        usedStaticReviewFallback = true;
+      }
+
+      if (
+        !usedStaticReviewFallback &&
+        this.shouldContinueWithStaticReview(command, context, result.output)
+      ) {
+        await callback.onProgress(
+          '⚠️ Validation command failed because a tool is missing; continuing with static review.',
+          false
+        );
+        result = await this.continueWithStaticReviewFallback(
+          command,
+          result.output,
+          projectPath,
+          context,
+          callback
+        );
+        usedStaticReviewFallback = true;
+      }
 
       // Check for file changes
       const changes = context.mode === 'review' ? [] : await this.getFileChanges(projectPath);
@@ -83,8 +126,7 @@ export class StreamingClaudeExecutor {
     const fullPrompt = this.buildPromptWithContext(command, context);
     const runtimeConfig = runtimeConfigService.getConfig();
     const model = context.model || runtimeConfig.claude.defaultModel;
-    const timeoutMs =
-      context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
+    const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
     const isReviewMode = context.mode === 'review';
 
     const env: Record<string, string> = {
@@ -161,10 +203,9 @@ export class StreamingClaudeExecutor {
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
-            append:
-              isReviewMode
-                ? 'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. Return a concise, structured review result.'
-                : 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+            append: isReviewMode
+              ? 'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. Return a concise, structured review result.'
+              : 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, or validation command fails because a toolchain is missing, unavailable, or the command is not found, record that verification could not run and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
           },
           env,
           abortController,
@@ -266,6 +307,107 @@ export class StreamingClaudeExecutor {
     return fullPrompt;
   }
 
+  private async continueWithStaticReviewFallback(
+    originalCommand: string,
+    previousOutput: string,
+    projectPath: string,
+    context: AIExecutionContext,
+    callback: StreamingProgressCallback
+  ): Promise<{ output: string; error?: string }> {
+    const fallbackCommand = this.buildStaticReviewFallbackCommand(originalCommand, previousOutput);
+
+    try {
+      const fallbackResult = await this.runClaudeWithSDK(
+        fallbackCommand,
+        projectPath,
+        {
+          ...context,
+          instruction: fallbackCommand,
+          mode: 'review',
+        },
+        callback
+      );
+
+      return {
+        output: [previousOutput, fallbackResult.output].filter(Boolean).join('\n\n'),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('Static review fallback failed after missing tool validation', {
+        error: message,
+      });
+
+      return {
+        output: [
+          previousOutput,
+          `Static review fallback could not complete after the missing-tool validation failure: ${message}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      };
+    }
+  }
+
+  private shouldContinueWithStaticReview(
+    command: string,
+    context: AIExecutionContext,
+    output: string
+  ): boolean {
+    if (context.mode === 'review') {
+      return false;
+    }
+
+    return (
+      this.isMergeRequestReviewIntent(command, context) && this.containsMissingToolFailure(output)
+    );
+  }
+
+  private isMergeRequestReviewIntent(command: string, context: AIExecutionContext): boolean {
+    const hasMergeRequestContext = Boolean(context.context?.includes('MR #'));
+    if (!hasMergeRequestContext) {
+      return false;
+    }
+
+    const normalized = command.toLowerCase();
+    return (
+      normalized.includes('review') ||
+      normalized.includes('code review') ||
+      command.includes('审阅') ||
+      command.includes('审查') ||
+      command.includes('评审')
+    );
+  }
+
+  private containsMissingToolFailure(output: string): boolean {
+    return (
+      /command not found/i.test(output) ||
+      /exit code 127/i.test(output) ||
+      (/not found/i.test(output) &&
+        /\b(cargo|rustc|go|mvn|gradle|pytest|python|node|npm|pnpm|yarn)\b/i.test(output))
+    );
+  }
+
+  private buildStaticReviewFallbackCommand(
+    originalCommand: string,
+    previousOutput: string
+  ): string {
+    return [
+      'Continue the merge request review after an optional validation command failed because the runtime environment is missing a toolchain.',
+      '',
+      `Original request: ${originalCommand}`,
+      '',
+      'Previous validation output:',
+      '```text',
+      previousOutput.trim().slice(0, 4000),
+      '```',
+      '',
+      'Do not stop because a command such as cargo, rustc, go, mvn, gradle, pytest, npm, pnpm, or yarn is missing.',
+      'Do not rerun the same missing command.',
+      'Continue with static repository inspection using git diff, git log, Read, Glob, Grep, and narrowly scoped Bash commands that are available.',
+      'Clearly state which validation could not run, then provide the best review findings you can support from static inspection.',
+    ].join('\n');
+  }
+
   private extractProgressFromMessage(message: SDKMessage): string {
     switch (message.type) {
       case 'system':
@@ -330,9 +472,10 @@ export class StreamingClaudeExecutor {
   }
 
   private formatToolProgress(name: string, input: unknown): string {
-    const record = input && typeof input === 'object' && !Array.isArray(input)
-      ? (input as Record<string, unknown>)
-      : {};
+    const record =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {};
 
     switch (name) {
       case 'Read': {

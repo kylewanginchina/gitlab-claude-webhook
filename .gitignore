@@ -4,8 +4,10 @@ dist/
 .env
 .DS_Store
 work/
+data/
 *.tmp
 *.temp
+*.bak
 
 # Claude Code local settings
 .claude/
