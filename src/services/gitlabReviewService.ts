@@ -700,7 +700,7 @@ export class GitLabReviewService {
       const link = this.buildFindingLink(event, context, finding);
       if (link) {
         lines.push('');
-        lines.push(link);
+        lines.push(`[${this.buildFindingLinkLabel(finding)}](${link})`);
       }
 
       lines.push('');
@@ -761,7 +761,17 @@ export class GitLabReviewService {
       return null;
     }
 
-    return `${event.project.web_url}/-/blob/${sha}/${filePath}#L${finding.line}`;
+    const encodedFilePath = filePath.split('/').map(encodeURIComponent).join('/');
+    return `${event.project.web_url}/-/blob/${sha}/${encodedFilePath}#L${finding.line}`;
+  }
+
+  private buildFindingLinkLabel(finding: ReviewFinding): string {
+    const filePath =
+      finding.lineType === 'old'
+        ? finding.oldPath || finding.path
+        : finding.newPath || finding.path;
+
+    return `${filePath}:${finding.line}`;
   }
 
   private buildDiscussionPosition(

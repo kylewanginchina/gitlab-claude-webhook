@@ -19,6 +19,13 @@ import {
   ReviewPassResult,
 } from './gitlabReviewService';
 import { runtimeConfigService } from '../utils/runtimeConfig';
+import {
+  formatProgressComment,
+  inferProgressStatus,
+  linkifyReviewReferences,
+  sanitizeProgressMessage,
+  type ProgressEntry,
+} from '../utils/gitlabMarkdown';
 
 export class EventProcessor {
   private projectManager: ProjectManager;
@@ -282,7 +289,7 @@ export class EventProcessor {
       : 'Claude';
 
     // Create initial progress comment
-    const initialMessage = `🚀 ${providerName} is starting to work on your request...\n\n**Task:** ${instruction.command.substring(0, 100)}${instruction.command.length > 100 ? '...' : ''}\n\n---\n\n⏳ Processing...`;
+    const initialMessage = this.buildInitialProgressComment(providerName, instruction.command);
 
     this.currentCommentId = await this.createProgressComment(event, initialMessage);
 
@@ -810,10 +817,16 @@ export class EventProcessor {
       provider: instruction.provider,
     });
 
-    let responseMessage = `✅ ${providerName} processed your request successfully.\n\n`;
+    let responseMessage = `**${providerName} processed your request successfully.**\n\n`;
 
     if (result.output) {
-      responseMessage += `${result.output}\n\n`;
+      const linkedOutput = await this.linkReviewOutputReferences(
+        result.output,
+        event,
+        baseBranch,
+        projectPath
+      );
+      responseMessage += `${linkedOutput}\n\n`;
     }
 
     if (result.changes?.length > 0) {
@@ -856,18 +869,18 @@ export class EventProcessor {
         // Generate MR URL
         const mrUrl = `${event.project.web_url}/-/merge_requests/${mergeRequest.iid}`;
 
-        responseMessage += `**🔀 Merge Request Created**\n`;
+        responseMessage += `**Merge request created**\n`;
         responseMessage += `[Click here to review and merge the changes →](${mrUrl})\n\n`;
         responseMessage += `**Branch:** \`${claudeBranch}\` → \`${baseBranch}\`\n`;
 
         await this.updateProgressComment(event, `Created merge request: ${mrUrl}`);
       } catch (error) {
         logger.error('Failed to create branch or merge request:', error);
-        responseMessage += `⚠️ **Note:** Changes were made but could not create merge request: ${error instanceof Error ? error.message : String(error)}\n\n`;
+        responseMessage += `**Note:** Changes were made but could not create merge request: ${error instanceof Error ? error.message : String(error)}\n\n`;
       }
     } else {
       // No changes, just post the result
-      responseMessage += '📋 No file changes were made.\n';
+      responseMessage += 'No file changes were made.\n';
     }
 
     await this.postComment(event, responseMessage);
@@ -1088,7 +1101,23 @@ export class EventProcessor {
     }
   }
 
-  private progressMessages: string[] = [];
+  private progressMessages: ProgressEntry[] = [];
+
+  private buildInitialProgressComment(providerName: string, command: string): string {
+    const now = new Date();
+    const task = command.length > 100 ? `${command.substring(0, 100)}...` : command;
+
+    return formatProgressComment({
+      entries: [
+        {
+          timestamp: now,
+          status: 'queued',
+          message: `${providerName} is starting to work on your request. Task: ${task}`,
+        },
+      ],
+      updatedAt: now,
+    });
+  }
 
   private async updateProgressComment(
     event: GitLabWebhookEvent,
@@ -1102,48 +1131,56 @@ export class EventProcessor {
 
     try {
       // Add new message to the progress log
-      const timestamp = new Date().toISOString().slice(11, 19);
-      const formattedMessage = `[${timestamp}] ${message}`;
+      const timestamp = new Date();
+      const status = inferProgressStatus(message, isComplete, isError);
 
       // Check for duplicate messages (ignore timestamp, only check the message content)
       const isDuplicate = this.progressMessages.some(existingMsg => {
-        // Extract the message part after the timestamp
-        const existingMessageContent = existingMsg.substring(11); // Remove "[HH:MM:SS] "
-        const newMessageContent = formattedMessage.substring(11);
-        return existingMessageContent === newMessageContent;
+        return sanitizeProgressMessage(existingMsg.message) === sanitizeProgressMessage(message);
       });
 
       // Only add if not duplicate
       if (!isDuplicate) {
-        this.progressMessages.push(formattedMessage);
+        this.progressMessages.push({ timestamp, status, message });
       }
-
-      // Build the complete comment body
-      let commentBody = `🤖 **AI Agent Progress Report**\n\n`;
 
       // Add the latest messages (keep last 10 to avoid too long comments)
       const recentMessages = this.progressMessages.slice(-10);
-      recentMessages.forEach(msg => {
-        commentBody += `- ${msg}\n`;
+      const commentBody = formatProgressComment({
+        entries: recentMessages,
+        isComplete,
+        isError,
+        updatedAt: timestamp,
       });
-
-      if (isComplete) {
-        commentBody += '\n---\n\n';
-        if (isError) {
-          commentBody += '❌ **Task completed with errors**';
-        } else {
-          commentBody += '✅ **Task completed successfully!**';
-        }
-      } else {
-        commentBody += '\n⏳ *Processing...*';
-      }
-
-      commentBody += `\n\n---\n*Last updated: ${new Date().toISOString()}*`;
 
       // Update the comment
       await this.updateComment(event, this.currentCommentId, commentBody);
     } catch (error) {
       logger.error('Failed to update progress comment:', error);
+    }
+  }
+
+  private async linkReviewOutputReferences(
+    output: string,
+    event: GitLabWebhookEvent,
+    baseBranch: string,
+    projectPath: string
+  ): Promise<string> {
+    if (event.object_kind !== 'merge_request' && !event.merge_request) {
+      return output;
+    }
+
+    try {
+      return await linkifyReviewReferences(output, {
+        projectPath,
+        projectUrl: event.project.web_url,
+        ref: event.merge_request?.source_branch || baseBranch,
+      });
+    } catch (error) {
+      logger.warn('Failed to linkify review output references', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return output;
     }
   }
 

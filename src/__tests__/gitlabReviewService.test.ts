@@ -142,10 +142,7 @@ describe('GitLabReviewService', () => {
       expect(merged).toHaveLength(1);
       expect(merged[0]?.confidence).toBe(85);
       expect(merged[0]?.body).toContain('Additional corroboration');
-      expect(merged[0]?.sources).toEqual([
-        'Bug scan',
-        'History and blame context',
-      ]);
+      expect(merged[0]?.sources).toEqual(['Bug scan', 'History and blame context']);
     });
   });
 
@@ -179,6 +176,64 @@ describe('GitLabReviewService', () => {
       expect(scored?.confidence).toBe(95);
       expect(scored?.verdict).toBe('Confirmed in diff');
       expect(scored?.sources).toEqual(['Bug scan']);
+    });
+  });
+
+  describe('postReview', () => {
+    it('renders structured finding links as readable file line anchors', async () => {
+      const gitlabService = {
+        addMergeRequestComment: jest.fn().mockResolvedValue(undefined),
+        createMergeRequestDiscussion: jest.fn().mockResolvedValue(undefined),
+      };
+      const customService = new GitLabReviewService(gitlabService as any);
+
+      await customService.postReview(
+        {
+          object_kind: 'merge_request',
+          user: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
+          project: {
+            id: 1,
+            name: 'project',
+            web_url: 'https://gitlab.example.com/group/project',
+            default_branch: 'main',
+          },
+          object_attributes: {},
+          merge_request: {
+            id: 2,
+            iid: 2,
+            title: 'Test MR',
+            description: '',
+            state: 'opened',
+            web_url: 'https://gitlab.example.com/group/project/-/merge_requests/2',
+            source_branch: 'feature/test',
+            target_branch: 'main',
+            author: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
+          },
+        },
+        context,
+        {
+          summary: 'Found one issue',
+          findings: [
+            {
+              title: 'Bug',
+              body: 'This is real',
+              confidence: 95,
+              path: 'src/a file.ts',
+              line: 12,
+              lineType: 'new',
+            },
+          ],
+        }
+      );
+
+      const body = gitlabService.addMergeRequestComment.mock.calls[0]?.[2] as string;
+
+      expect(body).toContain(
+        '[src/a file.ts:12](https://gitlab.example.com/group/project/-/blob/head-sha/src/a%20file.ts#L12)'
+      );
+      expect(body).not.toContain(
+        '\nhttps://gitlab.example.com/group/project/-/blob/head-sha/src/a%20file.ts#L12\n'
+      );
     });
   });
 

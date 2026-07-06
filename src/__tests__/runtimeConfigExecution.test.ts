@@ -1,6 +1,9 @@
 import type { RuntimeConfig } from '../admin/adminTypes';
 import type { AIExecutionContext, StreamingProgressCallback } from '../types/common';
 import type { GitLabWebhookEvent, AIInstruction } from '../types/gitlab';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 
 const mockQuery = jest.fn();
 const mockGitlabConstructor = jest.fn();
@@ -612,6 +615,97 @@ describe('runtime config execution paths', () => {
     expect(result.output).toContain('exit code 2');
     expect(result.output).toContain('Static review completed');
     expect(callback.onError).not.toHaveBeenCalled();
+  });
+
+  it('formats progress comments as an aligned enterprise review table', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-06T09:20:31.817Z'));
+
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    (processor as any).currentCommentId = 101;
+    (processor as any).updateComment = jest.fn().mockResolvedValue(undefined);
+
+    await (processor as any).updateProgressComment(
+      event,
+      '🔎 Grep infer_l7_class_1 in /tmp/gitlab-claude-work/agent/src/ebpf/k...',
+      false
+    );
+    await (processor as any).updateProgressComment(
+      event,
+      '✅ Claude execution completed successfully!',
+      true
+    );
+
+    const body = (processor as any).updateComment.mock.calls.at(-1)?.[2] as string;
+
+    expect(body).toContain('### AI Agent Progress Report');
+    expect(body).toContain('| Time (UTC+08) | Status | Activity |');
+    expect(body).toContain(
+      '| 17:20:31 | Search | Grep `infer_l7_class_1` in `/tmp/gitlab-claude-work/agent/src/ebpf/k...` |'
+    );
+    expect(body).toContain('| 17:20:31 | Completed | Claude execution completed successfully. |');
+    expect(body).toContain('**Status:** Completed successfully');
+    expect(body).toContain('Last updated: 2026-07-06 17:20:31 UTC+08:00');
+    expect(body).not.toContain('🔎');
+    expect(body).not.toContain('✅');
+    expect(body).not.toContain('2026-07-06T09:20:31.817Z');
+
+    jest.useRealTimers();
+  });
+
+  it('links ordinary review output references before posting the success comment', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'event-review-links-'));
+    await fs.mkdir(path.join(projectPath, 'agent/src/ebpf/user'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectPath, 'agent/src/ebpf/user/socket_trace.bpf.c'),
+      [
+        '#include "socket_trace.bpf.h"',
+        '',
+        'int process_data_common(void *ctx) {',
+        '  return 0;',
+        '}',
+        '',
+      ].join('\n')
+    );
+
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    if (event.merge_request) {
+      event.merge_request.source_branch = 'feature/review-links';
+    }
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+
+    await (processor as any).handleSuccess(
+      event,
+      {
+        command: '审阅代码',
+        context: 'MR #2',
+        branch: 'feature/review-links',
+        provider: 'claude',
+      },
+      {
+        success: true,
+        output: [
+          'Review 结论',
+          '',
+          '- `socket_trace.bpf.c`',
+          '  - `process_data_common()` 路径保持一致。',
+        ].join('\n'),
+        changes: [],
+      },
+      'feature/review-links',
+      projectPath
+    );
+
+    const body = (processor as any).postComment.mock.calls[0]?.[1] as string;
+
+    expect(body).toContain('**Claude processed your request successfully.**');
+    expect(body).toContain(
+      '[`socket_trace.bpf.c`](https://gitlab.example.com/group/project/-/blob/feature%2Freview-links/agent/src/ebpf/user/socket_trace.bpf.c)'
+    );
+    expect(body).toContain(
+      '[`process_data_common()`](https://gitlab.example.com/group/project/-/blob/feature%2Freview-links/agent/src/ebpf/user/socket_trace.bpf.c#L3)'
+    );
   });
 
   it('uses runtime Codex model, base URL, API key, reasoning effort, and default timeout for new executions', async () => {
