@@ -108,6 +108,58 @@ services:
       - WEBHOOK_SECRET=your-secret
 ```
 
+#### 方法4：可选 DeepFlow 构建工具镜像
+
+默认镜像保持轻量，只包含 webhook 服务和常规 review/edit 所需工具。如果希望 AI review 在容器内执行 DeepFlow 的编译或验证命令，可以使用可选覆盖文件：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
+```
+
+该镜像会额外包含：
+
+- Rust/Cargo，用于 DeepFlow agent 相关 `cargo build`/`cargo test`
+- Go，用于 DeepFlow server/controller 相关构建检查
+- `protobuf-compiler`，提供 `protoc`
+- Clang/LLVM、gcc、make、cmake、`pkg-config`
+- `libpcap-dev`、`libelf-dev`、`libbpf-dev`
+- bash、git、curl、ripgrep 等仓库检查工具
+
+覆盖文件会增加以下 named volume 缓存：
+
+| Volume                    | 用途                      |
+| ------------------------- | ------------------------- |
+| `deepflow-cargo-registry` | Cargo registry 缓存       |
+| `deepflow-cargo-git`      | Cargo git dependency 缓存 |
+| `deepflow-go-cache`       | Go build cache            |
+| `deepflow-go-mod-cache`   | Go module cache           |
+| `deepflow-npm-cache`      | npm cache                 |
+| `deepflow-work`           | DeepFlow 临时构建目录     |
+
+可以用以下命令确认当前容器内工具链：
+
+```bash
+docker exec gitlab-claude-webhook sh -lc 'node --version && npm --version && cargo --version && rustc --version && go version && protoc --version && clang --version | head -n 1 && make --version | head -n 1 && pkg-config --version'
+```
+
+该镜像基于 Debian/Node 20 安装通用构建工具，目标是让 AI review 可以执行常见 DeepFlow 编译/验证命令。若要生产级复刻 DeepFlow 官方发布构建，请仍以 DeepFlow 官方 `hub.deepflow.yunshan.net/public/rust-build` 镜像和官方构建脚本为准。
+
+可选构建参数：
+
+| 变量                              | 默认值                                       | 说明                  |
+| --------------------------------- | -------------------------------------------- | --------------------- |
+| `DEEPFLOW_DEBIAN_MIRROR`          | `https://mirrors.aliyun.com/debian`          | Debian main/update 源 |
+| `DEEPFLOW_DEBIAN_SECURITY_MIRROR` | `https://mirrors.aliyun.com/debian-security` | Debian security 源    |
+
+如果构建环境访问官方 Debian 源更快，可以覆盖为：
+
+```bash
+DEEPFLOW_DEBIAN_MIRROR=http://deb.debian.org/debian \
+DEEPFLOW_DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security \
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
+```
+
 ### 4. 配置优先级
 
 服务启动时会先加载环境变量和 `.env`，再用管理后台保存的运行时配置覆盖这些默认来源。
@@ -157,27 +209,29 @@ GitLab Token: ***h7i8j9k0
 #### AI 提供者配置（根据使用情况）
 
 **使用 Claude 时必需：**
+
 - `ANTHROPIC_AUTH_TOKEN` - Anthropic API 令牌
 
 **使用 Codex 时必需：**
+
 - `OPENAI_API_KEY` - OpenAI API 令牌
 
 **可选配置（都有默认值）：**
 
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `AI_DEFAULT_PROVIDER` | 默认 AI 提供者 | `claude` |
-| `ANTHROPIC_BASE_URL` | Anthropic API 基础 URL | `https://api.anthropic.com` |
-| `OPENAI_BASE_URL` | OpenAI API 基础 URL | `https://api.openai.com/v1` |
-| `CLAUDE_DEFAULT_MODEL` | Claude 默认模型 | `claude-sonnet-4-20250514` |
-| `CODEX_DEFAULT_MODEL` | Codex 默认模型 | `gpt-5.1-codex-max` |
-| `CODEX_REASONING_EFFORT` | Codex 推理等级 | `high` |
-| `CLAUDE_DEFAULT_TIMEOUT_MINUTES` | Claude 默认超时时间（分钟） | `30` |
-| `CODEX_DEFAULT_TIMEOUT_MINUTES` | Codex 默认超时时间（分钟） | `30` |
-| `REVIEW_ENABLED` | 是否默认启用 review | `true` |
-| `REVIEW_MIN_CONFIDENCE` | review 置信度阈值 | `80` |
-| `REVIEW_MAX_CANDIDATE_FINDINGS` | review 候选问题上限 | `12` |
-| `REVIEW_MAX_FINAL_FINDINGS` | review 最终问题上限 | `8` |
+| 配置项                           | 说明                        | 默认值                      |
+| -------------------------------- | --------------------------- | --------------------------- |
+| `AI_DEFAULT_PROVIDER`            | 默认 AI 提供者              | `claude`                    |
+| `ANTHROPIC_BASE_URL`             | Anthropic API 基础 URL      | `https://api.anthropic.com` |
+| `OPENAI_BASE_URL`                | OpenAI API 基础 URL         | `https://api.openai.com/v1` |
+| `CLAUDE_DEFAULT_MODEL`           | Claude 默认模型             | `claude-sonnet-4-20250514`  |
+| `CODEX_DEFAULT_MODEL`            | Codex 默认模型              | `gpt-5.1-codex-max`         |
+| `CODEX_REASONING_EFFORT`         | Codex 推理等级              | `high`                      |
+| `CLAUDE_DEFAULT_TIMEOUT_MINUTES` | Claude 默认超时时间（分钟） | `30`                        |
+| `CODEX_DEFAULT_TIMEOUT_MINUTES`  | Codex 默认超时时间（分钟）  | `30`                        |
+| `REVIEW_ENABLED`                 | 是否默认启用 review         | `true`                      |
+| `REVIEW_MIN_CONFIDENCE`          | review 置信度阈值           | `80`                        |
+| `REVIEW_MAX_CANDIDATE_FINDINGS`  | review 候选问题上限         | `12`                        |
+| `REVIEW_MAX_FINAL_FINDINGS`      | review 最终问题上限         | `8`                         |
 
 ### 7. 配置模板
 
@@ -196,21 +250,21 @@ cp .env.example .env
 
 必需变量：
 
-| 配置项 | 说明 |
-|--------|------|
-| `ADMIN_TOKEN` | 管理后台登录密钥，请使用长随机字符串 |
-| `DATA_DIR` | 运行时配置目录，Docker 默认 `/app/data` |
+| 配置项        | 说明                                    |
+| ------------- | --------------------------------------- |
+| `ADMIN_TOKEN` | 管理后台登录密钥，请使用长随机字符串    |
+| `DATA_DIR`    | 运行时配置目录，Docker 默认 `/app/data` |
 
 保存到管理后台的运行时配置位于 `${DATA_DIR}/runtime-config.json`。第一次启动时如果文件不存在，服务会从 `.env` 生成初始配置。
 
 Prompt/Skill/反馈优化数据也位于 `${DATA_DIR}`：
 
-| 文件 | 说明 |
-|------|------|
-| `review-prompts.json` | review prompt 草稿、发布版本和回滚历史 |
-| `review-skills.json` | 可启停的 review skill 指令 |
-| `review-feedback.json` | 管理后台录入的 review 反馈 |
-| `prompt-proposals.json` | 基于反馈生成的 prompt 优化建议 |
+| 文件                    | 说明                                   |
+| ----------------------- | -------------------------------------- |
+| `review-prompts.json`   | review prompt 草稿、发布版本和回滚历史 |
+| `review-skills.json`    | 可启停的 review skill 指令             |
+| `review-feedback.json`  | 管理后台录入的 review 反馈             |
+| `prompt-proposals.json` | 基于反馈生成的 prompt 优化建议         |
 
 新的 review 任务会读取当前已发布 prompt 版本和启用的匹配 skill，不需要重启服务。优化建议只会应用到草稿，不会自动发布。
 

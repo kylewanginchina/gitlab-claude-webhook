@@ -85,6 +85,23 @@ docker-compose up -d
 docker-compose logs -f
 ```
 
+### Optional DeepFlow Build-Tool Image
+
+The default Docker image stays small and includes only the tools needed by normal webhook and review workflows. If you want `@claude`/`@codex` review tasks to run DeepFlow compile or validation commands inside the webhook container, use the optional DeepFlow image profile:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
+```
+
+The DeepFlow profile is Debian-based and adds Rust/Cargo, Go, protobuf, Clang/LLVM, `libpcap`, `libelf`, `libbpf`, `make`, `pkg-config`, and related build tools. It also mounts named caches for Cargo, Go, npm, and DeepFlow scratch work so repeated reviews do not redownload everything. It is intended for automated review validation; for release-grade DeepFlow builds, keep using DeepFlow's official build images and scripts.
+
+Verify the active container:
+
+```bash
+docker exec gitlab-claude-webhook sh -lc 'node --version && npm --version && cargo --version && rustc --version && go version && protoc --version && clang --version | head -n 1 && make --version | head -n 1 && pkg-config --version'
+```
+
 ### Running Locally
 
 ```bash
@@ -220,31 +237,31 @@ See [Admin Console Guide](docs/admin-console.md).
 **Core Required:**
 
 | Variable         | Description               |
-|------------------|---------------------------|
+| ---------------- | ------------------------- |
 | `GITLAB_TOKEN`   | GitLab API token          |
 | `WEBHOOK_SECRET` | Webhook validation secret |
 
 **AI Provider Required (based on usage):**
 
-| Variable               | Description                      |
-|------------------------|----------------------------------|
-| `ANTHROPIC_AUTH_TOKEN` | Required when using Claude       |
-| `OPENAI_API_KEY`       | Required when using Codex        |
+| Variable               | Description                |
+| ---------------------- | -------------------------- |
+| `ANTHROPIC_AUTH_TOKEN` | Required when using Claude |
+| `OPENAI_API_KEY`       | Required when using Codex  |
 
 **Optional (all have defaults):**
 
-| Variable               | Description                    | Default                          |
-| ---------------------- | ------------------------------ | -------------------------------- |
-| `AI_DEFAULT_PROVIDER`  | Default AI provider            | `claude`                         |
-| `ANTHROPIC_BASE_URL`   | Anthropic API base URL         | `https://api.anthropic.com`      |
-| `OPENAI_BASE_URL`      | OpenAI API base URL            | `https://api.openai.com/v1`      |
-| `CLAUDE_DEFAULT_MODEL` | Default model for Claude       | `claude-sonnet-4-20250514`       |
-| `CODEX_DEFAULT_MODEL`  | Default model for Codex        | `gpt-5.1-codex-max`              |
-| `CODEX_REASONING_EFFORT` | Codex reasoning level        | `high`                           |
-| `GITLAB_BASE_URL`      | GitLab instance URL            | `https://gitlab.com`             |
-| `PORT`                 | Server port                    | `3000`                           |
-| `WORK_DIR`             | Temporary work directory       | `/tmp/gitlab-claude-work`        |
-| `LOG_LEVEL`            | Logging level                  | `info`                           |
+| Variable                 | Description              | Default                     |
+| ------------------------ | ------------------------ | --------------------------- |
+| `AI_DEFAULT_PROVIDER`    | Default AI provider      | `claude`                    |
+| `ANTHROPIC_BASE_URL`     | Anthropic API base URL   | `https://api.anthropic.com` |
+| `OPENAI_BASE_URL`        | OpenAI API base URL      | `https://api.openai.com/v1` |
+| `CLAUDE_DEFAULT_MODEL`   | Default model for Claude | `claude-sonnet-4-20250514`  |
+| `CODEX_DEFAULT_MODEL`    | Default model for Codex  | `gpt-5.1-codex-max`         |
+| `CODEX_REASONING_EFFORT` | Codex reasoning level    | `high`                      |
+| `GITLAB_BASE_URL`        | GitLab instance URL      | `https://gitlab.com`        |
+| `PORT`                   | Server port              | `3000`                      |
+| `WORK_DIR`               | Temporary work directory | `/tmp/gitlab-claude-work`   |
+| `LOG_LEVEL`              | Logging level            | `info`                      |
 
 ### Codex Custom Provider Configuration
 
@@ -252,12 +269,12 @@ Codex configuration is **automatically generated** from environment variables at
 
 **Environment variables for Codex config:**
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_BASE_URL` | API endpoint URL | `https://api.openai.com/v1` |
-| `OPENAI_API_KEY` | API key | Required for Codex |
-| `CODEX_DEFAULT_MODEL` | Model name | `gpt-5.1-codex-max` |
-| `CODEX_REASONING_EFFORT` | Reasoning level | `high` |
+| Variable                 | Description      | Default                     |
+| ------------------------ | ---------------- | --------------------------- |
+| `OPENAI_BASE_URL`        | API endpoint URL | `https://api.openai.com/v1` |
+| `OPENAI_API_KEY`         | API key          | Required for Codex          |
+| `CODEX_DEFAULT_MODEL`    | Model name       | `gpt-5.1-codex-max`         |
+| `CODEX_REASONING_EFFORT` | Reasoning level  | `high`                      |
 
 Provider name is auto-extracted from `OPENAI_BASE_URL` (e.g., `https://88code.org/...` → `88code`).
 
@@ -271,6 +288,7 @@ CODEX_REASONING_EFFORT=high
 ```
 
 The container entrypoint script automatically generates `~/.codex/config.toml` with:
+
 - Custom model provider configuration
 - Base URL and API key settings
 - Reasoning effort and model selection
