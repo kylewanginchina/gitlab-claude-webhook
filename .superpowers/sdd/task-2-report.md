@@ -87,3 +87,29 @@ Tests:       21 passed, 21 total
 ## Concerns
 
 - The focused Jest run still emits the pre-existing `ts-jest` warning about `isolatedModules: true` with hybrid module kind. Tests pass, and I did not change toolchain config in this task.
+
+## Task 2 review-fix follow-up
+
+- Updated the stale private `handleSuccess(...)` test invocation in `src/__tests__/runtimeConfigExecution.test.ts` to pass a fresh `(processor as any).createRunContext()` as the sixth argument, matching the current production signature.
+- Added a focused regression test covering discussion reply routing isolation across two independent run contexts by setting `contextA.currentDiscussionId` and `contextB.currentDiscussionId` and asserting `postComment(...)` routes each reply to its own merge request discussion id without falling back to regular comments.
+- Kept the change within the requested scope; `src/services/eventProcessor.ts` did not require edits.
+
+### Verification
+
+Command:
+
+```bash
+npm test -- src/__tests__/runtimeConfigExecution.test.ts --runInBand
+```
+
+Result:
+
+```text
+PASS src/__tests__/runtimeConfigExecution.test.ts (6.605 s)
+Test Suites: 1 passed, 1 total
+Tests:       22 passed, 22 total
+```
+
+### Follow-up concern
+
+- The targeted Jest run still emits the existing `ts-jest` `isolatedModules: true` warning for the hybrid module kind configuration. This predates the fix and does not affect the test result.

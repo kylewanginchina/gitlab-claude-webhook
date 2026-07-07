@@ -690,6 +690,49 @@ describe('runtime config execution paths', () => {
     jest.useRealTimers();
   });
 
+  it('keeps discussion reply routing isolated per run context', async () => {
+    const processor = new EventProcessor();
+    const eventA = createMergeRequestEvent();
+    const eventB = createMergeRequestEvent();
+    if (eventB.merge_request) {
+      eventB.merge_request.iid = 99;
+    }
+
+    const contextA = (processor as any).createRunContext();
+    const contextB = (processor as any).createRunContext();
+    contextA.currentDiscussionId = 'discussion-a';
+    contextB.currentDiscussionId = 'discussion-b';
+
+    const addMergeRequestDiscussionReply = jest.fn().mockResolvedValue(undefined);
+    const addMergeRequestComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).gitlabService = {
+      addMergeRequestDiscussionReply,
+      addMergeRequestComment,
+    };
+
+    await Promise.all([
+      (processor as any).postComment(eventA, 'Reply for discussion A', contextA),
+      (processor as any).postComment(eventB, 'Reply for discussion B', contextB),
+    ]);
+
+    expect(addMergeRequestDiscussionReply).toHaveBeenCalledTimes(2);
+    expect(addMergeRequestDiscussionReply).toHaveBeenNthCalledWith(
+      1,
+      1,
+      2,
+      'discussion-a',
+      'Reply for discussion A'
+    );
+    expect(addMergeRequestDiscussionReply).toHaveBeenNthCalledWith(
+      2,
+      1,
+      99,
+      'discussion-b',
+      'Reply for discussion B'
+    );
+    expect(addMergeRequestComment).not.toHaveBeenCalled();
+  });
+
   it('links ordinary review output references before posting the success comment', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'event-review-links-'));
     await fs.mkdir(path.join(projectPath, 'agent/src/ebpf/user'), { recursive: true });
@@ -712,6 +755,8 @@ describe('runtime config execution paths', () => {
     }
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
 
+    const runContext = (processor as any).createRunContext();
+
     await (processor as any).handleSuccess(
       event,
       {
@@ -731,7 +776,8 @@ describe('runtime config execution paths', () => {
         changes: [],
       },
       'feature/review-links',
-      projectPath
+      projectPath,
+      runContext
     );
 
     const body = (processor as any).postComment.mock.calls[0]?.[1] as string;
