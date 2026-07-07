@@ -43,6 +43,53 @@ function createEvent(overrides: Partial<GitLabWebhookEvent> = {}): GitLabWebhook
 }
 
 describe('RunQueue', () => {
+  it.each([0, -1, Number.NaN])(
+    'falls back to concurrency 2 for invalid globalConcurrency=%s',
+    async globalConcurrency => {
+      const queue = new RunQueue({ globalConcurrency });
+      const firstRun = deferred();
+      const secondRun = deferred();
+      const events: string[] = [];
+
+      const runA = queue.enqueue({
+        resourceKey: 'project:10:mr:1',
+        run: async () => {
+          events.push('a:start');
+          await firstRun.promise;
+          events.push('a:end');
+        },
+      });
+
+      const runB = queue.enqueue({
+        resourceKey: 'project:10:mr:2',
+        run: async () => {
+          events.push('b:start');
+          await secondRun.promise;
+          events.push('b:end');
+        },
+      });
+
+      const runC = queue.enqueue({
+        resourceKey: 'project:10:mr:3',
+        run: async () => {
+          events.push('c:start');
+        },
+      });
+
+      await flushPromises();
+
+      expect(events).toEqual(['a:start', 'b:start']);
+      expect(queue.getStats()).toMatchObject({ running: 2, queued: 1 });
+
+      firstRun.resolve();
+      secondRun.resolve();
+      await Promise.all([runA.promise, runB.promise, runC.promise]);
+
+      expect(events).toEqual(['a:start', 'b:start', 'a:end', 'b:end', 'c:start']);
+      expect(queue.getStats()).toMatchObject({ running: 0, queued: 0 });
+    }
+  );
+
   it('runs different resources concurrently but serializes the same resource', async () => {
     const queue = new RunQueue({ globalConcurrency: 2 });
     const firstSameResource = deferred();

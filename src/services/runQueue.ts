@@ -46,7 +46,14 @@ export class RunQueue {
   private runningCount = 0;
 
   constructor(options: RunQueueOptions = {}) {
-    this.globalConcurrency = Math.max(1, Math.floor(options.globalConcurrency ?? 2));
+    const globalConcurrency = options.globalConcurrency;
+
+    if (typeof globalConcurrency !== 'number' || !Number.isFinite(globalConcurrency) || globalConcurrency <= 0) {
+      this.globalConcurrency = 2;
+      return;
+    }
+
+    this.globalConcurrency = Math.max(1, Math.floor(globalConcurrency));
   }
 
   public enqueue<T>(job: RunQueueJob<T>): QueuedRun<T> {
