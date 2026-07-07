@@ -50,8 +50,12 @@ export class WebhookServer {
   }
 
   private resolveTaskConcurrency(): number {
-    const parsed = Number.parseInt(this.env.WEBHOOK_TASK_CONCURRENCY || '2', 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+    const raw = this.env.WEBHOOK_TASK_CONCURRENCY;
+    if (!raw || !/^[1-9]\d*$/.test(raw)) {
+      return 2;
+    }
+
+    return Number(raw);
   }
 
   private setupMiddleware(): void {
