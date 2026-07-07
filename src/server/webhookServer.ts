@@ -9,17 +9,21 @@ import { verifyGitLabSignature } from '../utils/webhook';
 import logger from '../utils/logger';
 import { GitLabWebhookEvent } from '../types/gitlab';
 import { EventProcessor } from '../services/eventProcessor';
+import { RunQueue, getGitLabEventResourceKey } from '../services/runQueue';
 
 export interface WebhookServerOptions {
   runtimeConfigService?: RuntimeConfigService;
   reviewCustomizationService?: ReviewCustomizationService;
+  eventProcessor?: Pick<EventProcessor, 'processEvent'>;
+  taskConcurrency?: number;
   env?: NodeJS.ProcessEnv;
   adminStaticPath?: string;
 }
 
 export class WebhookServer {
   private app: express.Application;
-  private eventProcessor: EventProcessor;
+  private eventProcessor: Pick<EventProcessor, 'processEvent'>;
+  private runQueue: RunQueue;
   private runtimeConfigService: RuntimeConfigService;
   private reviewCustomizationService: ReviewCustomizationService;
   private env: NodeJS.ProcessEnv;
@@ -27,11 +31,14 @@ export class WebhookServer {
 
   constructor(options: WebhookServerOptions = {}) {
     this.app = express();
-    this.eventProcessor = new EventProcessor();
+    this.env = options.env || process.env;
+    this.eventProcessor = options.eventProcessor || new EventProcessor();
+    this.runQueue = new RunQueue({
+      globalConcurrency: options.taskConcurrency ?? this.resolveTaskConcurrency(),
+    });
     this.runtimeConfigService = options.runtimeConfigService || defaultRuntimeConfigService;
     this.reviewCustomizationService =
       options.reviewCustomizationService || defaultReviewCustomizationService;
-    this.env = options.env || process.env;
     this.adminStaticPath =
       options.adminStaticPath || path.resolve(process.cwd(), 'dist/public/admin');
     this.setupMiddleware();
@@ -40,6 +47,11 @@ export class WebhookServer {
 
   public getApp(): express.Application {
     return this.app;
+  }
+
+  private resolveTaskConcurrency(): number {
+    const parsed = Number.parseInt(this.env.WEBHOOK_TASK_CONCURRENCY || '2', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
   }
 
   private setupMiddleware(): void {
@@ -109,12 +121,26 @@ export class WebhookServer {
         userId: event.user?.id,
       });
 
-      // Process the event asynchronously
-      this.eventProcessor.processEvent(event).catch(error => {
-        logger.error('Error processing GitLab event:', error);
+      const resourceKey = getGitLabEventResourceKey(event);
+      const queuedRun = this.runQueue.enqueue({
+        resourceKey,
+        run: () => this.eventProcessor.processEvent(event),
       });
 
-      res.status(200).json({ message: 'Webhook received' });
+      queuedRun.promise.catch(error => {
+        logger.error('Error processing GitLab event:', {
+          runId: queuedRun.id,
+          resourceKey,
+          error,
+        });
+      });
+
+      res.status(200).json({
+        message: 'Webhook received',
+        queued: true,
+        runId: queuedRun.id,
+        resourceKey,
+      });
     } catch (error) {
       logger.error('Error handling webhook:', error);
       res.status(500).json({ error: 'Internal server error' });
