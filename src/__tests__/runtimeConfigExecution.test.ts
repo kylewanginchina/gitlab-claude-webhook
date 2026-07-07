@@ -622,16 +622,19 @@ describe('runtime config execution paths', () => {
 
     const processor = new EventProcessor();
     const event = createMergeRequestEvent();
-    (processor as any).currentCommentId = 101;
+    const context = (processor as any).createRunContext();
+    context.currentCommentId = 101;
     (processor as any).updateComment = jest.fn().mockResolvedValue(undefined);
 
     await (processor as any).updateProgressComment(
       event,
+      context,
       '🔎 Grep infer_l7_class_1 in /tmp/gitlab-claude-work/agent/src/ebpf/k...',
       false
     );
     await (processor as any).updateProgressComment(
       event,
+      context,
       '✅ Claude execution completed successfully!',
       true
     );
@@ -649,6 +652,40 @@ describe('runtime config execution paths', () => {
     expect(body).not.toContain('🔎');
     expect(body).not.toContain('✅');
     expect(body).not.toContain('2026-07-06T09:20:31.817Z');
+
+    jest.useRealTimers();
+  });
+
+  it('keeps progress comment state isolated per run context', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-06T09:20:31.817Z'));
+
+    const processor = new EventProcessor();
+    const eventA = createMergeRequestEvent();
+    const eventB = createMergeRequestEvent();
+    if (eventB.merge_request) {
+      eventB.merge_request.iid = 99;
+    }
+
+    const contextA = (processor as any).createRunContext();
+    const contextB = (processor as any).createRunContext();
+    contextA.currentCommentId = 101;
+    contextB.currentCommentId = 202;
+
+    (processor as any).updateComment = jest.fn().mockResolvedValue(undefined);
+
+    await Promise.all([
+      (processor as any).updateProgressComment(eventA, contextA, 'Task A progress', false),
+      (processor as any).updateProgressComment(eventB, contextB, 'Task B progress', false),
+    ]);
+
+    const calls = (processor as any).updateComment.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toBe(101);
+    expect(calls[0][2]).toContain('Task A progress');
+    expect(calls[0][2]).not.toContain('Task B progress');
+    expect(calls[1][1]).toBe(202);
+    expect(calls[1][2]).toContain('Task B progress');
+    expect(calls[1][2]).not.toContain('Task A progress');
 
     jest.useRealTimers();
   });
@@ -1011,11 +1048,16 @@ describe('runtime config execution paths', () => {
       instruction,
       'main',
       '/tmp/project',
-      createCallback()
+      createCallback(),
+      (processor as any).createRunContext()
     );
 
     expect(mockReviewService.buildNoIssuesMessage).toHaveBeenCalled();
-    expect((processor as any).postComment).toHaveBeenCalledWith(event, 'NO_ISSUES');
+    expect((processor as any).postComment).toHaveBeenCalledWith(
+      event,
+      'NO_ISSUES',
+      expect.any(Object)
+    );
     expect(mockReviewService.postReview).not.toHaveBeenCalled();
   });
 
@@ -1046,17 +1088,23 @@ describe('runtime config execution paths', () => {
       provider: 'claude',
     };
 
-    await (processor as any).executeInstruction(event, instruction);
+    await (processor as any).executeInstruction(
+      event,
+      instruction,
+      (processor as any).createRunContext()
+    );
 
     expect((processor as any).projectManager.prepareProject).not.toHaveBeenCalled();
     expect((processor as any).executeCodeReview).not.toHaveBeenCalled();
     expect((processor as any).executeWithProvider).not.toHaveBeenCalled();
     expect((processor as any).postComment).toHaveBeenCalledWith(
       event,
-      'Skipped code review: review commands are currently disabled in runtime settings.'
+      'Skipped code review: review commands are currently disabled in runtime settings.',
+      expect.any(Object)
     );
     expect((processor as any).updateProgressComment).toHaveBeenCalledWith(
       event,
+      expect.any(Object),
       'Skipped code review: review commands are currently disabled in runtime settings.',
       true
     );
@@ -1101,12 +1149,16 @@ describe('runtime config execution paths', () => {
       findings: [],
     });
 
-    await (processor as any).executeInstruction(createMergeRequestEvent(), {
-      command: '/review-me auth edge cases',
-      context: 'MR #2',
-      branch: 'feature/runtime-config',
-      provider: 'claude',
-    });
+    await (processor as any).executeInstruction(
+      createMergeRequestEvent(),
+      {
+        command: '/review-me auth edge cases',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      (processor as any).createRunContext()
+    );
 
     expect(mockReviewService.buildReviewPasses).toHaveBeenCalledWith(
       reviewContext,
@@ -1162,13 +1214,15 @@ describe('runtime config execution paths', () => {
       },
       'main',
       '/tmp/project',
-      createCallback()
+      createCallback(),
+      (processor as any).createRunContext()
     );
 
     expect(mockReviewService.buildReviewPasses).toHaveBeenCalled();
     expect((processor as any).postComment).toHaveBeenCalledWith(
       createMergeRequestEvent(),
-      'NO_ISSUES'
+      'NO_ISSUES',
+      expect.any(Object)
     );
   });
 
@@ -1216,7 +1270,8 @@ describe('runtime config execution paths', () => {
       },
       'main',
       '/tmp/project',
-      createCallback()
+      createCallback(),
+      (processor as any).createRunContext()
     );
 
     expect(mockReviewService.hasExistingReview).toHaveBeenCalled();
@@ -1296,7 +1351,8 @@ describe('runtime config execution paths', () => {
       },
       'main',
       '/tmp/project',
-      createCallback()
+      createCallback(),
+      (processor as any).createRunContext()
     );
 
     expect((executeReviewPassSpy.mock.calls[0]?.[0] as AIInstruction).provider).toBe('codex');
@@ -1395,7 +1451,8 @@ describe('runtime config execution paths', () => {
       },
       'main',
       '/tmp/project',
-      createCallback()
+      createCallback(),
+      (processor as any).createRunContext()
     );
 
     expect(maxActivePasses).toBeLessThanOrEqual(2);
