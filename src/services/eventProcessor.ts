@@ -30,6 +30,8 @@ import {
 interface EventRunContext {
   currentCommentId: number | null;
   currentDiscussionId: string | null;
+  fallbackProgressCommentId: number | null;
+  progressUpdatesDisabled: boolean;
   progressMessages: ProgressEntry[];
 }
 
@@ -58,6 +60,8 @@ export class EventProcessor {
     return {
       currentCommentId: null,
       currentDiscussionId: null,
+      fallbackProgressCommentId: null,
+      progressUpdatesDisabled: false,
       progressMessages: [],
     };
   }
@@ -66,6 +70,15 @@ export class EventProcessor {
     const runContext = this.createRunContext();
 
     try {
+      if (this.isProgressNoteWebhook(event)) {
+        logger.info('Ignoring AI progress note webhook', {
+          eventType: event.object_kind,
+          projectId: event.project.id,
+          noteId: (event.object_attributes as { id?: number }).id,
+        });
+        return;
+      }
+
       const instruction = await this.extractInstruction(event, runContext);
 
       if (!instruction) {
@@ -267,6 +280,25 @@ export class EventProcessor {
     // If there's actual previous conversation content, this is a reply
     // If it's empty or just whitespace, this is the first comment in a new thread
     return Boolean(contextContent && contextContent.length > 0);
+  }
+
+  private isProgressNoteWebhook(event: GitLabWebhookEvent): boolean {
+    if (event.object_kind !== 'note') {
+      return false;
+    }
+
+    const note = (event.object_attributes as { note?: unknown }).note;
+    return typeof note === 'string' && this.isProgressCommentBody(note);
+  }
+
+  private isProgressCommentBody(body: string): boolean {
+    const trimmed = body.trim();
+    return (
+      trimmed.startsWith('### AI Agent Progress Report') ||
+      trimmed.startsWith('**Updated Progress:**') ||
+      trimmed.startsWith('Updated Progress:') ||
+      /^#+\s+AI Agent Progress Report/m.test(trimmed)
+    );
   }
 
   private async buildMergeRequestContext(mergeRequest: any, projectId: number): Promise<string> {
@@ -1224,7 +1256,7 @@ export class EventProcessor {
     isComplete?: boolean,
     isError?: boolean
   ): Promise<void> {
-    if (!runContext.currentCommentId) {
+    if (!runContext.currentCommentId || runContext.progressUpdatesDisabled) {
       return;
     }
 
@@ -1338,8 +1370,92 @@ export class EventProcessor {
       });
     } catch (error) {
       logger.error('Failed to update progress comment:', error);
-      // Fallback: create a new comment if update fails
-      await this.postComment(event, `**Updated Progress:**\n\n${body}`, runContext);
+
+      if (runContext.fallbackProgressCommentId) {
+        runContext.progressUpdatesDisabled = true;
+        logger.error('Failed to update fallback progress comment; disabling progress updates', {
+          commentId: runContext.fallbackProgressCommentId,
+        });
+        return;
+      }
+
+      try {
+        const fallbackCommentId = await this.createFallbackProgressComment(
+          event,
+          `**Updated Progress:**\n\n${body}`
+        );
+
+        if (fallbackCommentId) {
+          runContext.currentCommentId = fallbackCommentId;
+          runContext.fallbackProgressCommentId = fallbackCommentId;
+          logger.warn('Created fallback progress comment after update failure', {
+            originalCommentId: commentId,
+            fallbackCommentId,
+          });
+          return;
+        }
+
+        runContext.progressUpdatesDisabled = true;
+        logger.error('Fallback progress comment did not return an id; disabling progress updates', {
+          originalCommentId: commentId,
+        });
+      } catch (fallbackError) {
+        runContext.progressUpdatesDisabled = true;
+        logger.error(
+          'Failed to create fallback progress comment; disabling progress updates:',
+          fallbackError
+        );
+      }
     }
+  }
+
+  private async createFallbackProgressComment(
+    event: GitLabWebhookEvent,
+    body: string
+  ): Promise<number | null> {
+    switch (event.object_kind) {
+      case 'issue':
+        if (event.issue) {
+          const comment = await this.gitlabService.createIssueComment(
+            event.project.id,
+            event.issue.iid,
+            body
+          );
+          return comment?.id || null;
+        }
+        break;
+
+      case 'merge_request':
+        if (event.merge_request) {
+          const comment = await this.gitlabService.createMergeRequestComment(
+            event.project.id,
+            event.merge_request.iid,
+            body
+          );
+          return comment?.id || null;
+        }
+        break;
+
+      case 'note':
+        if (event.issue) {
+          const comment = await this.gitlabService.createIssueComment(
+            event.project.id,
+            event.issue.iid,
+            body
+          );
+          return comment?.id || null;
+        }
+        if (event.merge_request) {
+          const comment = await this.gitlabService.createMergeRequestComment(
+            event.project.id,
+            event.merge_request.iid,
+            body
+          );
+          return comment?.id || null;
+        }
+        break;
+    }
+
+    return null;
   }
 }

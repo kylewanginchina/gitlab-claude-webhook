@@ -703,6 +703,61 @@ describe('runtime config execution paths', () => {
     jest.useRealTimers();
   });
 
+  it('creates at most one fallback progress comment when updating the original progress comment fails', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    const context = (processor as any).createRunContext();
+    context.currentCommentId = 101;
+
+    const updateMergeRequestComment = jest
+      .fn()
+      .mockImplementation((_projectId: number, _mrIid: number, noteId: number) => {
+        if (noteId === 101) {
+          throw new Error('GitLab API returned 404 Not Found');
+        }
+        return Promise.resolve({ id: noteId });
+      });
+    const createMergeRequestComment = jest.fn().mockResolvedValue({ id: 202 });
+    (processor as any).gitlabService = {
+      updateMergeRequestComment,
+      createMergeRequestComment,
+    };
+
+    await (processor as any).updateProgressComment(event, context, 'First progress update', false);
+    await (processor as any).updateProgressComment(event, context, 'Second progress update', false);
+
+    expect(createMergeRequestComment).toHaveBeenCalledTimes(1);
+    expect(createMergeRequestComment.mock.calls[0][2]).toContain('Updated Progress');
+    expect(context.currentCommentId).toBe(202);
+    expect(updateMergeRequestComment).toHaveBeenNthCalledWith(
+      2,
+      1,
+      2,
+      202,
+      expect.stringContaining('Second progress update')
+    );
+  });
+
+  it('disables progress updates if fallback progress comment creation also fails', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    const context = (processor as any).createRunContext();
+    context.currentCommentId = 101;
+
+    const updateMergeRequestComment = jest.fn().mockRejectedValue(new Error('edit failed'));
+    const createMergeRequestComment = jest.fn().mockRejectedValue(new Error('create failed'));
+    (processor as any).gitlabService = {
+      updateMergeRequestComment,
+      createMergeRequestComment,
+    };
+
+    await (processor as any).updateProgressComment(event, context, 'First progress update', false);
+    await (processor as any).updateProgressComment(event, context, 'Second progress update', false);
+
+    expect(createMergeRequestComment).toHaveBeenCalledTimes(1);
+    expect(updateMergeRequestComment).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps discussion reply routing isolated per run context', async () => {
     const processor = new EventProcessor();
     const eventA = createMergeRequestEvent();
@@ -820,6 +875,30 @@ describe('runtime config execution paths', () => {
       'Progress in MR note discussion'
     );
     expect(createMergeRequestComment).not.toHaveBeenCalled();
+  });
+
+  it('ignores AI progress note webhooks without fetching discussion context', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestNoteEvent();
+    event.object_attributes.note = [
+      '### AI Agent Progress Report',
+      '',
+      '| Time (UTC+08) | Status | Activity |',
+      '| --- | --- | --- |',
+      '| 11:15:41 | Command | Bash `git diff --stat main...HEAD` |',
+    ].join('\n');
+
+    const getMergeRequest = jest.fn().mockResolvedValue({});
+    const getMergeRequestDiscussions = jest.fn().mockResolvedValue([]);
+    (processor as any).gitlabService = {
+      getMergeRequest,
+      getMergeRequestDiscussions,
+    };
+
+    await processor.processEvent(event);
+
+    expect(getMergeRequest).not.toHaveBeenCalled();
+    expect(getMergeRequestDiscussions).not.toHaveBeenCalled();
   });
 
   it('links ordinary review output references before posting the success comment', async () => {
