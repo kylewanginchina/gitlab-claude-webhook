@@ -1,4 +1,4 @@
-import { Config, AIProvider, ReasoningEffort } from '../types/common';
+import { Config, AIProvider, ClaudeReasoningEffort, ReasoningEffort } from '../types/common';
 
 /**
  * Expand environment variables in a string
@@ -48,11 +48,24 @@ function getReasoningEffort(key: string, defaultValue: ReasoningEffort): Reasoni
   return defaultValue;
 }
 
+function getClaudeReasoningEffort(
+  key: string,
+  defaultValue: ClaudeReasoningEffort
+): ClaudeReasoningEffort {
+  const value = getEnvVar(key, defaultValue) as ClaudeReasoningEffort;
+  const validEfforts: ClaudeReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+  if (validEfforts.includes(value)) {
+    return value;
+  }
+  return defaultValue;
+}
+
 export const config: Config = {
   anthropic: {
     baseUrl: getEnvVar('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
     authToken: getEnvVar('ANTHROPIC_AUTH_TOKEN'),
     defaultModel: getEnvVar('CLAUDE_DEFAULT_MODEL', 'claude-sonnet-4-20250514'),
+    reasoningEffort: getClaudeReasoningEffort('CLAUDE_REASONING_EFFORT', 'high'),
   },
   openai: {
     baseUrl: getEnvVar('OPENAI_BASE_URL', 'https://api.openai.com'),

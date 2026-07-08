@@ -17,9 +17,10 @@ jest.mock('../utils/config', () => ({
   expandEnvVars: (value: string) => value,
   config: {
     anthropic: {
-      baseUrl: 'https://claude.static.example',
-      authToken: 'anthropic-static-token',
-      defaultModel: 'claude-static-model',
+    baseUrl: 'https://claude.static.example',
+    authToken: 'anthropic-static-token',
+    defaultModel: 'claude-static-model',
+    reasoningEffort: 'high',
     },
     openai: {
       baseUrl: 'https://codex.static.example/v1',
@@ -78,6 +79,7 @@ const baseRuntimeConfig: RuntimeConfig = {
     baseUrl: 'https://claude.default.example',
     authToken: 'anthropic-default-token',
     defaultModel: 'claude-default-model',
+    reasoningEffort: 'high',
     defaultTimeoutMinutes: 30,
   },
   codex: {
@@ -266,14 +268,15 @@ describe('runtime config execution paths', () => {
     delete (global as { fetch?: typeof fetch }).fetch;
   });
 
-  it('uses runtime Claude model, base URL, auth token, and default timeout for new executions', async () => {
+  it('uses runtime Claude model, base URL, auth token, reasoning effort, and default timeout for new executions', async () => {
     const runtimeConfig = createRuntimeConfig({
       claude: {
         defaultModel: 'claude-runtime-model',
         baseUrl: 'https://claude.runtime.example',
         authToken: 'anthropic-runtime-token',
+        reasoningEffort: 'max',
         defaultTimeoutMinutes: 41,
-      },
+      } as any,
     });
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
     const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
@@ -312,6 +315,7 @@ describe('runtime config execution paths', () => {
       expect.objectContaining({
         options: expect.objectContaining({
           model: 'claude-runtime-model',
+          effort: 'max',
           env: expect.objectContaining({
             ANTHROPIC_BASE_URL: 'https://claude.runtime.example',
             ANTHROPIC_API_KEY: 'anthropic-runtime-token',

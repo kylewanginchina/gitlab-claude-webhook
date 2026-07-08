@@ -1,9 +1,31 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #172033;
-  background: #f3f6fb;
+  color: var(--text-primary);
+  background: var(--app-bg);
+  --app-bg: #0f1115;
+  --surface: #171a20;
+  --surface-raised: #1e232b;
+  --surface-muted: #12151b;
+  --surface-hover: #242a34;
+  --border: #303744;
+  --border-strong: #414a58;
+  --text-primary: #edf2f7;
+  --text-secondary: #c8d1dc;
+  --text-muted: #9aa6b5;
+  --accent: #4f8cff;
+  --accent-strong: #2f6fed;
+  --ok: #34d399;
+  --ok-bg: rgb(52 211 153 / 12%);
+  --ok-border: rgb(52 211 153 / 38%);
+  --warn: #fbbf24;
+  --warn-bg: rgb(251 191 36 / 12%);
+  --warn-border: rgb(251 191 36 / 36%);
+  --error: #f87171;
+  --error-bg: rgb(248 113 113 / 12%);
+  --error-border: rgb(248 113 113 / 38%);
+  --shadow: 0 18px 50px rgb(0 0 0 / 28%);
 }
 
 * {
@@ -20,6 +42,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--app-bg);
 }
 
 button,
@@ -37,11 +60,16 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #c9d4e4;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
-  background: #ffffff;
-  color: #172033;
+  background: var(--surface-muted);
+  color: var(--text-primary);
   padding: 9px 10px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
 }
 
 textarea {
@@ -57,7 +85,7 @@ input:focus,
 select:focus,
 textarea:focus,
 button:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -71,11 +99,12 @@ button:focus-visible {
 .auth-card,
 .panel,
 .metric-card,
-.banner {
-  border: 1px solid #d9e2ef;
+.banner,
+.table-card {
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 10px 30px rgb(27 39 63 / 8%);
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
 .auth-card {
@@ -97,21 +126,24 @@ button:focus-visible {
 .section-note,
 .status-meta,
 .empty-state {
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .admin-shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   min-height: 100vh;
+  background:
+    radial-gradient(circle at 88% 0%, rgb(79 140 255 / 9%), transparent 26rem),
+    var(--app-bg);
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  border-right: 1px solid #d9e2ef;
-  background: #ffffff;
+  border-right: 1px solid var(--border);
+  background: #12151a;
   padding: 18px 16px;
 }
 
@@ -144,20 +176,20 @@ button:focus-visible {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: #334155;
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 10px 11px;
   text-align: left;
 }
 
 .nav-button:hover {
-  background: #f6f8fc;
+  background: var(--surface-hover);
 }
 
 .nav-button.active {
-  border-color: #c8dafc;
-  background: #e9f1ff;
-  color: #1d4ed8;
+  border-color: rgb(79 140 255 / 48%);
+  background: rgb(79 140 255 / 14%);
+  color: #d7e5ff;
 }
 
 .content {
@@ -185,7 +217,7 @@ button:focus-visible {
 
 .page-header p {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .header-actions,
@@ -204,6 +236,7 @@ button:focus-visible {
 
 .grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
 .grid.three {
@@ -229,6 +262,7 @@ button:focus-visible {
 .metric-card {
   display: grid;
   gap: 10px;
+  align-content: start;
 }
 
 .metric-topline {
@@ -244,19 +278,21 @@ button:focus-visible {
 }
 
 .metric-label {
-  color: #475569;
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 600;
 }
 
 .metric-meta {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .panel {
   display: grid;
   gap: 14px;
+  align-content: start;
+  align-self: start;
 }
 
 .panel-header {
@@ -268,7 +304,7 @@ button:focus-visible {
 
 .panel-header p {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -279,6 +315,7 @@ button:focus-visible {
 
 .field-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
 .field {
@@ -287,7 +324,7 @@ button:focus-visible {
 }
 
 .field label {
-  color: #334155;
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 600;
 }
@@ -307,8 +344,9 @@ button:focus-visible {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 6px;
+  background: var(--surface-muted);
   padding: 10px 12px;
 }
 
@@ -334,26 +372,26 @@ button:focus-visible {
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  background: #eef2ff;
-  color: #3730a3;
+  background: rgb(79 140 255 / 14%);
+  color: #cfe0ff;
   font-size: 12px;
   font-weight: 600;
   padding: 6px 10px;
 }
 
 .status-chip.ok {
-  background: #e7f7ef;
-  color: #047857;
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 .status-chip.warn {
-  background: #fff4e6;
-  color: #b45309;
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
 .status-chip.neutral {
-  background: #eef2f7;
-  color: #475569;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
 }
 
 .banner {
@@ -369,18 +407,18 @@ button:focus-visible {
 }
 
 .banner.ok {
-  border-color: #bfdbca;
-  background: #f1fbf5;
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
 }
 
 .banner.warn {
-  border-color: #f5d0a3;
-  background: #fff8ee;
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
 }
 
 .banner.error {
-  border-color: #fecaca;
-  background: #fff1f2;
+  border-color: var(--error-border);
+  background: var(--error-bg);
 }
 
 .button {
@@ -388,9 +426,9 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--surface-raised);
   cursor: pointer;
   min-height: 38px;
   padding: 8px 12px;
@@ -398,21 +436,21 @@ button:focus-visible {
 }
 
 .button:hover {
-  background: #f8fafc;
+  background: var(--surface-hover);
 }
 
 .button.primary {
-  border-color: #2563eb;
-  background: #2563eb;
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
   color: #ffffff;
 }
 
 .button.primary:hover {
-  background: #1d4ed8;
+  background: #255ed0;
 }
 
 .button.subtle {
-  background: #f8fafc;
+  background: var(--surface-muted);
 }
 
 .button:disabled {
@@ -441,9 +479,9 @@ button:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--surface-muted);
   padding: 10px 12px;
   text-align: left;
 }
@@ -453,12 +491,12 @@ button:focus-visible {
 }
 
 .list-button:hover {
-  background: #f8fafc;
+  background: var(--surface-hover);
 }
 
 .list-button.active {
-  border-color: #93c5fd;
-  background: #eff6ff;
+  border-color: rgb(79 140 255 / 55%);
+  background: rgb(79 140 255 / 14%);
 }
 
 .list-button span:first-child,
@@ -492,14 +530,14 @@ button:focus-visible {
 
 .table th,
 .table td {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
   padding: 10px 0;
   text-align: left;
   vertical-align: top;
 }
 
 .table th {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -515,15 +553,15 @@ button:focus-visible {
 }
 
 .status-ok {
-  color: #047857;
+  color: var(--ok);
 }
 
 .status-warn {
-  color: #b45309;
+  color: var(--warn);
 }
 
 .status-error {
-  color: #b91c1c;
+  color: var(--error);
 }
 
 .split-title {
@@ -556,7 +594,7 @@ button:focus-visible {
 
   .sidebar {
     border-right: 0;
-    border-bottom: 1px solid #d9e2ef;
+    border-bottom: 1px solid var(--border);
   }
 
   .grid.two,

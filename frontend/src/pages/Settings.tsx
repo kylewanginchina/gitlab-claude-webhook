@@ -1,20 +1,28 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, LoaderCircle, RefreshCw, Save, TestTube2, TriangleAlert } from 'lucide-react';
 import { api } from '../api';
-import type { ConfigUpdateResult, ProviderTestResult, PublicRuntimeConfig, RuntimeConfigPatch } from '../types';
+import type {
+  ClaudeReasoningEffort,
+  CodexReasoningEffort,
+  ConfigUpdateResult,
+  ProviderTestResult,
+  PublicRuntimeConfig,
+  RuntimeConfigPatch,
+} from '../types';
 
 type DraftConfig = {
   claude: {
     baseUrl: string;
     authToken: string;
     defaultModel: string;
+    reasoningEffort: ClaudeReasoningEffort;
     defaultTimeoutMinutes: number;
   };
   codex: {
     baseUrl: string;
     apiKey: string;
     defaultModel: string;
-    reasoningEffort: PublicRuntimeConfig['codex']['reasoningEffort'];
+    reasoningEffort: CodexReasoningEffort;
     defaultTimeoutMinutes: number;
   };
   gitlab: {
@@ -34,7 +42,15 @@ type DraftConfig = {
   logLevel: string;
 };
 
-const REASONING_OPTIONS: Array<PublicRuntimeConfig['codex']['reasoningEffort']> = [
+const CLAUDE_REASONING_OPTIONS: ClaudeReasoningEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+const CODEX_REASONING_OPTIONS: CodexReasoningEffort[] = [
   'minimal',
   'low',
   'medium',
@@ -50,6 +66,7 @@ function toDraft(config: PublicRuntimeConfig): DraftConfig {
       baseUrl: config.claude.baseUrl,
       authToken: '',
       defaultModel: config.claude.defaultModel,
+      reasoningEffort: config.claude.reasoningEffort,
       defaultTimeoutMinutes: config.claude.defaultTimeoutMinutes,
     },
     codex: {
@@ -100,6 +117,7 @@ function buildPatch(draft: DraftConfig): RuntimeConfigPatch {
     claude: {
       baseUrl: draft.claude.baseUrl.trim(),
       defaultModel: draft.claude.defaultModel.trim(),
+      reasoningEffort: draft.claude.reasoningEffort,
       defaultTimeoutMinutes: draft.claude.defaultTimeoutMinutes,
     },
     codex: {
@@ -395,6 +413,28 @@ export default function Settings() {
               />
             </div>
             <div className="field">
+              <label htmlFor="claude-reasoning">Claude reasoning effort</label>
+              <select
+                id="claude-reasoning"
+                value={draft.claude.reasoningEffort}
+                onChange={event =>
+                  updateDraft(current => ({
+                    ...current,
+                    claude: {
+                      ...current.claude,
+                      reasoningEffort: event.target.value as ClaudeReasoningEffort,
+                    },
+                  }))
+                }
+              >
+                {CLAUDE_REASONING_OPTIONS.map(option => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
               <label htmlFor="claude-timeout">Claude timeout (minutes)</label>
               <input
                 id="claude-timeout"
@@ -463,7 +503,7 @@ export default function Settings() {
                   }))
                 }
               >
-                {REASONING_OPTIONS.map(option => (
+                {CODEX_REASONING_OPTIONS.map(option => (
                   <option key={option} value={option}>
                     {option}
                   </option>

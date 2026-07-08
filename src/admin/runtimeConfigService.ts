@@ -1,6 +1,6 @@
 import path from 'path';
 import { JsonStore } from '../storage/jsonStore';
-import { AIProvider, ReasoningEffort } from '../types/common';
+import { AIProvider, ClaudeReasoningEffort, ReasoningEffort } from '../types/common';
 import { expandEnvVars } from '../utils/config';
 import { secretStatus } from './secretMask';
 import {
@@ -16,6 +16,13 @@ export interface RuntimeConfigServiceOptions {
 }
 
 const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+const VALID_CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
 const VALID_AI_PROVIDERS: AIProvider[] = ['claude', 'codex'];
 const VALID_REVIEW_PROVIDERS: RuntimeConfig['review']['defaultProvider'][] = [
   'claude-multipass',
@@ -54,6 +61,12 @@ function reasoningValue(value: string): ReasoningEffort {
     : 'high';
 }
 
+function claudeReasoningValue(value: string): ClaudeReasoningEffort {
+  return VALID_CLAUDE_REASONING_EFFORTS.includes(value as ClaudeReasoningEffort)
+    ? (value as ClaudeReasoningEffort)
+    : 'high';
+}
+
 function booleanEnvValue(env: NodeJS.ProcessEnv, key: string, defaultValue: boolean): boolean {
   const fallback = defaultValue ? 'true' : 'false';
   return envValue(env, key, fallback) !== 'false';
@@ -85,6 +98,7 @@ export function createConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Runti
       baseUrl: envValue(env, 'ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
       authToken: envValue(env, 'ANTHROPIC_AUTH_TOKEN'),
       defaultModel: envValue(env, 'CLAUDE_DEFAULT_MODEL', 'claude-sonnet-4-20250514'),
+      reasoningEffort: claudeReasoningValue(envValue(env, 'CLAUDE_REASONING_EFFORT', 'high')),
       defaultTimeoutMinutes: intValue(envValue(env, 'CLAUDE_DEFAULT_TIMEOUT_MINUTES', '30'), 30),
     },
     codex: {
@@ -162,6 +176,7 @@ export class RuntimeConfigService {
         baseUrl: config.claude.baseUrl,
         authToken: secretStatus(config.claude.authToken),
         defaultModel: config.claude.defaultModel,
+        reasoningEffort: config.claude.reasoningEffort,
         defaultTimeoutMinutes: config.claude.defaultTimeoutMinutes,
       },
       codex: {
@@ -255,6 +270,7 @@ export class RuntimeConfigService {
     }
     this.assertAIProvider(config.ai.defaultProvider, 'ai.defaultProvider');
     this.assertReviewProvider(config.review.defaultProvider, 'review.defaultProvider');
+    this.assertClaudeReasoningEffort(config.claude.reasoningEffort, 'claude.reasoningEffort');
     this.assertReasoningEffort(config.codex.reasoningEffort, 'codex.reasoningEffort');
     this.assertPositiveInteger(
       config.claude.defaultTimeoutMinutes,
@@ -325,6 +341,12 @@ export class RuntimeConfigService {
       }
       if ('defaultModel' in claude) {
         next.defaultModel = this.assertString(claude.defaultModel, 'claude.defaultModel');
+      }
+      if ('reasoningEffort' in claude) {
+        next.reasoningEffort = this.assertClaudeReasoningEffort(
+          claude.reasoningEffort,
+          'claude.reasoningEffort'
+        );
       }
       if ('defaultTimeoutMinutes' in claude) {
         next.defaultTimeoutMinutes = this.assertPositiveInteger(
@@ -581,6 +603,17 @@ export class RuntimeConfigService {
     }
 
     return value as ReasoningEffort;
+  }
+
+  private assertClaudeReasoningEffort(
+    value: unknown,
+    fieldName: string
+  ): ClaudeReasoningEffort {
+    if (!VALID_CLAUDE_REASONING_EFFORTS.includes(value as ClaudeReasoningEffort)) {
+      throw new Error(`${fieldName} must be one of: low, medium, high, xhigh, max`);
+    }
+
+    return value as ClaudeReasoningEffort;
   }
 
   private assertAllowedCommands(value: unknown): string[] {

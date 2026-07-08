@@ -20,6 +20,7 @@ OPENAI_API_KEY=sk-proj-your-openai-key
 # AI 提供者配置 (可选，都有默认值)
 AI_DEFAULT_PROVIDER=claude                     # 默认: claude
 CLAUDE_DEFAULT_MODEL=claude-sonnet-4-20250514  # 默认: claude-sonnet-4-20250514
+CLAUDE_REASONING_EFFORT=high                   # 默认: high，可选: low, medium, high, xhigh, max
 CODEX_DEFAULT_MODEL=gpt-5.1-codex-max          # 默认: gpt-5.1-codex-max
 CODEX_REASONING_EFFORT=high                    # 默认: high
 
@@ -236,6 +237,7 @@ GitLab Token: ***h7i8j9k0
 | `ANTHROPIC_BASE_URL`             | Anthropic API 基础 URL      | `https://api.anthropic.com` |
 | `OPENAI_BASE_URL`                | OpenAI API 基础 URL         | `https://api.openai.com/v1` |
 | `CLAUDE_DEFAULT_MODEL`           | Claude 默认模型             | `claude-sonnet-4-20250514`  |
+| `CLAUDE_REASONING_EFFORT`        | Claude 推理等级             | `high`                      |
 | `CODEX_DEFAULT_MODEL`            | Codex 默认模型              | `gpt-5.1-codex-max`         |
 | `CODEX_REASONING_EFFORT`         | Codex 推理等级              | `high`                      |
 | `CLAUDE_DEFAULT_TIMEOUT_MINUTES` | Claude 默认超时时间（分钟） | `30`                        |

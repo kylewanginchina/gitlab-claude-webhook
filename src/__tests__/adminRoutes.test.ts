@@ -54,6 +54,7 @@ function buildAppWithLeakyUpdateResult() {
       baseUrl: 'https://api.anthropic.com',
       authToken: { configured: true, masked: '********cret' },
       defaultModel: 'claude-sonnet-4-20250514',
+      reasoningEffort: 'high',
       defaultTimeoutMinutes: 30,
     },
     codex: {
@@ -125,6 +126,7 @@ function buildPublicConfig(overrides: Partial<PublicRuntimeConfig> = {}): Public
       baseUrl: 'https://api.anthropic.com',
       authToken: { configured: true, masked: '********cret' },
       defaultModel: 'claude-sonnet-4-20250514',
+      reasoningEffort: 'high',
       defaultTimeoutMinutes: 30,
     },
     codex: {
@@ -202,6 +204,7 @@ describe('admin routes', () => {
       .send({
         claude: {
           defaultModel: 'claude-opus-test',
+          reasoningEffort: 'xhigh',
           defaultTimeoutMinutes: 42,
         },
       })
@@ -209,6 +212,7 @@ describe('admin routes', () => {
 
     expect(response.body.requiresRestart).toEqual([]);
     expect(response.body.config.claude.defaultModel).toBe('claude-opus-test');
+    expect(response.body.config.claude.reasoningEffort).toBe('xhigh');
     expect(response.body.config.claude.defaultTimeoutMinutes).toBe(42);
   });
 
@@ -264,6 +268,7 @@ describe('admin routes', () => {
         baseUrl: 'https://api.anthropic.com',
         authToken: { configured: true, masked: '********cret' },
         defaultModel: 'claude-sonnet-4-20250514',
+        reasoningEffort: 'high',
         defaultTimeoutMinutes: 30,
       },
       codex: {
@@ -353,6 +358,7 @@ describe('admin routes', () => {
             baseUrl: 'https://api.anthropic.com',
             authToken: { configured: false, masked: '' },
             defaultModel: 'claude-sonnet-4-20250514',
+            reasoningEffort: 'high',
             defaultTimeoutMinutes: 30,
           },
         })

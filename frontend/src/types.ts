@@ -3,18 +3,22 @@ export interface SecretStatus {
   masked: string;
 }
 
+export type ClaudeReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 export interface PublicRuntimeConfig {
   claude: {
     baseUrl: string;
     authToken: SecretStatus;
     defaultModel: string;
+    reasoningEffort: ClaudeReasoningEffort;
     defaultTimeoutMinutes: number;
   };
   codex: {
     baseUrl: string;
     apiKey: SecretStatus;
     defaultModel: string;
-    reasoningEffort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+    reasoningEffort: CodexReasoningEffort;
     defaultTimeoutMinutes: number;
   };
   gitlab: {
@@ -50,13 +54,14 @@ export type RuntimeConfigPatch = Partial<{
     baseUrl: string;
     authToken: string;
     defaultModel: string;
+    reasoningEffort: ClaudeReasoningEffort;
     defaultTimeoutMinutes: number;
   }>;
   codex: Partial<{
     baseUrl: string;
     apiKey: string;
     defaultModel: string;
-    reasoningEffort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+    reasoningEffort: CodexReasoningEffort;
     defaultTimeoutMinutes: number;
   }>;
   gitlab: Partial<{

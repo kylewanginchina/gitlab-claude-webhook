@@ -1,4 +1,4 @@
-import { AIProvider, ReasoningEffort } from '../types/common';
+import { AIProvider, ClaudeReasoningEffort, ReasoningEffort } from '../types/common';
 import { SecretStatus } from './secretMask';
 
 export interface RuntimeConfig {
@@ -6,6 +6,7 @@ export interface RuntimeConfig {
     baseUrl: string;
     authToken: string;
     defaultModel: string;
+    reasoningEffort: ClaudeReasoningEffort;
     defaultTimeoutMinutes: number;
   };
   codex: {

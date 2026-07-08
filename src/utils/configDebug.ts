@@ -18,6 +18,7 @@ export function debugConfig(): void {
           baseUrl: config.anthropic.baseUrl,
           authToken: config.anthropic.authToken,
           defaultModel: config.anthropic.defaultModel,
+          reasoningEffort: config.anthropic.reasoningEffort,
           defaultTimeoutMinutes: 30,
         },
         codex: {
@@ -53,6 +54,7 @@ export function debugConfig(): void {
   console.log(`Claude Base URL: ${runtimeConfig.claude.baseUrl}`);
   console.log(`Claude Auth Token: ${runtimeConfig.claude.authToken ? '********' : 'NOT SET'}`);
   console.log(`Claude Default Model: ${runtimeConfig.claude.defaultModel}`);
+  console.log(`Claude Reasoning Effort: ${runtimeConfig.claude.reasoningEffort}`);
   console.log(`Claude Default Timeout: ${runtimeConfig.claude.defaultTimeoutMinutes} minutes`);
   console.log(`OpenAI Base URL: ${runtimeConfig.codex.baseUrl}`);
   console.log(`OpenAI API Key: ${runtimeConfig.codex.apiKey ? '********' : 'NOT SET'}`);

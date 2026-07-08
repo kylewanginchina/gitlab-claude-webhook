@@ -157,7 +157,7 @@ export default function Dashboard() {
                 <td>Claude</td>
                 <td className="mono">
                   {config?.claude.defaultModel || '--'} @ {config?.claude.baseUrl || '--'} /{' '}
-                  {config?.claude.defaultTimeoutMinutes ?? '--'}m
+                  {config?.claude.defaultTimeoutMinutes ?? '--'}m / {config?.claude.reasoningEffort || '--'}
                 </td>
               </tr>
               <tr>

@@ -26,9 +26,21 @@ describe('RuntimeConfigService', () => {
     expect(config.webhook.port).toBe(3000);
     expect(config.webhook.taskConcurrency).toBe(2);
     expect(config.ai.defaultProvider).toBe('claude');
+    expect((config.claude as any).reasoningEffort).toBe('high');
     expect(config.review.minConfidence).toBe(80);
     expect(config.review.maxCandidateFindings).toBe(12);
     expect(config.review.maxFinalFindings).toBe(8);
+  });
+
+  it('creates Claude reasoning effort from environment variables', () => {
+    const config = createConfigFromEnv({
+      GITLAB_TOKEN: 'glpat-secret',
+      WEBHOOK_SECRET: 'webhook-secret',
+      ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      CLAUDE_REASONING_EFFORT: 'max',
+    } as NodeJS.ProcessEnv);
+
+    expect((config.claude as any).reasoningEffort).toBe('max');
   });
 
   it('creates webhook task concurrency from environment variables', () => {
@@ -116,8 +128,9 @@ describe('RuntimeConfigService', () => {
       {
         claude: {
           defaultModel: 'claude-opus-test',
+          reasoningEffort: 'max',
           defaultTimeoutMinutes: 45,
-        },
+        } as any,
         review: {
           minConfidence: 85,
         },
@@ -128,6 +141,7 @@ describe('RuntimeConfigService', () => {
     expect(result.requiresRestart).toEqual([]);
     expect(service.getConfig().claude.authToken).toBe('anthropic-secret');
     expect(service.getConfig().claude.defaultModel).toBe('claude-opus-test');
+    expect((service.getConfig().claude as any).reasoningEffort).toBe('max');
     expect(service.getConfig().claude.defaultTimeoutMinutes).toBe(45);
     expect(service.getConfig().review.minConfidence).toBe(85);
   });
@@ -288,6 +302,11 @@ describe('RuntimeConfigService', () => {
       'review.defaultProvider',
       'review.defaultProvider must be one of: claude-multipass, codex-multipass',
       { review: { defaultProvider: 'other' } },
+    ],
+    [
+      'claude.reasoningEffort',
+      'claude.reasoningEffort must be one of: low, medium, high, xhigh, max',
+      { claude: { reasoningEffort: 'ultra' } },
     ],
     [
       'codex.reasoningEffort',

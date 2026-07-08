@@ -57,6 +57,7 @@ OPENAI_API_KEY=sk-proj-your-openai-key
 # AI Provider Configuration (optional, all have defaults)
 AI_DEFAULT_PROVIDER=claude
 CLAUDE_DEFAULT_MODEL=claude-sonnet-4-20250514
+CLAUDE_REASONING_EFFORT=high
 CODEX_DEFAULT_MODEL=gpt-5.1-codex-max
 CODEX_REASONING_EFFORT=high
 
@@ -256,6 +257,7 @@ See [Admin Console Guide](docs/admin-console.md).
 | `ANTHROPIC_BASE_URL`     | Anthropic API base URL   | `https://api.anthropic.com` |
 | `OPENAI_BASE_URL`        | OpenAI API base URL      | `https://api.openai.com/v1` |
 | `CLAUDE_DEFAULT_MODEL`   | Default model for Claude | `claude-sonnet-4-20250514`  |
+| `CLAUDE_REASONING_EFFORT` | Claude reasoning level   | `high`                      |
 | `CODEX_DEFAULT_MODEL`    | Default model for Codex  | `gpt-5.1-codex-max`         |
 | `CODEX_REASONING_EFFORT` | Codex reasoning level    | `high`                      |
 | `GITLAB_BASE_URL`        | GitLab instance URL      | `https://gitlab.com`        |

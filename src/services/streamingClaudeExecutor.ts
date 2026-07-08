@@ -126,6 +126,7 @@ export class StreamingClaudeExecutor {
     const fullPrompt = this.buildPromptWithContext(command, context);
     const runtimeConfig = runtimeConfigService.getConfig();
     const model = context.model || runtimeConfig.claude.defaultModel;
+    const effort = runtimeConfig.claude.reasoningEffort;
     const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
     const isReviewMode = context.mode === 'review';
 
@@ -141,6 +142,7 @@ export class StreamingClaudeExecutor {
 
     logger.info('Executing Claude via Agent SDK', {
       model,
+      effort,
       cwd: projectPath,
       promptLength: fullPrompt.length,
     });
@@ -180,6 +182,7 @@ export class StreamingClaudeExecutor {
         options: {
           cwd: projectPath,
           model,
+          effort,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
           tools: isReviewMode

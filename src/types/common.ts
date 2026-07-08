@@ -20,12 +20,14 @@ export interface StreamingProgressCallback {
 }
 
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ClaudeReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface Config {
   anthropic: {
     baseUrl: string;
     authToken: string;
     defaultModel: string;
+    reasoningEffort: ClaudeReasoningEffort;
   };
   openai: {
     baseUrl: string;
