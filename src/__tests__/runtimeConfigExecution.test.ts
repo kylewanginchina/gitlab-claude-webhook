@@ -224,6 +224,19 @@ function createMergeRequestEvent(): GitLabWebhookEvent {
   };
 }
 
+function createMergeRequestNoteEvent(): GitLabWebhookEvent {
+  const event = createMergeRequestEvent();
+  return {
+    ...event,
+    object_kind: 'note',
+    object_attributes: {
+      id: 42,
+      noteable_type: 'MergeRequest',
+      noteable_id: event.merge_request?.id,
+    },
+  };
+}
+
 describe('runtime config execution paths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -731,6 +744,82 @@ describe('runtime config execution paths', () => {
       'Reply for discussion B'
     );
     expect(addMergeRequestComment).not.toHaveBeenCalled();
+  });
+
+  it('uses the GitLab discussion note body when a merge request note webhook has no note text', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestNoteEvent();
+    const executeInstruction = jest
+      .spyOn(processor as any, 'executeInstruction')
+      .mockResolvedValue(undefined);
+
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        changes_count: '1',
+        additions: 1,
+        deletions: 0,
+      }),
+      getMergeRequestDiscussions: jest.fn().mockResolvedValue([
+        {
+          id: 'discussion-42',
+          notes: [
+            {
+              id: 42,
+              body: '@codex /code-review',
+              created_at: '2026-07-08T04:27:05.000Z',
+              author: { id: 1, name: 'User', username: 'user' },
+            },
+          ],
+        },
+      ]),
+      findNoteInDiscussions: jest.fn().mockResolvedValue({
+        discussion: { id: 'discussion-42' },
+        discussionId: 'discussion-42',
+        threadContext: '',
+        note: {
+          id: 42,
+          body: '@codex /code-review',
+        },
+      }),
+    };
+
+    await processor.processEvent(event);
+
+    expect(executeInstruction).toHaveBeenCalledTimes(1);
+    expect(executeInstruction.mock.calls[0][1]).toMatchObject({
+      provider: 'codex',
+      command: '/code-review',
+      branch: 'feature/runtime-config',
+    });
+  });
+
+  it('routes merge request note discussion replies back to the original discussion', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestNoteEvent();
+    const context = (processor as any).createRunContext();
+    context.currentDiscussionId = 'discussion-note';
+
+    const addMergeRequestDiscussionReply = jest.fn().mockResolvedValue({ id: 303 });
+    const createMergeRequestComment = jest.fn().mockResolvedValue({ id: 404 });
+    (processor as any).gitlabService = {
+      addMergeRequestDiscussionReply,
+      createMergeRequestComment,
+    };
+
+    const commentId = await (processor as any).createProgressComment(
+      event,
+      'Progress in MR note discussion',
+      context
+    );
+
+    expect(commentId).toBe(303);
+    expect(addMergeRequestDiscussionReply).toHaveBeenCalledWith(
+      1,
+      2,
+      'discussion-note',
+      'Progress in MR note discussion'
+    );
+    expect(createMergeRequestComment).not.toHaveBeenCalled();
   });
 
   it('links ordinary review output references before posting the success comment', async () => {

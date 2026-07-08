@@ -33,6 +33,12 @@ interface EventRunContext {
   progressMessages: ProgressEntry[];
 }
 
+interface ThreadContextResult {
+  threadContext: string;
+  noteBody: string;
+  discussionId: string;
+}
+
 export class EventProcessor {
   private projectManager: ProjectManager;
   private claudeExecutor: StreamingClaudeExecutor;
@@ -91,6 +97,7 @@ export class EventProcessor {
     let content = '';
     let branch = '';
     let context = '';
+    let discussionNoteBody = '';
 
     switch (event.object_kind) {
       case 'issue':
@@ -128,8 +135,11 @@ export class EventProcessor {
                 noteId,
                 runContext
               );
-              if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `${context}\n\n${threadInfo}`;
+              if (threadInfo) {
+                discussionNoteBody = threadInfo.noteBody;
+              }
+              if (threadInfo && this.isActualReply(threadInfo.threadContext)) {
+                context = `${context}\n\n${threadInfo.threadContext}`;
               }
             }
           } else if (event.merge_request) {
@@ -146,8 +156,11 @@ export class EventProcessor {
                 noteId,
                 runContext
               );
-              if (threadInfo && this.isActualReply(threadInfo)) {
-                context = `${context}\n\n${threadInfo}`;
+              if (threadInfo) {
+                discussionNoteBody = threadInfo.noteBody;
+              }
+              if (threadInfo && this.isActualReply(threadInfo.threadContext)) {
+                context = `${context}\n\n${threadInfo.threadContext}`;
               }
             }
           }
@@ -159,9 +172,26 @@ export class EventProcessor {
     }
 
     // Extract AI instruction with provider and model information
-    const aiInstruction = extractAIInstructions(content);
+    let aiInstruction = extractAIInstructions(content);
+
+    if (!aiInstruction && discussionNoteBody && discussionNoteBody !== content) {
+      logger.info('Falling back to GitLab discussion note body for AI instruction extraction', {
+        eventType: event.object_kind,
+        projectId: event.project.id,
+        webhookNoteLength: content.length,
+        discussionNoteLength: discussionNoteBody.length,
+      });
+      aiInstruction = extractAIInstructions(discussionNoteBody);
+    }
 
     if (!aiInstruction) {
+      logger.info('No AI instruction found in event', {
+        eventType: event.object_kind,
+        projectId: event.project.id,
+        noteId: (event.object_attributes as { id?: number }).id,
+        contentLength: content.length,
+        hasDiscussionNoteBody: Boolean(discussionNoteBody),
+      });
       return null;
     }
 
@@ -181,7 +211,7 @@ export class EventProcessor {
     itemIid: number,
     noteId: number,
     runContext: EventRunContext
-  ): Promise<string | null> {
+  ): Promise<ThreadContextResult | null> {
     try {
       let discussions: any[];
 
@@ -202,8 +232,13 @@ export class EventProcessor {
           noteId,
           discussionId: result.discussionId,
           contextLength: result.threadContext.length,
+          noteBodyLength: typeof result.note?.body === 'string' ? result.note.body.length : 0,
         });
-        return result.threadContext;
+        return {
+          threadContext: result.threadContext,
+          noteBody: typeof result.note?.body === 'string' ? result.note.body : '',
+          discussionId: result.discussionId,
+        };
       }
 
       return null;
@@ -990,6 +1025,14 @@ export class EventProcessor {
                 message
               );
               return;
+            } else if (event.merge_request) {
+              await this.gitlabService.addMergeRequestDiscussionReply(
+                event.project.id,
+                event.merge_request.iid,
+                runContext.currentDiscussionId,
+                message
+              );
+              return;
             }
             break;
 
@@ -1065,6 +1108,15 @@ export class EventProcessor {
                 const comment = await this.gitlabService.addIssueDiscussionReply(
                   event.project.id,
                   event.issue.iid,
+                  runContext.currentDiscussionId,
+                  message
+                );
+                commentId = comment?.id || null;
+                return commentId;
+              } else if (event.merge_request) {
+                const comment = await this.gitlabService.addMergeRequestDiscussionReply(
+                  event.project.id,
+                  event.merge_request.iid,
                   runContext.currentDiscussionId,
                   message
                 );
