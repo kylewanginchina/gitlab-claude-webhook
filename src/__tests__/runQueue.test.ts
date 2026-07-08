@@ -130,6 +130,56 @@ describe('RunQueue', () => {
     expect(queue.getStats()).toMatchObject({ running: 0, queued: 0 });
   });
 
+  it('reports whether a run started immediately and where queued runs are waiting', async () => {
+    const queue = new RunQueue({ globalConcurrency: 2 });
+    const firstSameResource = deferred();
+    const secondResource = deferred();
+
+    const runA1 = queue.enqueue({
+      resourceKey: 'project:10:mr:1',
+      run: async () => {
+        await firstSameResource.promise;
+      },
+    });
+
+    const runB1 = queue.enqueue({
+      resourceKey: 'project:10:mr:2',
+      run: async () => {
+        await secondResource.promise;
+      },
+    });
+
+    const runA2 = queue.enqueue({
+      resourceKey: 'project:10:mr:1',
+      run: async () => undefined,
+    });
+
+    expect(runA1).toMatchObject({
+      startedImmediately: true,
+      queuePosition: 0,
+      resourceQueuePosition: 0,
+      globalConcurrency: 2,
+    });
+    expect(runB1).toMatchObject({
+      startedImmediately: true,
+      queuePosition: 0,
+      resourceQueuePosition: 0,
+      globalConcurrency: 2,
+    });
+    expect(runA2).toMatchObject({
+      startedImmediately: false,
+      queuePosition: 1,
+      resourceQueuePosition: 1,
+      queuedAhead: 0,
+      running: 2,
+      globalConcurrency: 2,
+    });
+
+    firstSameResource.resolve();
+    secondResource.resolve();
+    await Promise.all([runA1.promise, runB1.promise, runA2.promise]);
+  });
+
   it('rejects queued run promises when the task fails and continues draining', async () => {
     const queue = new RunQueue({ globalConcurrency: 1 });
     const events: string[] = [];

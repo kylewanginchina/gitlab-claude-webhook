@@ -5,16 +5,22 @@ import { ReviewCustomizationService } from '../admin/reviewCustomizationService'
 import { RuntimeConfigService } from '../admin/runtimeConfigService';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { runtimeConfigService as defaultRuntimeConfigService } from '../utils/runtimeConfig';
-import { verifyGitLabSignature } from '../utils/webhook';
+import { extractAIInstructions, verifyGitLabSignature } from '../utils/webhook';
+import { isServiceStatusCommentBody } from '../utils/gitlabMarkdown';
 import logger from '../utils/logger';
 import { GitLabWebhookEvent } from '../types/gitlab';
-import { EventProcessor } from '../services/eventProcessor';
+import { EventProcessor, QueueStatusDetails } from '../services/eventProcessor';
 import { RunQueue, getGitLabEventResourceKey } from '../services/runQueue';
+
+interface WebhookEventProcessor {
+  processEvent(event: GitLabWebhookEvent): Promise<void>;
+  postQueueStatus?(event: GitLabWebhookEvent, details: QueueStatusDetails): Promise<void>;
+}
 
 export interface WebhookServerOptions {
   runtimeConfigService?: RuntimeConfigService;
   reviewCustomizationService?: ReviewCustomizationService;
-  eventProcessor?: Pick<EventProcessor, 'processEvent'>;
+  eventProcessor?: WebhookEventProcessor;
   taskConcurrency?: number;
   env?: NodeJS.ProcessEnv;
   adminStaticPath?: string;
@@ -22,7 +28,7 @@ export interface WebhookServerOptions {
 
 export class WebhookServer {
   private app: express.Application;
-  private eventProcessor: Pick<EventProcessor, 'processEvent'>;
+  private eventProcessor: WebhookEventProcessor;
   private runQueue: RunQueue;
   private runtimeConfigService: RuntimeConfigService;
   private reviewCustomizationService: ReviewCustomizationService;
@@ -125,6 +131,20 @@ export class WebhookServer {
         userId: event.user?.id,
       });
 
+      if (this.isServiceStatusNoteWebhook(event)) {
+        logger.info('Ignoring service status note webhook before queueing', {
+          eventType: event.object_kind,
+          projectId: event.project?.id,
+          noteId: (event.object_attributes as { id?: number }).id,
+        });
+        res.status(200).json({
+          message: 'Webhook ignored',
+          ignored: true,
+          reason: 'service_status_note',
+        });
+        return;
+      }
+
       const resourceKey = getGitLabEventResourceKey(event);
       const queuedRun = this.runQueue.enqueue({
         resourceKey,
@@ -139,15 +159,70 @@ export class WebhookServer {
         });
       });
 
+      if (!queuedRun.startedImmediately && this.hasAIInstruction(event)) {
+        this.eventProcessor
+          .postQueueStatus?.(event, {
+            runId: queuedRun.id,
+            resourceKey: queuedRun.resourceKey,
+            queuePosition: queuedRun.queuePosition,
+            resourceQueuePosition: queuedRun.resourceQueuePosition,
+            queuedAhead: queuedRun.queuedAhead,
+            queued: queuedRun.pendingCount,
+            running: queuedRun.running,
+            globalConcurrency: queuedRun.globalConcurrency,
+          })
+          .catch(error => {
+            logger.warn('Failed to post queue status comment:', {
+              runId: queuedRun.id,
+              resourceKey,
+              error,
+            });
+          });
+      }
+
       res.status(200).json({
         message: 'Webhook received',
         queued: true,
         runId: queuedRun.id,
         resourceKey,
+        startedImmediately: queuedRun.startedImmediately,
+        queuePosition: queuedRun.queuePosition,
+        resourceQueuePosition: queuedRun.resourceQueuePosition,
+        queuedAhead: queuedRun.queuedAhead,
+        running: queuedRun.running,
+        globalConcurrency: queuedRun.globalConcurrency,
       });
     } catch (error) {
       logger.error('Error handling webhook:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  private isServiceStatusNoteWebhook(event: GitLabWebhookEvent): boolean {
+    if (event.object_kind !== 'note') {
+      return false;
+    }
+
+    const note = (event.object_attributes as { note?: unknown }).note;
+    return typeof note === 'string' && isServiceStatusCommentBody(note);
+  }
+
+  private hasAIInstruction(event: GitLabWebhookEvent): boolean {
+    return Boolean(extractAIInstructions(this.getInstructionText(event)));
+  }
+
+  private getInstructionText(event: GitLabWebhookEvent): string {
+    switch (event.object_kind) {
+      case 'issue':
+        return event.issue?.description || '';
+      case 'merge_request':
+        return event.merge_request?.description || '';
+      case 'note':
+        return typeof (event.object_attributes as { note?: unknown }).note === 'string'
+          ? ((event.object_attributes as { note?: string }).note ?? '')
+          : '';
+      default:
+        return '';
     }
   }
 

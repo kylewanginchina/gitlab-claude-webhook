@@ -877,6 +877,64 @@ describe('runtime config execution paths', () => {
     expect(createMergeRequestComment).not.toHaveBeenCalled();
   });
 
+  it('posts queue status back to the merge request note discussion', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestNoteEvent();
+
+    const getMergeRequestDiscussions = jest.fn().mockResolvedValue([
+      {
+        id: 'discussion-note',
+        notes: [
+          {
+            id: 42,
+            body: '@claude review',
+            created_at: '2026-07-08T04:27:05.000Z',
+            author: { id: 1, name: 'User', username: 'user' },
+          },
+        ],
+      },
+    ]);
+    const findNoteInDiscussions = jest.fn().mockResolvedValue({
+      discussion: { id: 'discussion-note' },
+      discussionId: 'discussion-note',
+      threadContext: '',
+      note: {
+        id: 42,
+        body: '@claude review',
+      },
+    });
+    const addMergeRequestDiscussionReply = jest.fn().mockResolvedValue({ id: 505 });
+    const addMergeRequestComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).gitlabService = {
+      getMergeRequestDiscussions,
+      findNoteInDiscussions,
+      addMergeRequestDiscussionReply,
+      addMergeRequestComment,
+    };
+
+    await processor.postQueueStatus(event, {
+      runId: 'run-123',
+      resourceKey: 'project:1:merge_request:2',
+      queuePosition: 1,
+      resourceQueuePosition: 1,
+      queuedAhead: 0,
+      queued: 1,
+      running: 1,
+      globalConcurrency: 2,
+    });
+
+    expect(getMergeRequestDiscussions).toHaveBeenCalledWith(1, 2);
+    expect(addMergeRequestDiscussionReply).toHaveBeenCalledWith(
+      1,
+      2,
+      'discussion-note',
+      expect.stringContaining('### AI Agent Queue Status')
+    );
+    expect(addMergeRequestDiscussionReply.mock.calls[0][3]).toContain('Run ID: `run-123`');
+    expect(addMergeRequestDiscussionReply.mock.calls[0][3]).toContain('同资源等待位置：#1');
+    expect(addMergeRequestComment).not.toHaveBeenCalled();
+  });
+
   it('ignores AI progress note webhooks without fetching discussion context', async () => {
     const processor = new EventProcessor();
     const event = createMergeRequestNoteEvent();

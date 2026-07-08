@@ -15,9 +15,20 @@ export interface QueuedRun<T> {
   id: string;
   resourceKey: string;
   promise: Promise<T>;
+  startedImmediately: boolean;
+  queuePosition: number;
+  resourceQueuePosition: number;
+  queuedAhead: number;
+  pendingCount: number;
+  running: number;
+  activeResourceKeys: string[];
+  globalConcurrency: number;
 }
 
-interface PendingRun<T> extends QueuedRun<T> {
+interface PendingRun<T> {
+  id: string;
+  resourceKey: string;
+  promise: Promise<T>;
   run: () => Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
   reject: (reason?: unknown) => void;
@@ -78,14 +89,42 @@ export class RunQueue {
     this.pendingRuns.push(pendingRun as PendingRun<unknown>);
     this.drain();
 
-    return { id, resourceKey: job.resourceKey, promise };
+    const pendingIndex = this.pendingRuns.findIndex(run => run.id === id);
+    const startedImmediately = pendingIndex < 0;
+    const queuePosition = startedImmediately ? 0 : pendingIndex + 1;
+    const resourceQueuePosition = startedImmediately
+      ? 0
+      : this.pendingRuns
+          .slice(0, pendingIndex + 1)
+          .filter(run => run.resourceKey === job.resourceKey).length;
+    const stats = this.getStats();
+
+    return {
+      id,
+      resourceKey: job.resourceKey,
+      promise,
+      startedImmediately,
+      queuePosition,
+      resourceQueuePosition,
+      queuedAhead: Math.max(0, queuePosition - 1),
+      pendingCount: stats.queued,
+      running: stats.running,
+      activeResourceKeys: stats.activeResourceKeys,
+      globalConcurrency: stats.globalConcurrency,
+    };
   }
 
-  public getStats(): { queued: number; running: number; activeResourceKeys: string[] } {
+  public getStats(): {
+    queued: number;
+    running: number;
+    activeResourceKeys: string[];
+    globalConcurrency: number;
+  } {
     return {
       queued: this.pendingRuns.length,
       running: this.runningCount,
       activeResourceKeys: [...this.activeResourceKeys],
+      globalConcurrency: this.globalConcurrency,
     };
   }
 

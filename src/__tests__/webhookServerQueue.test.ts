@@ -4,6 +4,7 @@ import { GitLabWebhookEvent } from '../types/gitlab';
 jest.mock('../services/eventProcessor', () => ({
   EventProcessor: jest.fn().mockImplementation(() => ({
     processEvent: jest.fn().mockResolvedValue(undefined),
+    postQueueStatus: jest.fn().mockResolvedValue(undefined),
   })),
 }));
 
@@ -58,8 +59,23 @@ function createMergeRequestEvent(iid: number): GitLabWebhookEvent {
   };
 }
 
+function createMergeRequestNoteEvent(iid: number, note: string): GitLabWebhookEvent {
+  const event = createMergeRequestEvent(iid);
+  return {
+    ...event,
+    object_kind: 'note',
+    object_attributes: {
+      id: 555,
+      note,
+    },
+  };
+}
+
 function createServerWithEnv(
-  eventProcessor: { processEvent: jest.Mock<Promise<void>, [GitLabWebhookEvent]> },
+  eventProcessor: {
+    processEvent: jest.Mock<Promise<void>, [GitLabWebhookEvent]>;
+    postQueueStatus?: jest.Mock<Promise<void>, any>;
+  },
   env: NodeJS.ProcessEnv
 ): WebhookServer {
   return new WebhookServer({ eventProcessor: eventProcessor as any, env });
@@ -130,6 +146,53 @@ describe('WebhookServer task queue', () => {
     expect(events).toEqual(['start:1', 'end:1', 'start:1', 'end:1']);
   });
 
+  it('posts queue status for an AI request waiting behind the same merge request', async () => {
+    const first = deferred();
+    const eventProcessor = {
+      processEvent: jest.fn(async event => {
+        if (event.merge_request.iid === 1) {
+          await first.promise;
+        }
+      }),
+      postQueueStatus: jest.fn().mockResolvedValue(undefined),
+    };
+    const server = new WebhookServer({ eventProcessor: eventProcessor as any, taskConcurrency: 2 });
+
+    await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(createMergeRequestNoteEvent(1, '@claude review this MR'));
+
+    const response = await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(createMergeRequestNoteEvent(1, '@codex review this MR'));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      message: 'Webhook received',
+      queued: true,
+      startedImmediately: false,
+      queuePosition: 1,
+      resourceQueuePosition: 1,
+      running: 1,
+      globalConcurrency: 2,
+      resourceKey: 'project:10:merge_request:1',
+    });
+    expect(eventProcessor.postQueueStatus).toHaveBeenCalledTimes(1);
+    expect(eventProcessor.postQueueStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ object_kind: 'note' }),
+      expect.objectContaining({
+        queuePosition: 1,
+        resourceQueuePosition: 1,
+        resourceKey: 'project:10:merge_request:1',
+        globalConcurrency: 2,
+      })
+    );
+
+    first.resolve();
+  });
+
   it('allows different merge requests to process concurrently', async () => {
     const first = deferred();
     const events: string[] = [];
@@ -156,6 +219,38 @@ describe('WebhookServer task queue', () => {
     await flushPromises();
 
     expect(events).toEqual(['start:1', 'start:2', 'end:2']);
+
+    first.resolve();
+  });
+
+  it('does not post queue status when a different merge request starts immediately', async () => {
+    const first = deferred();
+    const eventProcessor = {
+      processEvent: jest.fn(async event => {
+        if (event.merge_request.iid === 1) {
+          await first.promise;
+        }
+      }),
+      postQueueStatus: jest.fn().mockResolvedValue(undefined),
+    };
+    const server = new WebhookServer({ eventProcessor: eventProcessor as any, taskConcurrency: 2 });
+
+    await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(createMergeRequestNoteEvent(1, '@claude review this MR'));
+    const response = await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(createMergeRequestNoteEvent(2, '@codex review this other MR'));
+
+    expect(response.body).toMatchObject({
+      queued: true,
+      startedImmediately: true,
+      queuePosition: 0,
+      resourceQueuePosition: 0,
+    });
+    expect(eventProcessor.postQueueStatus).not.toHaveBeenCalled();
 
     first.resolve();
   });
@@ -254,5 +349,37 @@ describe('WebhookServer task queue', () => {
 
     expect(verifyGitLabSignature).toHaveBeenCalled();
     expect(eventProcessor.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('ignores service status note webhooks before enqueueing work', async () => {
+    const eventProcessor = {
+      processEvent: jest.fn().mockResolvedValue(undefined),
+      postQueueStatus: jest.fn().mockResolvedValue(undefined),
+    };
+    const server = new WebhookServer({ eventProcessor: eventProcessor as any });
+    jest.mocked(verifyGitLabSignature).mockReturnValue(true);
+
+    const response = await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(
+        createMergeRequestNoteEvent(
+          1,
+          [
+            '### AI Agent Queue Status',
+            '',
+            '当前请求已进入后台队列，前序任务完成后会自动开始处理。',
+          ].join('\n')
+        )
+      );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      message: 'Webhook ignored',
+      ignored: true,
+      reason: 'service_status_note',
+    });
+    expect(eventProcessor.processEvent).not.toHaveBeenCalled();
+    expect(eventProcessor.postQueueStatus).not.toHaveBeenCalled();
   });
 });

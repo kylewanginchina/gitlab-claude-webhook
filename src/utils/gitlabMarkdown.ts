@@ -166,6 +166,20 @@ export function formatProgressComment(options: ProgressCommentOptions): string {
   return lines.join('\n');
 }
 
+export function isServiceStatusCommentBody(body: string): boolean {
+  const trimmed = body.trim();
+  return (
+    trimmed.startsWith('### AI Agent Progress Report') ||
+    trimmed.startsWith('### AI Agent Queue Status') ||
+    trimmed.startsWith('**AI Agent Queue Status**') ||
+    trimmed.startsWith('AI Agent Queue Status') ||
+    trimmed.startsWith('**Updated Progress:**') ||
+    trimmed.startsWith('Updated Progress:') ||
+    /^#+\s+AI Agent Progress Report/m.test(trimmed) ||
+    /^#+\s+AI Agent Queue Status/m.test(trimmed)
+  );
+}
+
 export async function linkifyReviewReferences(
   output: string,
   context: ReviewLinkContext

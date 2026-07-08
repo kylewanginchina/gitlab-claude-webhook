@@ -22,6 +22,7 @@ import { runtimeConfigService } from '../utils/runtimeConfig';
 import {
   formatProgressComment,
   inferProgressStatus,
+  isServiceStatusCommentBody,
   linkifyReviewReferences,
   sanitizeProgressMessage,
   type ProgressEntry,
@@ -39,6 +40,17 @@ interface ThreadContextResult {
   threadContext: string;
   noteBody: string;
   discussionId: string;
+}
+
+export interface QueueStatusDetails {
+  runId: string;
+  resourceKey: string;
+  queuePosition: number;
+  resourceQueuePosition: number;
+  queuedAhead: number;
+  queued: number;
+  running: number;
+  globalConcurrency: number;
 }
 
 export class EventProcessor {
@@ -101,6 +113,15 @@ export class EventProcessor {
       logger.error('Error processing event:', error);
       await this.reportError(event, error, runContext);
     }
+  }
+
+  public async postQueueStatus(
+    event: GitLabWebhookEvent,
+    details: QueueStatusDetails
+  ): Promise<void> {
+    const runContext = this.createRunContext();
+    await this.attachNoteThreadContext(event, runContext);
+    await this.postComment(event, this.buildQueueStatusComment(details), runContext);
   }
 
   private async extractInstruction(
@@ -288,17 +309,49 @@ export class EventProcessor {
     }
 
     const note = (event.object_attributes as { note?: unknown }).note;
-    return typeof note === 'string' && this.isProgressCommentBody(note);
+    return typeof note === 'string' && isServiceStatusCommentBody(note);
   }
 
-  private isProgressCommentBody(body: string): boolean {
-    const trimmed = body.trim();
-    return (
-      trimmed.startsWith('### AI Agent Progress Report') ||
-      trimmed.startsWith('**Updated Progress:**') ||
-      trimmed.startsWith('Updated Progress:') ||
-      /^#+\s+AI Agent Progress Report/m.test(trimmed)
-    );
+  private async attachNoteThreadContext(
+    event: GitLabWebhookEvent,
+    runContext: EventRunContext
+  ): Promise<void> {
+    if (event.object_kind !== 'note') {
+      return;
+    }
+
+    const rawNoteId = (event.object_attributes as { id?: number | string }).id;
+    const noteId = Number(rawNoteId);
+    if (!Number.isFinite(noteId)) {
+      return;
+    }
+
+    if (event.issue) {
+      await this.getThreadContext('issue', event.project.id, event.issue.iid, noteId, runContext);
+    } else if (event.merge_request) {
+      await this.getThreadContext(
+        'merge_request',
+        event.project.id,
+        event.merge_request.iid,
+        noteId,
+        runContext
+      );
+    }
+  }
+
+  private buildQueueStatusComment(details: QueueStatusDetails): string {
+    return [
+      '### AI Agent Queue Status',
+      '',
+      '当前请求已进入后台队列，前序任务完成后会自动开始处理。',
+      '',
+      `- Run ID: \`${details.runId}\``,
+      `- 全局排队位置：#${details.queuePosition}`,
+      `- 同资源等待位置：#${details.resourceQueuePosition}`,
+      `- 当前运行中：${details.running}/${details.globalConcurrency}`,
+      `- 当前等待中：${details.queued}`,
+      `- 资源：\`${details.resourceKey}\``,
+    ].join('\n');
   }
 
   private async buildMergeRequestContext(mergeRequest: any, projectId: number): Promise<string> {
