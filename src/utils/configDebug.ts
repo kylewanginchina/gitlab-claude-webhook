@@ -34,6 +34,7 @@ export function debugConfig(): void {
         webhook: {
           secret: config.webhook.secret,
           port: config.webhook.port,
+          taskConcurrency: config.webhook.taskConcurrency,
         },
         workDir: config.workDir,
         logLevel: config.logLevel,
@@ -61,6 +62,7 @@ export function debugConfig(): void {
   console.log(`GitLab Token: ${runtimeConfig.gitlab.token ? '********' : 'NOT SET'}`);
   console.log(`Webhook Secret: ${runtimeConfig.webhook.secret ? '********' : 'NOT SET'}`);
   console.log(`Port: ${runtimeConfig.webhook.port}`);
+  console.log(`Webhook Task Concurrency: ${runtimeConfig.webhook.taskConcurrency}`);
   console.log(`Work Directory: ${runtimeConfig.workDir}`);
   console.log(`Log Level: ${runtimeConfig.logLevel}`);
 

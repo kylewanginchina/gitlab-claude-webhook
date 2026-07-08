@@ -67,6 +67,7 @@ export const config: Config = {
   webhook: {
     secret: getEnvVar('WEBHOOK_SECRET'),
     port: parseInt(getEnvVar('PORT', '3000')),
+    taskConcurrency: parseInt(getEnvVar('WEBHOOK_TASK_CONCURRENCY', '2')),
   },
   ai: {
     defaultProvider: getAIProvider('AI_DEFAULT_PROVIDER', 'claude'),

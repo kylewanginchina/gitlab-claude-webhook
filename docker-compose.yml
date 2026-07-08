@@ -16,6 +16,7 @@ services:
       - GITLAB_BASE_URL=${GITLAB_BASE_URL:-https://gitlab.com}
       - GITLAB_TOKEN=${GITLAB_TOKEN}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - WEBHOOK_TASK_CONCURRENCY=${WEBHOOK_TASK_CONCURRENCY:-2}
       - PORT=${PORT:-3000}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
       - DATA_DIR=/app/data

@@ -70,6 +70,7 @@ function buildAppWithLeakyUpdateResult() {
     webhook: {
       secret: { configured: true, masked: '********cret' },
       port: 3000,
+      taskConcurrency: 2,
     },
     ai: {
       defaultProvider: 'claude',
@@ -140,6 +141,7 @@ function buildPublicConfig(overrides: Partial<PublicRuntimeConfig> = {}): Public
     webhook: {
       secret: { configured: true, masked: '********cret' },
       port: 3000,
+      taskConcurrency: 2,
     },
     ai: {
       defaultProvider: 'claude',
@@ -210,6 +212,43 @@ describe('admin routes', () => {
     expect(response.body.config.claude.defaultTimeoutMinutes).toBe(42);
   });
 
+  it('notifies the host service after runtime config updates', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'admin-routes-'));
+    const runtimeConfigService = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+    await runtimeConfigService.initialize();
+    const onRuntimeConfigUpdated = jest.fn();
+
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/api/admin',
+      createAdminRouter({
+        runtimeConfigService,
+        env: { ADMIN_TOKEN: 'admin-secret' },
+        onRuntimeConfigUpdated,
+      })
+    );
+
+    await request(app)
+      .put('/api/admin/config')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ webhook: { taskConcurrency: 3 } })
+      .expect(200);
+
+    expect(onRuntimeConfigUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhook: expect.objectContaining({ taskConcurrency: 3 }),
+      })
+    );
+  });
+
   it('returns masked public config for update responses', async () => {
     const app = buildAppWithLeakyUpdateResult();
 
@@ -241,6 +280,7 @@ describe('admin routes', () => {
       webhook: {
         secret: { configured: true, masked: '********cret' },
         port: 3000,
+        taskConcurrency: 2,
       },
       ai: {
         defaultProvider: 'claude',

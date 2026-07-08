@@ -23,6 +23,7 @@ export interface ProgressCommentOptions {
   entries: ProgressEntry[];
   isComplete?: boolean;
   isError?: boolean;
+  startedAt?: Date;
   updatedAt?: Date;
 }
 
@@ -135,9 +136,20 @@ export function formatProgressComment(options: ProgressCommentOptions): string {
   const lines = [
     '### AI Agent Progress Report',
     '',
+  ];
+
+  if (options.startedAt) {
+    lines.push(
+      `**Started:** ${formatDateTime(options.startedAt)}`,
+      `**Elapsed:** ${formatDuration(updatedAt.getTime() - options.startedAt.getTime())}`,
+      ''
+    );
+  }
+
+  lines.push(
     '| Time (UTC+08) | Status | Activity |',
     '| --- | --- | --- |',
-  ];
+  );
 
   for (const entry of entries) {
     lines.push(
@@ -164,6 +176,23 @@ export function formatProgressComment(options: ProgressCommentOptions): string {
   lines.push('', `_Last updated: ${formatDateTime(updatedAt)}_`);
 
   return lines.join('\n');
+}
+
+function formatDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
 }
 
 export function isServiceStatusCommentBody(body: string): boolean {

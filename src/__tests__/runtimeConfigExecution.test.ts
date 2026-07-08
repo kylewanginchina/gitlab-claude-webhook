@@ -34,6 +34,7 @@ jest.mock('../utils/config', () => ({
     webhook: {
       secret: 'webhook-static-secret',
       port: 3000,
+      taskConcurrency: 2,
     },
     ai: {
       defaultProvider: 'claude',
@@ -93,6 +94,7 @@ const baseRuntimeConfig: RuntimeConfig = {
   webhook: {
     secret: 'webhook-secret',
     port: 3000,
+    taskConcurrency: 2,
   },
   ai: {
     defaultProvider: 'claude',

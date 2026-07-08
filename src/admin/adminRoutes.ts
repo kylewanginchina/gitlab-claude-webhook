@@ -2,12 +2,14 @@ import express from 'express';
 import { createAdminAuthMiddleware } from './adminAuth';
 import { ReviewCustomizationService } from './reviewCustomizationService';
 import { RuntimeConfigService } from './runtimeConfigService';
+import type { RuntimeConfig } from './adminTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 
 export interface CreateAdminRouterOptions {
   runtimeConfigService: RuntimeConfigService;
   reviewCustomizationService?: ReviewCustomizationService;
   env?: NodeJS.ProcessEnv;
+  onRuntimeConfigUpdated?: (config: RuntimeConfig) => void | Promise<void>;
 }
 
 function providerTestResult(
@@ -96,6 +98,7 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
   router.put('/config', async (req, res, next) => {
     try {
       const result = await runtimeConfigService.updateConfig(req.body, 'admin');
+      await options.onRuntimeConfigUpdated?.(runtimeConfigService.getConfig());
       res.json({
         config: runtimeConfigService.getPublicConfig(),
         requiresRestart: result.requiresRestart,
@@ -108,6 +111,7 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
   router.post('/config/reload', async (_req, res, next) => {
     try {
       await runtimeConfigService.reload();
+      await options.onRuntimeConfigUpdated?.(runtimeConfigService.getConfig());
       res.json({ ok: true });
     } catch (error) {
       next(error);

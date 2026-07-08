@@ -24,6 +24,7 @@ export interface PublicRuntimeConfig {
   webhook: {
     secret: SecretStatus;
     port: number;
+    taskConcurrency: number;
   };
   ai: {
     defaultProvider: 'claude' | 'codex';
@@ -65,6 +66,7 @@ export type RuntimeConfigPatch = Partial<{
   webhook: Partial<{
     secret: string;
     port: number;
+    taskConcurrency: number;
   }>;
   ai: Partial<{
     defaultProvider: 'claude' | 'codex';

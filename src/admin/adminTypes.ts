@@ -22,6 +22,7 @@ export interface RuntimeConfig {
   webhook: {
     secret: string;
     port: number;
+    taskConcurrency: number;
   };
   ai: {
     defaultProvider: AIProvider;

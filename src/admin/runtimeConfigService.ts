@@ -35,6 +35,11 @@ function intValue(value: string, defaultValue: number): number {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+function positiveIntValue(value: string, defaultValue: number): number {
+  const parsed = intValue(value, defaultValue);
+  return parsed > 0 ? parsed : defaultValue;
+}
+
 function providerValue(value: string): AIProvider {
   return value === 'codex' ? 'codex' : 'claude';
 }
@@ -96,6 +101,7 @@ export function createConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Runti
     webhook: {
       secret: envValue(env, 'WEBHOOK_SECRET'),
       port: intValue(envValue(env, 'PORT', '3000'), 3000),
+      taskConcurrency: positiveIntValue(envValue(env, 'WEBHOOK_TASK_CONCURRENCY', '2'), 2),
     },
     ai: {
       defaultProvider: providerValue(envValue(env, 'AI_DEFAULT_PROVIDER', 'claude')),
@@ -132,7 +138,7 @@ export class RuntimeConfigService {
 
   public async initialize(): Promise<void> {
     const fallback = createConfigFromEnv(this.options.env || process.env);
-    this.config = await this.store.read(fallback);
+    this.config = this.applyDefaults(await this.store.read(fallback), fallback);
     this.validateConfig(this.config);
     await this.store.write(this.config);
     this.loaded = true;
@@ -172,6 +178,7 @@ export class RuntimeConfigService {
       webhook: {
         secret: secretStatus(config.webhook.secret),
         port: config.webhook.port,
+        taskConcurrency: config.webhook.taskConcurrency,
       },
       ai: {
         ...config.ai,
@@ -230,7 +237,8 @@ export class RuntimeConfigService {
   }
 
   public async reload(): Promise<void> {
-    const next = await this.store.read(createConfigFromEnv(this.options.env || process.env));
+    const fallback = createConfigFromEnv(this.options.env || process.env);
+    const next = this.applyDefaults(await this.store.read(fallback), fallback);
     this.validateConfig(next);
     this.config = next;
   }
@@ -254,6 +262,7 @@ export class RuntimeConfigService {
     );
     this.assertPositiveInteger(config.codex.defaultTimeoutMinutes, 'codex.defaultTimeoutMinutes');
     this.assertPort(config.webhook.port);
+    this.assertPositiveInteger(config.webhook.taskConcurrency, 'webhook.taskConcurrency');
     this.assertMinConfidence(config.review.minConfidence);
     this.assertPositiveInteger(
       config.review.maxCandidateFindings,
@@ -374,6 +383,12 @@ export class RuntimeConfigService {
       if ('port' in webhook) {
         next.port = this.assertPort(webhook.port);
       }
+      if ('taskConcurrency' in webhook) {
+        next.taskConcurrency = this.assertPositiveInteger(
+          webhook.taskConcurrency,
+          'webhook.taskConcurrency'
+        );
+      }
       sanitized.webhook = next;
     }
 
@@ -472,6 +487,37 @@ export class RuntimeConfigService {
     }
 
     return value;
+  }
+
+  private applyDefaults(config: RuntimeConfig, fallback: RuntimeConfig): RuntimeConfig {
+    return {
+      ...fallback,
+      ...config,
+      claude: {
+        ...fallback.claude,
+        ...(config.claude || {}),
+      },
+      codex: {
+        ...fallback.codex,
+        ...(config.codex || {}),
+      },
+      gitlab: {
+        ...fallback.gitlab,
+        ...(config.gitlab || {}),
+      },
+      webhook: {
+        ...fallback.webhook,
+        ...(config.webhook || {}),
+      },
+      ai: {
+        ...fallback.ai,
+        ...(config.ai || {}),
+      },
+      review: {
+        ...fallback.review,
+        ...(config.review || {}),
+      },
+    };
   }
 
   private assertBoolean(value: unknown, fieldName: string): boolean {

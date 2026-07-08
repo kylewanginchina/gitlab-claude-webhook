@@ -24,10 +24,22 @@ describe('RuntimeConfigService', () => {
     expect(config.gitlab.token).toBe('glpat-secret');
     expect(config.webhook.secret).toBe('webhook-secret');
     expect(config.webhook.port).toBe(3000);
+    expect(config.webhook.taskConcurrency).toBe(2);
     expect(config.ai.defaultProvider).toBe('claude');
     expect(config.review.minConfidence).toBe(80);
     expect(config.review.maxCandidateFindings).toBe(12);
     expect(config.review.maxFinalFindings).toBe(8);
+  });
+
+  it('creates webhook task concurrency from environment variables', () => {
+    const config = createConfigFromEnv({
+      GITLAB_TOKEN: 'glpat-secret',
+      WEBHOOK_SECRET: 'webhook-secret',
+      ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      WEBHOOK_TASK_CONCURRENCY: '5',
+    } as NodeJS.ProcessEnv);
+
+    expect(config.webhook.taskConcurrency).toBe(5);
   });
 
   it('expands environment variable references from the injected env when creating config', () => {
@@ -118,6 +130,62 @@ describe('RuntimeConfigService', () => {
     expect(service.getConfig().claude.defaultModel).toBe('claude-opus-test');
     expect(service.getConfig().claude.defaultTimeoutMinutes).toBe(45);
     expect(service.getConfig().review.minConfidence).toBe(85);
+  });
+
+  it('updates webhook task concurrency without requiring restart', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    const result = await service.updateConfig(
+      {
+        webhook: {
+          taskConcurrency: 4,
+        },
+      },
+      'admin'
+    );
+
+    expect(result.requiresRestart).toEqual([]);
+    expect(service.getConfig().webhook.taskConcurrency).toBe(4);
+    expect(service.getPublicConfig().webhook.taskConcurrency).toBe(4);
+  });
+
+  it('adds webhook task concurrency when loading older persisted config files', async () => {
+    const dir = await tempDir();
+    const stored = createConfigFromEnv({
+      GITLAB_TOKEN: 'glpat-secret',
+      WEBHOOK_SECRET: 'webhook-secret',
+      ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+    } as NodeJS.ProcessEnv);
+    delete (stored.webhook as Partial<typeof stored.webhook>).taskConcurrency;
+
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'runtime-config.json'), JSON.stringify(stored, null, 2));
+
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+
+    await service.initialize();
+
+    expect(service.getConfig().webhook.taskConcurrency).toBe(2);
+    await expect(fs.readFile(path.join(dir, 'runtime-config.json'), 'utf8')).resolves.toContain(
+      '"taskConcurrency": 2'
+    );
   });
 
   it('keeps existing secrets on blank secret patches and drops unknown nested fields', async () => {
@@ -275,6 +343,11 @@ describe('RuntimeConfigService', () => {
     ],
     ['logLevel', 'logLevel must be one of: debug, info, warn, error', { logLevel: 'trace' }],
     ['webhook.port', 'webhook.port must be between 1 and 65535', { webhook: { port: 0 } }],
+    [
+      'webhook.taskConcurrency',
+      'webhook.taskConcurrency must be at least 1',
+      { webhook: { taskConcurrency: 0 } },
+    ],
     [
       'review.minConfidence',
       'review.minConfidence must be between 0 and 100',

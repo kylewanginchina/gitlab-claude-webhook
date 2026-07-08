@@ -205,6 +205,39 @@ describe('RunQueue', () => {
     expect(events).toEqual(['first', 'second']);
   });
 
+  it('drains queued work when global concurrency is increased', async () => {
+    const queue = new RunQueue({ globalConcurrency: 1 });
+    const first = deferred();
+    const events: string[] = [];
+
+    const runA = queue.enqueue({
+      resourceKey: 'project:10:mr:1',
+      run: async () => {
+        events.push('a:start');
+        await first.promise;
+        events.push('a:end');
+      },
+    });
+
+    const runB = queue.enqueue({
+      resourceKey: 'project:10:mr:2',
+      run: async () => {
+        events.push('b:start');
+      },
+    });
+
+    await flushPromises();
+    expect(events).toEqual(['a:start']);
+
+    queue.setGlobalConcurrency(2);
+    await flushPromises();
+
+    expect(events).toEqual(['a:start', 'b:start']);
+
+    first.resolve();
+    await Promise.all([runA.promise, runB.promise]);
+  });
+
   it('builds resource keys for merge request notes using the merge request iid', () => {
     const event = createEvent({
       object_kind: 'note',

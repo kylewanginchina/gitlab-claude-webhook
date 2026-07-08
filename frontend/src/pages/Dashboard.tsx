@@ -180,7 +180,9 @@ export default function Dashboard() {
               <tr>
                 <td>Concurrency</td>
                 <td className="mono">
-                  pass {config?.review.passConcurrency ?? '--'} / scoring {config?.review.scoringConcurrency ?? '--'}
+                  webhook tasks {config?.webhook.taskConcurrency ?? '--'} / pass{' '}
+                  {config?.review.passConcurrency ?? '--'} / scoring{' '}
+                  {config?.review.scoringConcurrency ?? '--'}
                 </td>
               </tr>
             </tbody>
@@ -227,6 +229,10 @@ export default function Dashboard() {
               <tr>
                 <th>Webhook port</th>
                 <td className="mono">{config?.webhook.port ?? '--'} (restart required)</td>
+              </tr>
+              <tr>
+                <th>Webhook task concurrency</th>
+                <td className="mono">{config?.webhook.taskConcurrency ?? '--'} (hot applied)</td>
               </tr>
               <tr>
                 <th>Log level</th>

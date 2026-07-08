@@ -40,6 +40,7 @@ export interface Config {
   webhook: {
     secret: string;
     port: number;
+    taskConcurrency: number;
   };
   ai: {
     defaultProvider: AIProvider;

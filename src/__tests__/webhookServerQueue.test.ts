@@ -1,5 +1,9 @@
 import request from 'supertest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { GitLabWebhookEvent } from '../types/gitlab';
+import { RuntimeConfigService } from '../admin/runtimeConfigService';
 
 jest.mock('../services/eventProcessor', () => ({
   EventProcessor: jest.fn().mockImplementation(() => ({
@@ -331,6 +335,60 @@ describe('WebhookServer task queue', () => {
     await flushPromises();
 
     expect(events).toEqual(['start:1', 'end:1', 'start:2', 'end:2']);
+  });
+
+  it('hot-applies webhook task concurrency updates from the admin config API', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'webhook-runtime-concurrency-'));
+    const runtimeConfigService = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'test-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+        WEBHOOK_TASK_CONCURRENCY: '1',
+      } as NodeJS.ProcessEnv,
+    });
+    await runtimeConfigService.initialize();
+
+    const first = deferred();
+    const events: string[] = [];
+    const eventProcessor = {
+      processEvent: jest.fn(async event => {
+        events.push(`start:${event.merge_request.iid}`);
+        if (event.merge_request.iid === 1) {
+          await first.promise;
+        }
+        events.push(`end:${event.merge_request.iid}`);
+      }),
+    };
+    const server = new WebhookServer({
+      eventProcessor: eventProcessor as any,
+      runtimeConfigService,
+      env: { ADMIN_TOKEN: 'admin-secret' },
+    });
+
+    await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(createMergeRequestEvent(1));
+    await request(server.getApp())
+      .post('/webhook')
+      .set('x-gitlab-token', 'test-secret')
+      .send(createMergeRequestEvent(2));
+
+    await flushPromises();
+    expect(events).toEqual(['start:1']);
+
+    await request(server.getApp())
+      .put('/api/admin/config')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ webhook: { taskConcurrency: 2 } })
+      .expect(200);
+
+    await flushPromises();
+    expect(events).toEqual(['start:1', 'start:2', 'end:2']);
+
+    first.resolve();
   });
 
   it('does not enqueue webhook processing when the signature is invalid', async () => {

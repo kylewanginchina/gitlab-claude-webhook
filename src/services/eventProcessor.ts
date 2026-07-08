@@ -29,6 +29,7 @@ import {
 } from '../utils/gitlabMarkdown';
 
 interface EventRunContext {
+  startedAt: Date;
   currentCommentId: number | null;
   currentDiscussionId: string | null;
   fallbackProgressCommentId: number | null;
@@ -70,6 +71,7 @@ export class EventProcessor {
 
   private createRunContext(): EventRunContext {
     return {
+      startedAt: new Date(),
       currentCommentId: null,
       currentDiscussionId: null,
       fallbackProgressCommentId: null,
@@ -423,7 +425,11 @@ export class EventProcessor {
       : 'Claude';
 
     // Create initial progress comment
-    const initialMessage = this.buildInitialProgressComment(providerName, instruction.command);
+    const initialMessage = this.buildInitialProgressComment(
+      providerName,
+      instruction.command,
+      runContext.startedAt
+    );
 
     runContext.currentCommentId = await this.createProgressComment(event, initialMessage, runContext);
 
@@ -1286,19 +1292,23 @@ export class EventProcessor {
     }
   }
 
-  private buildInitialProgressComment(providerName: string, command: string): string {
-    const now = new Date();
+  private buildInitialProgressComment(
+    providerName: string,
+    command: string,
+    startedAt: Date
+  ): string {
     const task = command.length > 100 ? `${command.substring(0, 100)}...` : command;
 
     return formatProgressComment({
       entries: [
         {
-          timestamp: now,
+          timestamp: startedAt,
           status: 'queued',
           message: `${providerName} is starting to work on your request. Task: ${task}`,
         },
       ],
-      updatedAt: now,
+      startedAt,
+      updatedAt: startedAt,
     });
   }
 
@@ -1334,6 +1344,7 @@ export class EventProcessor {
         entries: recentMessages,
         isComplete,
         isError,
+        startedAt: runContext.startedAt,
         updatedAt: timestamp,
       });
 

@@ -39,12 +39,12 @@ export class WebhookServer {
     this.app = express();
     this.env = options.env || process.env;
     this.eventProcessor = options.eventProcessor || new EventProcessor();
-    this.runQueue = new RunQueue({
-      globalConcurrency: options.taskConcurrency ?? this.resolveTaskConcurrency(),
-    });
     this.runtimeConfigService = options.runtimeConfigService || defaultRuntimeConfigService;
     this.reviewCustomizationService =
       options.reviewCustomizationService || defaultReviewCustomizationService;
+    this.runQueue = new RunQueue({
+      globalConcurrency: options.taskConcurrency ?? this.resolveTaskConcurrency(),
+    });
     this.adminStaticPath =
       options.adminStaticPath || path.resolve(process.cwd(), 'dist/public/admin');
     this.setupMiddleware();
@@ -56,6 +56,10 @@ export class WebhookServer {
   }
 
   private resolveTaskConcurrency(): number {
+    if (this.runtimeConfigService.isLoaded()) {
+      return this.runtimeConfigService.getConfig().webhook.taskConcurrency;
+    }
+
     const raw = this.env.WEBHOOK_TASK_CONCURRENCY;
     if (!raw || !/^[1-9]\d*$/.test(raw)) {
       return 2;
@@ -79,6 +83,9 @@ export class WebhookServer {
         runtimeConfigService: this.runtimeConfigService,
         reviewCustomizationService: this.reviewCustomizationService,
         env: this.env,
+        onRuntimeConfigUpdated: config => {
+          this.runQueue.setGlobalConcurrency(config.webhook.taskConcurrency);
+        },
       })
     );
 

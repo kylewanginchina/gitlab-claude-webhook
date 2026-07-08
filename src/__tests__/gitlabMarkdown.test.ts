@@ -42,6 +42,27 @@ describe('gitlab markdown helpers', () => {
     expect(body).not.toContain('2026-07-06T09:20:31.817Z');
   });
 
+  it('shows progress start time and elapsed duration when provided', () => {
+    const startedAt = new Date('2026-07-06T09:13:32.000Z');
+    const updatedAt = new Date('2026-07-06T09:15:37.000Z');
+
+    const body = formatProgressComment({
+      entries: [
+        {
+          timestamp: startedAt,
+          status: 'queued',
+          message: 'Claude is starting to work.',
+        },
+      ],
+      startedAt,
+      updatedAt,
+    });
+
+    expect(body).toContain('### AI Agent Progress Report');
+    expect(body).toContain('**Started:** 2026-07-06 17:13:32 UTC+08:00');
+    expect(body).toContain('**Elapsed:** 2m 5s');
+  });
+
   it('normalizes noisy progress emoji into professional status text', () => {
     expect(sanitizeProgressMessage('📖 Read /tmp/project/agent/src/ebpf/user/config.h')).toBe(
       'Read `/tmp/project/agent/src/ebpf/user/config.h`'

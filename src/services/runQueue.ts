@@ -51,7 +51,7 @@ export function getGitLabEventResourceKey(event: GitLabWebhookEvent): string {
 }
 
 export class RunQueue {
-  private readonly globalConcurrency: number;
+  private globalConcurrency: number;
   private readonly pendingRuns: Array<PendingRun<unknown>> = [];
   private readonly activeResourceKeys = new Set<string>();
   private runningCount = 0;
@@ -126,6 +126,20 @@ export class RunQueue {
       activeResourceKeys: [...this.activeResourceKeys],
       globalConcurrency: this.globalConcurrency,
     };
+  }
+
+  public setGlobalConcurrency(globalConcurrency: number): void {
+    if (
+      typeof globalConcurrency !== 'number' ||
+      !Number.isFinite(globalConcurrency) ||
+      globalConcurrency <= 0
+    ) {
+      this.globalConcurrency = 2;
+    } else {
+      this.globalConcurrency = Math.max(1, Math.floor(globalConcurrency));
+    }
+
+    this.drain();
   }
 
   private drain(): void {

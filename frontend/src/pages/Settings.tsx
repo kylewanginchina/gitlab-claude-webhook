@@ -24,6 +24,7 @@ type DraftConfig = {
   webhook: {
     secret: string;
     port: number;
+    taskConcurrency: number;
   };
   ai: {
     defaultProvider: PublicRuntimeConfig['ai']['defaultProvider'];
@@ -65,6 +66,7 @@ function toDraft(config: PublicRuntimeConfig): DraftConfig {
     webhook: {
       secret: '',
       port: config.webhook.port,
+      taskConcurrency: config.webhook.taskConcurrency,
     },
     ai: {
       defaultProvider: config.ai.defaultProvider,
@@ -111,6 +113,7 @@ function buildPatch(draft: DraftConfig): RuntimeConfigPatch {
     },
     webhook: {
       port: draft.webhook.port,
+      taskConcurrency: draft.webhook.taskConcurrency,
     },
     review: {
       enabled: draft.review.enabled,
@@ -730,6 +733,21 @@ export default function Settings() {
                 onChange={updateNumber('webhook', 'port', draft.webhook.port)}
               />
               <span className="field-hint">Changing the port requires process restart.</span>
+            </div>
+            <div className="field">
+              <label htmlFor="webhook-task-concurrency">Webhook task concurrency</label>
+              <input
+                id="webhook-task-concurrency"
+                type="number"
+                min={1}
+                value={draft.webhook.taskConcurrency}
+                onChange={updateNumber(
+                  'webhook',
+                  'taskConcurrency',
+                  draft.webhook.taskConcurrency
+                )}
+              />
+              <span className="field-hint">Hot-applied to queued and future webhook tasks.</span>
             </div>
             <div className="field">
               <label htmlFor="webhook-secret">Webhook secret replacement</label>
