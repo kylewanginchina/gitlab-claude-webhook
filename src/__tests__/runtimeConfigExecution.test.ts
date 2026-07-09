@@ -4,6 +4,7 @@ import type { GitLabWebhookEvent, AIInstruction } from '../types/gitlab';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { simpleGit } from 'simple-git';
 
 const mockQuery = jest.fn();
 const mockGitlabConstructor = jest.fn();
@@ -1023,6 +1024,57 @@ describe('runtime config execution paths', () => {
     );
   });
 
+  it('does not create a branch or merge request for read-only review results even if changes are reported', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'event-review-readonly-'));
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    const createBranch = jest.fn();
+    const createMergeRequest = jest.fn();
+    (processor as any).gitlabService = {
+      createBranch,
+      createMergeRequest,
+    };
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).commitAndPushToNewBranch = jest.fn().mockResolvedValue(undefined);
+
+    const runContext = (processor as any).createRunContext();
+
+    await (processor as any).handleSuccess(
+      event,
+      {
+        command: 'review一下当前MR中的代码修改',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      {
+        success: true,
+        output: 'Review result',
+        changes: [
+          { path: 'src/app.ts', type: 'modified' },
+          { path: '.claude/worktrees/agent-1/src/internal.rs', type: 'created' },
+        ],
+      },
+      'feature/runtime-config',
+      projectPath,
+      runContext,
+      'review'
+    );
+
+    const body = (processor as any).postComment.mock.calls[0]?.[1] as string;
+
+    expect(createBranch).not.toHaveBeenCalled();
+    expect(createMergeRequest).not.toHaveBeenCalled();
+    expect((processor as any).commitAndPushToNewBranch).not.toHaveBeenCalled();
+    expect(body).toContain('Review result');
+    expect(body).toContain('No file changes were made.');
+    expect(body).not.toContain('Changes made');
+    expect(body).not.toContain('Merge request created');
+
+    await fs.rm(projectPath, { recursive: true, force: true });
+  });
+
   it('uses runtime Codex model, base URL, API key, reasoning effort, and default timeout for new executions', async () => {
     const runtimeConfig = createRuntimeConfig({
       codex: {
@@ -1211,6 +1263,20 @@ describe('runtime config execution paths', () => {
     expect(new URL((manager as any).getAuthenticatedUrl(repoUrl)).password).toBe(
       'glpat-updated-token'
     );
+  });
+
+  it('does not report Claude internal worktree files as project changes', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'project-changes-'));
+    await simpleGit(dir).init();
+    await fs.mkdir(path.join(dir, '.claude/worktrees/agent-1/src'), { recursive: true });
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, '.claude/worktrees/agent-1/src/internal.rs'), 'internal');
+    await fs.writeFile(path.join(dir, 'src/app.ts'), 'export const app = true;');
+
+    const manager = new ProjectManager();
+    const changes = await manager.getChangedFiles(dir);
+
+    expect(changes).toEqual([{ path: 'src/app.ts', type: 'created' }]);
   });
 
   it('uses runtime review caps for candidate and final findings', () => {
@@ -1441,6 +1507,46 @@ describe('runtime config execution paths', () => {
     expect(mockReviewService.buildReviewPasses).toHaveBeenCalledWith(
       reviewContext,
       'auth edge cases'
+    );
+  });
+
+  it('runs natural language merge request review requests in read-only review mode', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+
+    const processor = new EventProcessor();
+    const executeWithProvider = jest
+      .spyOn(processor as any, 'executeWithProvider')
+      .mockResolvedValue({ success: true, output: 'Review result', changes: [] });
+    const executeCodeReview = jest
+      .spyOn(processor as any, 'executeCodeReview')
+      .mockResolvedValue(undefined);
+    (processor as any).createProgressComment = jest.fn().mockResolvedValue(101);
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleSuccess = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+    (processor as any).projectManager = {
+      prepareProject: jest.fn().mockResolvedValue('/tmp/project'),
+      cleanup: jest.fn().mockResolvedValue(undefined),
+    };
+
+    await (processor as any).executeInstruction(
+      createMergeRequestEvent(),
+      {
+        command: 'review一下当前MR中的代码修改',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      (processor as any).createRunContext()
+    );
+
+    expect(executeCodeReview).not.toHaveBeenCalled();
+    expect(executeWithProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'claude' }),
+      'review一下当前MR中的代码修改',
+      '/tmp/project',
+      expect.objectContaining({ mode: 'review' }),
+      expect.any(Object)
     );
   });
 

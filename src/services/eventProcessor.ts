@@ -5,7 +5,7 @@ import {
   extractCodeReviewFocus,
 } from '../utils/webhook';
 import logger from '../utils/logger';
-import { ProjectManager } from './projectManager';
+import { ProjectManager, isPublishableChangePath } from './projectManager';
 import { StreamingClaudeExecutor } from './streamingClaudeExecutor';
 import { AIExecutionContext, StreamingProgressCallback } from '../types/common';
 import { CodexExecutor } from './codexExecutor';
@@ -414,6 +414,9 @@ export class EventProcessor {
       instruction.command,
       reviewSettings.allowedCommands
     );
+    const isReadOnlyReviewRequest =
+      !isReviewCommand &&
+      this.isNaturalLanguageMergeRequestReviewRequest(event, instruction.command);
 
     // Determine provider name for messages
     const providerName = (
@@ -435,7 +438,7 @@ export class EventProcessor {
 
     const baseBranch = instruction.branch || event.project.default_branch;
 
-    if (isReviewCommand && !reviewSettings.enabled) {
+    if ((isReviewCommand || isReadOnlyReviewRequest) && !reviewSettings.enabled) {
       const message =
         'Skipped code review: review commands are currently disabled in runtime settings.';
       logger.info(message, {
@@ -486,18 +489,50 @@ export class EventProcessor {
           instruction: instruction.command,
           model: instruction.model,
           timeoutMs: instruction.timeoutMs,
+          ...(isReadOnlyReviewRequest ? { mode: 'review' as const } : {}),
         },
         callback
       );
 
       if (result.success) {
-        await this.handleSuccess(event, instruction, result, baseBranch, projectPath, runContext);
+        await this.handleSuccess(
+          event,
+          instruction,
+          result,
+          baseBranch,
+          projectPath,
+          runContext,
+          isReadOnlyReviewRequest ? 'review' : 'edit'
+        );
       } else {
         await this.handleFailure(event, instruction, result, runContext);
       }
     } finally {
       await this.projectManager.cleanup(projectPath);
     }
+  }
+
+  private isNaturalLanguageMergeRequestReviewRequest(
+    event: GitLabWebhookEvent,
+    command: string
+  ): boolean {
+    if (!event.merge_request) {
+      return false;
+    }
+
+    const trimmedCommand = command.trim();
+    if (!trimmedCommand || trimmedCommand.startsWith('/')) {
+      return false;
+    }
+
+    return this.hasReviewIntent(trimmedCommand);
+  }
+
+  private hasReviewIntent(command: string): boolean {
+    const englishReviewPattern = /(^|[^a-z])(?:code\s+review|review)(?:[^a-z]|$)/i;
+    const chineseReviewPattern = /(代码审查|代码审阅|代码评审|审阅|审查|评审)/;
+
+    return englishReviewPattern.test(command) || chineseReviewPattern.test(command);
   }
 
   private async executeCodeReview(
@@ -971,14 +1006,25 @@ export class EventProcessor {
     result: any,
     baseBranch: string,
     projectPath: string,
-    runContext: EventRunContext
+    runContext: EventRunContext,
+    executionMode: AIExecutionContext['mode'] = 'edit'
   ): Promise<void> {
     const providerName = instruction.provider === 'codex' ? 'Codex' : 'Claude';
+    const changes =
+      executionMode === 'review'
+        ? []
+        : Array.isArray(result.changes)
+          ? result.changes.filter(
+              (change: { path?: unknown }) =>
+                typeof change.path === 'string' && isPublishableChangePath(change.path)
+            )
+          : [];
 
     logger.info(`${providerName} instruction executed successfully`, {
       projectId: event.project.id,
-      hasChanges: result.changes?.length > 0,
+      hasChanges: changes.length > 0,
       provider: instruction.provider,
+      executionMode,
     });
 
     let responseMessage = `**${providerName} processed your request successfully.**\n\n`;
@@ -993,9 +1039,9 @@ export class EventProcessor {
       responseMessage += `${linkedOutput}\n\n`;
     }
 
-    if (result.changes?.length > 0) {
+    if (changes.length > 0) {
       responseMessage += `**Changes made:**\n`;
-      for (const change of result.changes) {
+      for (const change of changes) {
         responseMessage += `- ${change.type}: \`${change.path}\`\n`;
       }
       responseMessage += '\n';
@@ -1016,7 +1062,7 @@ export class EventProcessor {
         const mrInfo = MRGenerator.generateMR({
           instruction: instruction.command,
           context: instruction.context,
-          changes: result.changes,
+          changes,
           projectUrl: event.project.web_url,
         });
 
