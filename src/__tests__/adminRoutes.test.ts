@@ -561,6 +561,69 @@ describe('admin routes', () => {
     expect(response.body.prompt.draft.focus[0]).toContain('Read only the merge request changes');
   });
 
+  it('lists and updates prompt templates', async () => {
+    const app = await buildApp();
+
+    const listed = await request(app)
+      .get('/api/admin/prompt-templates')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(listed.body.templates).toHaveLength(9);
+    expect(listed.body.templates[0]).toMatchObject({
+      id: 'claude.edit.system',
+      provider: 'claude',
+      scope: 'edit',
+      currentVersion: 1,
+    });
+
+    const updated = await request(app)
+      .put('/api/admin/prompt-templates/claude.edit.system')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({
+        label: 'Claude edit system',
+        draft: {
+          body: 'Custom Claude edit prompt.',
+        },
+      })
+      .expect(200);
+
+    expect(updated.body.template.draft.body).toBe('Custom Claude edit prompt.');
+
+    const published = await request(app)
+      .post('/api/admin/prompt-templates/claude.edit.system/publish')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ changelog: 'Custom Claude behavior' })
+      .expect(200);
+
+    expect(published.body.template.currentVersion).toBe(2);
+    expect(published.body.template.versions[1].changelog).toBe('Custom Claude behavior');
+  });
+
+  it('rolls a prompt template back by creating a new published version', async () => {
+    const app = await buildApp();
+
+    await request(app)
+      .put('/api/admin/prompt-templates/codex.edit.instructions')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ draft: { body: 'Temporary Codex behavior.' } })
+      .expect(200);
+    await request(app)
+      .post('/api/admin/prompt-templates/codex.edit.instructions/publish')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ changelog: 'Temporary' })
+      .expect(200);
+
+    const response = await request(app)
+      .post('/api/admin/prompt-templates/codex.edit.instructions/rollback')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ version: 1, changelog: 'Back to default' })
+      .expect(200);
+
+    expect(response.body.template.currentVersion).toBe(3);
+    expect(response.body.template.draft.body).toContain('Make code changes directly');
+  });
+
   it('creates and toggles review skills', async () => {
     const app = await buildApp();
 
@@ -639,6 +702,12 @@ describe('admin routes', () => {
       .set('X-Admin-Key', 'admin-secret')
       .send({ label: 'Missing' })
       .expect(404, { error: 'prompt not found' });
+
+    await request(app)
+      .put('/api/admin/prompt-templates/missing')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({ draft: { body: 'Missing' } })
+      .expect(404, { error: 'prompt template not found' });
 
     await request(app)
       .post('/api/admin/skills')

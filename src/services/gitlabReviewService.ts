@@ -262,7 +262,26 @@ export class GitLabReviewService {
     lines.push('}');
     lines.push('```');
 
-    return lines.join('\n');
+    const defaultPrompt = lines.join('\n');
+    return this.renderPromptTemplate(
+      'review.scoring.template',
+      {
+        reviewScoringPrompt: defaultPrompt,
+        mergeRequestUrl: context.mergeRequestUrl,
+        sourceBranch: context.sourceBranch,
+        targetBranch: context.targetBranch,
+        candidateTitle: finding.title,
+        candidateBody: finding.body,
+        candidatePath: finding.path,
+        candidateLine: finding.line ?? 'unknown',
+        candidateLineType: finding.lineType,
+        candidateCategory: finding.category || 'unknown',
+        candidateSources: finding.sources?.join(', ') || 'single pass',
+        userFocus: userFocus || '',
+        userFocusBlock: userFocus ? `Requested review focus: ${userFocus}` : '',
+      },
+      defaultPrompt
+    );
   }
 
   public parseReviewOutput(output: string, minConfidence = 80): ParsedReviewResult {
@@ -443,6 +462,22 @@ export class GitLabReviewService {
     return lines.join('\n');
   }
 
+  private renderPromptTemplate(
+    id: string,
+    variables: Record<string, unknown>,
+    fallback: string
+  ): string {
+    try {
+      return this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+    } catch (error) {
+      logger.warn('Falling back to built-in review prompt template', {
+        templateId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return fallback;
+    }
+  }
+
   public buildIncompleteReviewMessage(
     headSha: string,
     options: {
@@ -600,7 +635,37 @@ export class GitLabReviewService {
     lines.push('- Include only issues on lines modified by this merge request.');
     lines.push('- If there are no worthwhile issues, return an empty findings array.');
 
-    return lines.join('\n');
+    const defaultPrompt = lines.join('\n');
+    return this.renderPromptTemplate(
+      'review.pass.template',
+      {
+        reviewPassPrompt: defaultPrompt,
+        reviewPassLabel: template.label,
+        reviewPassFocus: template.focus.map((line, index) => `${index + 1}. ${line}`).join('\n'),
+        adminPromptInstructions: template.systemInstructions || '',
+        adminPromptInstructionsBlock: template.systemInstructions
+          ? `\nAdmin prompt instructions:\n${template.systemInstructions}\n\n`
+          : '',
+        adminSkillInstructions: skills
+          .map(skill => `- ${skill.name}: ${skill.systemInstructions}`)
+          .join('\n'),
+        adminSkillInstructionsBlock:
+          skills.length > 0
+            ? `\nAdmin skill instructions:\n${skills
+                .map(skill => `- ${skill.name}: ${skill.systemInstructions}`)
+                .join('\n')}\n\n`
+            : '',
+        mergeRequestUrl: context.mergeRequestUrl,
+        mergeRequestTitle: context.mergeRequestTitle,
+        sourceBranch: context.sourceBranch,
+        targetBranch: context.targetBranch,
+        changedFiles: this.formatChangedFiles(context.diffs),
+        guidelineFiles: this.formatGuidelineFiles(context.claudeGuidelineFiles),
+        userFocus: userFocus || '',
+        userFocusBlock: userFocus ? `\nRequested review focus: ${userFocus}` : '',
+      },
+      defaultPrompt
+    );
   }
 
   private getReviewPassTemplates(): ReviewPassTemplate[] {

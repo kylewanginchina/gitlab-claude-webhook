@@ -67,6 +67,7 @@ import { StreamingClaudeExecutor } from '../services/streamingClaudeExecutor';
 import { CodexExecutor } from '../services/codexExecutor';
 import { GitLabService } from '../services/gitlabService';
 import { ProjectManager } from '../services/projectManager';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import {
   GitLabReviewService,
   PreparedReviewContext,
@@ -325,6 +326,54 @@ describe('runtime config execution paths', () => {
       })
     );
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2460000);
+  });
+
+  it('uses published admin Claude edit system prompt templates for ordinary requests', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-prompt-template-'));
+    const customization = new ReviewCustomizationService({ dataDir });
+    await customization.initialize();
+    await customization.updatePromptTemplate('claude.edit.system', {
+      draft: {
+        body: 'Custom Claude edit behavior from admin.',
+      },
+    });
+    await customization.publishPromptTemplate('claude.edit.system', 'Custom edit behavior');
+
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([
+        {
+          type: 'result',
+          subtype: 'success',
+          result: 'Claude output',
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+        },
+      ])
+    );
+
+    const executor = new StreamingClaudeExecutor(customization);
+    const result = await executor.executeWithStreaming(
+      'Implement the requested change',
+      '/tmp/project',
+      createExecutionContext({ mode: undefined, instruction: 'Implement the requested change' }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          tools: { type: 'preset', preset: 'claude_code' },
+          systemPrompt: expect.objectContaining({
+            append: 'Custom Claude edit behavior from admin.',
+          }),
+        }),
+      })
+    );
+
+    await fs.rm(dataDir, { recursive: true, force: true });
   });
 
   it('continues a normal MR review request with read-only fallback when a validation command is missing', async () => {
@@ -1135,6 +1184,49 @@ describe('runtime config execution paths', () => {
       })
     );
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1020000);
+  });
+
+  it('uses published admin Codex edit instruction templates for ordinary requests', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-prompt-template-'));
+    const customization = new ReviewCustomizationService({ dataDir });
+    await customization.initialize();
+    await customization.updatePromptTemplate('codex.edit.instructions', {
+      draft: {
+        body: 'Custom Codex edit behavior from admin.',
+      },
+    });
+    await customization.publishPromptTemplate('codex.edit.instructions', 'Custom edit behavior');
+
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const mockRunStreamed = jest.fn().mockResolvedValue({
+      events: createAsyncGenerator([
+        {
+          type: 'item.completed',
+          item: {
+            type: 'agent_message',
+            text: 'Codex output',
+          },
+        },
+      ]),
+    });
+    mockCodexConstructor.mockImplementation(() => ({
+      startThread: jest.fn().mockReturnValue({
+        runStreamed: mockRunStreamed,
+      }),
+    }));
+
+    const executor = new CodexExecutor(customization);
+    const result = await executor.executeWithStreaming(
+      'Implement the requested change',
+      '/tmp/project',
+      createExecutionContext({ mode: undefined, instruction: 'Implement the requested change' }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockRunStreamed.mock.calls[0]?.[0]).toContain('Custom Codex edit behavior from admin.');
+
+    await fs.rm(dataDir, { recursive: true, force: true });
   });
 
   it('uses runtime GitLab base URL and token in the service constructor and direct fetch helper', async () => {

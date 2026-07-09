@@ -51,7 +51,7 @@ function isReviewCustomizationValidationError(message: string): boolean {
     return true;
   }
 
-  return /^(prompt|skill|feedback)\.[a-zA-Z0-9.]+ (?:must|is required|is invalid)\b/.test(
+  return /^(prompt|promptTemplate|skill|feedback)\.[a-zA-Z0-9.]+ (?:must|is required|is invalid)\b/.test(
     message
   );
 }
@@ -59,6 +59,8 @@ function isReviewCustomizationValidationError(message: string): boolean {
 function isNotFoundError(message: string): boolean {
   return [
     'prompt not found',
+    'prompt template not found',
+    'prompt template version not found',
     'prompt version not found',
     'skill not found',
     'proposal not found',
@@ -135,6 +137,61 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
 
   router.get('/prompts', (_req, res) => {
     res.json({ prompts: reviewCustomizationService.listPrompts() });
+  });
+
+  router.get('/prompt-templates', (_req, res) => {
+    res.json({ templates: reviewCustomizationService.listPromptTemplates() });
+  });
+
+  router.get('/prompt-templates/:id', (req, res, next) => {
+    try {
+      res.json({ template: reviewCustomizationService.getPromptTemplate(req.params.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put('/prompt-templates/:id', async (req, res, next) => {
+    try {
+      res.json({
+        template: await reviewCustomizationService.updatePromptTemplate(req.params.id, req.body),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/prompt-templates/:id/publish', async (req, res, next) => {
+    try {
+      const changelog = typeof req.body?.changelog === 'string' ? req.body.changelog : undefined;
+      res.json({
+        template: await reviewCustomizationService.publishPromptTemplate(
+          req.params.id,
+          changelog
+        ),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/prompt-templates/:id/rollback', async (req, res, next) => {
+    try {
+      const version = req.body?.version;
+      if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+        throw new Error('promptTemplate.version must be at least 1');
+      }
+      const changelog = typeof req.body?.changelog === 'string' ? req.body.changelog : undefined;
+      res.json({
+        template: await reviewCustomizationService.rollbackPromptTemplate(
+          req.params.id,
+          version,
+          changelog
+        ),
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   router.post('/prompts', async (req, res, next) => {

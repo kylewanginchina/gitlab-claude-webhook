@@ -1,4 +1,49 @@
 export type ReviewPromptProvider = 'claude' | 'codex' | 'coderabbit' | 'any';
+export type PromptTemplateProvider = 'claude' | 'codex' | 'review' | 'shared';
+export type PromptTemplateScope = 'edit' | 'review' | 'context' | 'fallback' | 'pass' | 'scoring';
+
+export interface PromptTemplateDraft {
+  body: string;
+}
+
+export interface PromptTemplateVersion extends PromptTemplateDraft {
+  version: number;
+  createdAt: string;
+  createdBy: string;
+  changelog: string;
+}
+
+export interface PromptTemplate {
+  id: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  provider: PromptTemplateProvider;
+  scope: PromptTemplateScope;
+  currentVersion: number;
+  draft: PromptTemplateDraft;
+  versions: PromptTemplateVersion[];
+  defaultBody: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptTemplatePatch {
+  label?: string;
+  description?: string;
+  enabled?: boolean;
+  provider?: PromptTemplateProvider;
+  scope?: PromptTemplateScope;
+  draft?: Partial<PromptTemplateDraft>;
+}
+
+export interface PublishedPromptTemplate extends PromptTemplateDraft {
+  id: string;
+  label: string;
+  provider: PromptTemplateProvider;
+  scope: PromptTemplateScope;
+  version: number;
+}
 
 export interface ReviewPromptDraft {
   focus: string[];

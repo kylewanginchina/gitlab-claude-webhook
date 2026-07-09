@@ -1,6 +1,8 @@
 import type {
   AdminStatus,
   ConfigUpdateResult,
+  PromptTemplate,
+  PromptTemplatePatch,
   ProviderTestResult,
   PromptOptimizationProposal,
   PublicRuntimeConfig,
@@ -67,6 +69,24 @@ export const api = {
     }),
   testProvider: (provider: 'gitlab' | 'claude' | 'codex') =>
     request<ProviderTestResult>(`/test/${provider}`, { method: 'POST' }),
+  getPromptTemplates: () => request<{ templates: PromptTemplate[] }>('/prompt-templates'),
+  getPromptTemplate: (id: string) =>
+    request<{ template: PromptTemplate }>(`/prompt-templates/${id}`),
+  updatePromptTemplate: (id: string, patch: PromptTemplatePatch) =>
+    request<{ template: PromptTemplate }>(`/prompt-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  publishPromptTemplate: (id: string, changelog: string) =>
+    request<{ template: PromptTemplate }>(`/prompt-templates/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ changelog }),
+    }),
+  rollbackPromptTemplate: (id: string, version: number, changelog: string) =>
+    request<{ template: PromptTemplate }>(`/prompt-templates/${id}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ version, changelog }),
+    }),
   getPrompts: () => request<{ prompts: ReviewPrompt[] }>('/prompts'),
   getPrompt: (id: string) => request<{ prompt: ReviewPrompt }>(`/prompts/${id}`),
   updatePrompt: (id: string, patch: ReviewPromptPatch) =>

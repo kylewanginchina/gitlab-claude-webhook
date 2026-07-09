@@ -55,6 +55,75 @@ describe('ReviewCustomizationService', () => {
     expect(rolledBack.draft.focus[0]).toContain('Read only the merge request changes');
   });
 
+  it('initializes default prompt templates and renders published template variables', async () => {
+    const { service } = await buildService();
+
+    const templates = service.listPromptTemplates();
+
+    expect(templates.map(template => template.id)).toEqual([
+      'claude.edit.system',
+      'claude.review.system',
+      'claude.context.wrapper',
+      'claude.review.fallback',
+      'codex.edit.instructions',
+      'codex.review.instructions',
+      'codex.context.wrapper',
+      'review.pass.template',
+      'review.scoring.template',
+    ]);
+    expect(service.getPromptTemplate('claude.edit.system')).toMatchObject({
+      provider: 'claude',
+      scope: 'edit',
+      currentVersion: 1,
+    });
+
+    await service.updatePromptTemplate('claude.context.wrapper', {
+      draft: {
+        body: 'Context={{context}}\nMode={{mode}}\nRequest={{command}}\nUnknown={{missing}}',
+      },
+    });
+    await service.publishPromptTemplate('claude.context.wrapper', 'Custom wrapper');
+
+    expect(
+      service.renderPromptTemplate(
+        'claude.context.wrapper',
+        {
+          context: 'MR #1',
+          mode: 'edit',
+          command: 'Implement change',
+        },
+        'fallback'
+      )
+    ).toBe('Context=MR #1\nMode=edit\nRequest=Implement change\nUnknown={{missing}}');
+  });
+
+  it('rolls prompt templates back by publishing a new version', async () => {
+    const { service } = await buildService();
+
+    await service.updatePromptTemplate('codex.edit.instructions', {
+      draft: {
+        body: 'Custom Codex edit instructions.',
+      },
+    });
+    const published = await service.publishPromptTemplate(
+      'codex.edit.instructions',
+      'Custom edit instructions'
+    );
+
+    expect(published.currentVersion).toBe(2);
+    expect(published.versions[1]?.body).toBe('Custom Codex edit instructions.');
+
+    const rolledBack = await service.rollbackPromptTemplate(
+      'codex.edit.instructions',
+      1,
+      'Restore default edit instructions'
+    );
+
+    expect(rolledBack.currentVersion).toBe(3);
+    expect(rolledBack.draft.body).toContain('Make code changes directly');
+    expect(rolledBack.versions[2]?.body).toContain('Make code changes directly');
+  });
+
   it('creates and toggles skills', async () => {
     const { service } = await buildService();
 
@@ -119,6 +188,11 @@ describe('ReviewCustomizationService', () => {
     await expect(service.updatePrompt('missing', { label: 'Missing' })).rejects.toThrow(
       'prompt not found'
     );
+    await expect(
+      service.updatePromptTemplate('missing', {
+        draft: { body: 'Missing' },
+      })
+    ).rejects.toThrow('prompt template not found');
     await expect(
       service.createSkill({
         name: '',

@@ -18,11 +18,24 @@ import {
 } from '../types/common';
 import { ProjectManager } from './projectManager';
 import { runtimeConfigService } from '../utils/runtimeConfig';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
+
+const CODEX_EDIT_INSTRUCTIONS =
+  'You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.';
+
+const CODEX_REVIEW_INSTRUCTIONS =
+  'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Focus on identifying real issues in the merge request and return a structured review result.';
+
+const CODEX_CONTEXT_WRAPPER =
+  '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Request:** {{command}}';
 
 export class CodexExecutor {
   private projectManager: ProjectManager;
 
-  constructor() {
+  constructor(
+    private readonly reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService
+  ) {
     this.projectManager = new ProjectManager();
   }
 
@@ -166,29 +179,40 @@ export class CodexExecutor {
   }
 
   private buildPromptWithContext(command: string, context: AIExecutionContext): string {
-    let fullPrompt = '';
-
-    // Add context information if available
-    if (context.context && context.context.trim()) {
-      fullPrompt += `**Context:** ${context.context}\n\n`;
-    }
+    const contextBlock =
+      context.context && context.context.trim() ? `**Context:** ${context.context}\n\n` : '';
 
     // Special handling for MR contexts
     const isMRContext = context.context && context.context.includes('MR #');
-
-    if (isMRContext) {
-      fullPrompt += `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`;
-    }
+    const mrAnalysisBlock = isMRContext
+      ? `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`
+      : '';
 
     // Add automation context
-    if (context.mode === 'review') {
-      fullPrompt += `You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Focus on identifying real issues in the merge request and return a structured review result.\n\n`;
-    } else {
-      fullPrompt += `You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.\n\n`;
-    }
+    const instructionTemplateId =
+      context.mode === 'review' ? 'codex.review.instructions' : 'codex.edit.instructions';
+    const instructions = this.renderPromptTemplate(
+      instructionTemplateId,
+      {},
+      context.mode === 'review' ? CODEX_REVIEW_INSTRUCTIONS : CODEX_EDIT_INSTRUCTIONS
+    );
+    const instructionsBlock = `${instructions}\n\n`;
 
-    // Add the main command/instruction
-    fullPrompt += `**Request:** ${command}`;
+    const fullPrompt = this.renderPromptTemplate(
+      'codex.context.wrapper',
+      {
+        context: context.context || '',
+        contextBlock,
+        mrAnalysisBlock,
+        mode: context.mode || 'edit',
+        instructions,
+        instructionsBlock,
+        command,
+        projectUrl: context.projectUrl,
+        branch: context.branch,
+      },
+      CODEX_CONTEXT_WRAPPER
+    );
 
     logger.debug('Built Codex prompt with context', {
       hasContext: !!context.context,
@@ -198,6 +222,22 @@ export class CodexExecutor {
     });
 
     return fullPrompt;
+  }
+
+  private renderPromptTemplate(
+    id: string,
+    variables: Record<string, unknown>,
+    fallback: string
+  ): string {
+    try {
+      return this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+    } catch (error) {
+      logger.warn('Falling back to built-in Codex prompt template', {
+        templateId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return fallback;
+    }
   }
 
   private extractProgressFromEvent(event: ThreadEvent): string {

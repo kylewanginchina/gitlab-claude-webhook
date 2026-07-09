@@ -14,11 +14,40 @@ import {
 } from '../types/common';
 import { ProjectManager } from './projectManager';
 import { runtimeConfigService } from '../utils/runtimeConfig';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
+
+const CLAUDE_EDIT_SYSTEM_PROMPT =
+  'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.';
+
+const CLAUDE_REVIEW_SYSTEM_PROMPT =
+  'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.';
+
+const CLAUDE_CONTEXT_WRAPPER =
+  '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Request:** {{command}}';
+
+const CLAUDE_STATIC_REVIEW_FALLBACK = [
+  'Continue the merge request review after a build, test, lint, compile, or validation command failed before the review produced findings.',
+  '',
+  'Original request: {{originalCommand}}',
+  '',
+  'Previous validation output:',
+  '```text',
+  '{{previousOutput}}',
+  '```',
+  '',
+  'Treat the failed command as a verification result, not as the end of the review.',
+  'Do not rerun the same failing command.',
+  'Continue with static repository inspection using git diff, git log, Read, Glob, Grep, and narrowly scoped Bash commands that are safe and available.',
+  'Clearly state which validation failed or could not run, then provide the best review findings you can support from static inspection.',
+].join('\n');
 
 export class StreamingClaudeExecutor {
   private projectManager: ProjectManager;
 
-  constructor() {
+  constructor(
+    private readonly reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService
+  ) {
     this.projectManager = new ProjectManager();
   }
 
@@ -206,9 +235,11 @@ export class StreamingClaudeExecutor {
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
-            append: isReviewMode
-              ? 'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.'
-              : 'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+            append: this.renderPromptTemplate(
+              isReviewMode ? 'claude.review.system' : 'claude.edit.system',
+              {},
+              isReviewMode ? CLAUDE_REVIEW_SYSTEM_PROMPT : CLAUDE_EDIT_SYSTEM_PROMPT
+            ),
           },
           env,
           abortController,
@@ -278,27 +309,33 @@ export class StreamingClaudeExecutor {
   }
 
   private buildPromptWithContext(command: string, context: AIExecutionContext): string {
-    let fullPrompt = '';
-
-    // Add context information if available
-    if (context.context && context.context.trim()) {
-      fullPrompt += `**Context:** ${context.context}\n\n`;
-    }
+    const contextBlock =
+      context.context && context.context.trim() ? `**Context:** ${context.context}\n\n` : '';
 
     // Special handling for MR contexts - always explore when it's MR-related
     const isMRContext = context.context && context.context.includes('MR #');
+    const mrAnalysisBlock = isMRContext
+      ? `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`
+      : '';
+    const modeBlock =
+      context.mode === 'review'
+        ? '**Execution Mode:** Review only. Do not edit files, do not create commits, and do not change repository state.\n\n'
+        : '';
 
-    if (isMRContext) {
-      fullPrompt += `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`;
-    }
-
-    if (context.mode === 'review') {
-      fullPrompt +=
-        '**Execution Mode:** Review only. Do not edit files, do not create commits, and do not change repository state.\n\n';
-    }
-
-    // Add the main command/instruction
-    fullPrompt += `**Request:** ${command}`;
+    const fullPrompt = this.renderPromptTemplate(
+      'claude.context.wrapper',
+      {
+        context: context.context || '',
+        contextBlock,
+        mrAnalysisBlock,
+        mode: context.mode || 'edit',
+        modeBlock,
+        command,
+        projectUrl: context.projectUrl,
+        branch: context.branch,
+      },
+      CLAUDE_CONTEXT_WRAPPER
+    );
 
     logger.debug('Built prompt with context', {
       hasContext: !!context.context,
@@ -445,21 +482,30 @@ export class StreamingClaudeExecutor {
     originalCommand: string,
     previousOutput: string
   ): string {
-    return [
-      'Continue the merge request review after a build, test, lint, compile, or validation command failed before the review produced findings.',
-      '',
-      `Original request: ${originalCommand}`,
-      '',
-      'Previous validation output:',
-      '```text',
-      previousOutput.trim().slice(0, 4000),
-      '```',
-      '',
-      'Treat the failed command as a verification result, not as the end of the review.',
-      'Do not rerun the same failing command.',
-      'Continue with static repository inspection using git diff, git log, Read, Glob, Grep, and narrowly scoped Bash commands that are safe and available.',
-      'Clearly state which validation failed or could not run, then provide the best review findings you can support from static inspection.',
-    ].join('\n');
+    return this.renderPromptTemplate(
+      'claude.review.fallback',
+      {
+        originalCommand,
+        previousOutput: previousOutput.trim().slice(0, 4000),
+      },
+      CLAUDE_STATIC_REVIEW_FALLBACK
+    );
+  }
+
+  private renderPromptTemplate(
+    id: string,
+    variables: Record<string, unknown>,
+    fallback: string
+  ): string {
+    try {
+      return this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+    } catch (error) {
+      logger.warn('Falling back to built-in Claude prompt template', {
+        templateId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return fallback;
+    }
   }
 
   private extractProgressFromMessage(message: SDKMessage): string {

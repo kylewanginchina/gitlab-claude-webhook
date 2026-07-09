@@ -81,6 +81,15 @@ textarea.tall {
   min-height: 190px;
 }
 
+textarea.code-area,
+.details-box pre {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 input:focus,
 select:focus,
 textarea:focus,
@@ -308,6 +317,11 @@ button:focus-visible {
   font-size: 13px;
 }
 
+.panel-header.compact {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
 .field-grid {
   display: grid;
   gap: 12px;
@@ -513,6 +527,32 @@ button:focus-visible {
 
 .list-row.align-start {
   align-items: flex-start;
+}
+
+.details-box {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  padding: 10px 12px;
+}
+
+.details-box summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.details-box pre {
+  margin: 10px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.skill-editor {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
 }
 
 .spin {

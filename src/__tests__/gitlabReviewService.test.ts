@@ -114,6 +114,34 @@ describe('GitLabReviewService', () => {
     });
   });
 
+  describe('buildScoringPrompt', () => {
+    it('uses published admin review scoring prompt templates', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-scoring-template-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.updatePromptTemplate('review.scoring.template', {
+        draft: {
+          body: 'Custom score {{candidateTitle}} in {{mergeRequestUrl}}.',
+        },
+      });
+      await customization.publishPromptTemplate('review.scoring.template', 'Custom scoring');
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const prompt = customService.buildScoringPrompt(context, {
+        title: 'Potential regression',
+        body: 'The change may break retry handling.',
+        confidence: 80,
+        path: 'src/a.ts',
+        line: 10,
+        lineType: 'new',
+      });
+
+      expect(prompt).toBe(
+        'Custom score Potential regression in https://gitlab.example.com/group/project/-/merge_requests/2.'
+      );
+    });
+  });
+
   describe('mergeCandidateFindings', () => {
     it('should merge duplicate findings and combine sources', () => {
       const findings: ReviewFinding[] = [
