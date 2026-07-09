@@ -8,6 +8,7 @@ import { GitLabService } from './gitlabService';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { ReviewSkill } from '../admin/reviewCustomizationTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
+import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 
 interface MergeRequestDiff {
   old_path?: string;
@@ -192,7 +193,8 @@ export class GitLabReviewService {
 
   public buildReviewPasses(
     context: PreparedReviewContext,
-    userFocus?: string
+    userFocus?: string,
+    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget()
   ): ReviewPassDefinition[] {
     return this.getReviewPassTemplates().map(template => ({
       id: template.id,
@@ -201,7 +203,8 @@ export class GitLabReviewService {
         context,
         template,
         userFocus,
-        this.getMatchingSkills(context, template.id)
+        this.getMatchingSkills(context, template.id),
+        timeBudget
       ),
     }));
   }
@@ -209,10 +212,13 @@ export class GitLabReviewService {
   public buildScoringPrompt(
     context: PreparedReviewContext,
     finding: ReviewFinding,
-    userFocus?: string
+    userFocus?: string,
+    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget()
   ): string {
     const lines = [
       'Score whether this GitLab merge request review finding is real.',
+      '',
+      `Time budget: hard timeout ${timeBudget.timeoutMinutes} minutes; finish verification by ${timeBudget.softDeadlineMinutes} minutes; reserve ${timeBudget.wrapUpMinutes} minutes to return JSON.`,
       '',
       'You are performing the confidence-scoring stage of a multi-pass code review.',
       'Verify the finding against the merge request diff, relevant CLAUDE.md files, and git history as needed.',
@@ -279,6 +285,7 @@ export class GitLabReviewService {
         candidateSources: finding.sources?.join(', ') || 'single pass',
         userFocus: userFocus || '',
         userFocusBlock: userFocus ? `Requested review focus: ${userFocus}` : '',
+        ...timeBudget,
       },
       defaultPrompt
     );
@@ -559,10 +566,13 @@ export class GitLabReviewService {
     context: PreparedReviewContext,
     template: ReviewPassTemplate,
     userFocus?: string,
-    skills: ReviewSkill[] = []
+    skills: ReviewSkill[] = [],
+    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget()
   ): string {
     const lines = [
       'Provide a GitLab merge request code review.',
+      '',
+      `Time budget: hard timeout ${timeBudget.timeoutMinutes} minutes; finish substantive review by ${timeBudget.softDeadlineMinutes} minutes; reserve ${timeBudget.wrapUpMinutes} minutes to return JSON.`,
       '',
       `Review pass: ${template.label}`,
       ...template.focus.map((line, index) => `${index + 1}. ${line}`),
@@ -663,9 +673,15 @@ export class GitLabReviewService {
         guidelineFiles: this.formatGuidelineFiles(context.claudeGuidelineFiles),
         userFocus: userFocus || '',
         userFocusBlock: userFocus ? `\nRequested review focus: ${userFocus}` : '',
+        ...timeBudget,
       },
       defaultPrompt
     );
+  }
+
+  private getDefaultReviewTimeBudget(): TimeBudget {
+    const runtimeConfig = runtimeConfigService.getConfig();
+    return createTimeBudget(runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000);
   }
 
   private getReviewPassTemplates(): ReviewPassTemplate[] {

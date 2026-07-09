@@ -97,6 +97,52 @@ describe('ReviewCustomizationService', () => {
     ).toBe('Context=MR #1\nMode=edit\nRequest=Implement change\nUnknown={{missing}}');
   });
 
+  it('refreshes unmodified system prompt template defaults when built-in defaults change', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-customization-migrate-'));
+    const oldBody =
+      'You are working in an automated webhook environment in read-only review mode. Return a concise, structured review result.';
+    await fs.mkdir(dataDir, { recursive: true });
+    await fs.writeFile(
+      path.join(dataDir, 'prompt-templates.json'),
+      JSON.stringify(
+        [
+          {
+            id: 'claude.review.system',
+            label: 'Claude review system prompt',
+            description: 'System prompt append used by Claude read-only review tasks.',
+            enabled: true,
+            provider: 'claude',
+            scope: 'review',
+            currentVersion: 1,
+            draft: { body: oldBody },
+            versions: [
+              {
+                body: oldBody,
+                version: 1,
+                createdAt: '2026-07-01T00:00:00.000Z',
+                createdBy: 'system',
+                changelog: 'Initial default prompt template',
+              },
+            ],
+            defaultBody: oldBody,
+            createdAt: '2026-07-01T00:00:00.000Z',
+            updatedAt: '2026-07-01T00:00:00.000Z',
+          },
+        ],
+        null,
+        2
+      )
+    );
+
+    const service = new ReviewCustomizationService({ dataDir });
+    await service.initialize();
+
+    const template = service.getPromptTemplate('claude.review.system');
+    expect(template.defaultBody).toContain('{{timeoutMinutes}}');
+    expect(template.draft.body).toContain('{{timeoutMinutes}}');
+    expect(template.versions[0]?.body).toContain('{{timeoutMinutes}}');
+  });
+
   it('rolls prompt templates back by publishing a new version', async () => {
     const { service } = await buildService();
 

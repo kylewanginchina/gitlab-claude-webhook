@@ -83,6 +83,28 @@ describe('GitLabReviewService', () => {
       expect(bugPass?.prompt).toContain('Prioritize auth bypasses and leaked secrets.');
       expect(guidelinePass?.prompt).not.toContain('Prioritize auth bypasses');
     });
+
+    it('renders timeout budget variables in review pass prompt templates', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-pass-time-budget-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.updatePromptTemplate('review.pass.template', {
+        draft: {
+          body:
+            'Pass {{reviewPassLabel}} budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}.',
+        },
+      });
+      await customization.publishPromptTemplate('review.pass.template', 'Custom pass budget');
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const passes = (customService as any).buildReviewPasses(context, undefined, {
+        timeoutMinutes: 13,
+        softDeadlineMinutes: 10,
+        wrapUpMinutes: 2,
+      });
+
+      expect(passes[0]?.prompt).toBe('Pass CLAUDE.md compliance budget 13/10/2.');
+    });
   });
 
   describe('parseReviewOutput', () => {
@@ -139,6 +161,40 @@ describe('GitLabReviewService', () => {
       expect(prompt).toBe(
         'Custom score Potential regression in https://gitlab.example.com/group/project/-/merge_requests/2.'
       );
+    });
+
+    it('renders timeout budget variables in review scoring prompt templates', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-scoring-time-budget-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.updatePromptTemplate('review.scoring.template', {
+        draft: {
+          body:
+            'Score {{candidateTitle}} with budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}.',
+        },
+      });
+      await customization.publishPromptTemplate('review.scoring.template', 'Custom scoring budget');
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const prompt = (customService as any).buildScoringPrompt(
+        context,
+        {
+          title: 'Potential regression',
+          body: 'The change may break retry handling.',
+          confidence: 80,
+          path: 'src/a.ts',
+          line: 10,
+          lineType: 'new',
+        },
+        undefined,
+        {
+          timeoutMinutes: 13,
+          softDeadlineMinutes: 10,
+          wrapUpMinutes: 2,
+        }
+      );
+
+      expect(prompt).toBe('Score Potential regression with budget 13/10/2.');
     });
   });
 

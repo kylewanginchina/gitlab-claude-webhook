@@ -20,15 +20,16 @@ import { ProjectManager } from './projectManager';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
+import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 
 const CODEX_EDIT_INSTRUCTIONS =
-  'You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.';
+  'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.';
 
 const CODEX_REVIEW_INSTRUCTIONS =
-  'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Focus on identifying real issues in the merge request and return a structured review result.';
+  'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result.';
 
 const CODEX_CONTEXT_WRAPPER =
-  '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Request:** {{command}}';
+  '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}';
 
 export class CodexExecutor {
   private projectManager: ProjectManager;
@@ -98,11 +99,12 @@ export class CodexExecutor {
     context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const fullPrompt = this.buildPromptWithContext(command, context);
     const runtimeConfig = runtimeConfigService.getConfig();
     const model = context.model || runtimeConfig.codex.defaultModel;
     const timeoutMs =
       context.timeoutMs || runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000;
+    const timeBudget = createTimeBudget(timeoutMs);
+    const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
     const reasoningEffort = runtimeConfig.codex.reasoningEffort;
 
     logger.info('Executing Codex via SDK', {
@@ -178,7 +180,11 @@ export class CodexExecutor {
     }
   }
 
-  private buildPromptWithContext(command: string, context: AIExecutionContext): string {
+  private buildPromptWithContext(
+    command: string,
+    context: AIExecutionContext,
+    timeBudget: TimeBudget
+  ): string {
     const contextBlock =
       context.context && context.context.trim() ? `**Context:** ${context.context}\n\n` : '';
 
@@ -193,7 +199,7 @@ export class CodexExecutor {
       context.mode === 'review' ? 'codex.review.instructions' : 'codex.edit.instructions';
     const instructions = this.renderPromptTemplate(
       instructionTemplateId,
-      {},
+      { ...timeBudget },
       context.mode === 'review' ? CODEX_REVIEW_INSTRUCTIONS : CODEX_EDIT_INSTRUCTIONS
     );
     const instructionsBlock = `${instructions}\n\n`;
@@ -210,6 +216,7 @@ export class CodexExecutor {
         command,
         projectUrl: context.projectUrl,
         branch: context.branch,
+        ...timeBudget,
       },
       CODEX_CONTEXT_WRAPPER
     );

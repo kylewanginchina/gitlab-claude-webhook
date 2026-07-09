@@ -119,7 +119,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     provider: 'claude',
     scope: 'edit',
     body:
-      'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+      'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
   },
   {
     id: 'claude.review.system',
@@ -128,7 +128,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     provider: 'claude',
     scope: 'review',
     body:
-      'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.',
+      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. Prefer diff-first review and avoid broad repository exploration. For merge request contexts, use git commands to inspect changes, history, and blame only when needed to validate a concrete concern. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.',
   },
   {
     id: 'claude.context.wrapper',
@@ -136,7 +136,8 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     description: 'Prompt wrapper that combines context, MR hints, execution mode, and request text for Claude.',
     provider: 'claude',
     scope: 'context',
-    body: '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Request:** {{command}}',
+    body:
+      '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}',
   },
   {
     id: 'claude.review.fallback',
@@ -146,6 +147,8 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     scope: 'fallback',
     body: [
       'Continue the merge request review after a build, test, lint, compile, or validation command failed before the review produced findings.',
+      '',
+      'Time budget: hard timeout {{timeoutMinutes}} minutes; finish analysis by {{softDeadlineMinutes}} minutes; reserve {{wrapUpMinutes}} minutes to summarize.',
       '',
       'Original request: {{originalCommand}}',
       '',
@@ -167,7 +170,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     provider: 'codex',
     scope: 'edit',
     body:
-      'You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.',
+      'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.',
   },
   {
     id: 'codex.review.instructions',
@@ -176,7 +179,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     provider: 'codex',
     scope: 'review',
     body:
-      'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Focus on identifying real issues in the merge request and return a structured review result.',
+      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result.',
   },
   {
     id: 'codex.context.wrapper',
@@ -184,7 +187,8 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     description: 'Prompt wrapper that combines context, MR hints, mode instructions, and request text for Codex.',
     provider: 'codex',
     scope: 'context',
-    body: '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Request:** {{command}}',
+    body:
+      '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}',
   },
   {
     id: 'review.pass.template',
@@ -194,6 +198,8 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     scope: 'pass',
     body: [
       'Provide a GitLab merge request code review.',
+      '',
+      'Time budget: hard timeout {{timeoutMinutes}} minutes; finish substantive review by {{softDeadlineMinutes}} minutes; reserve {{wrapUpMinutes}} minutes to return JSON.',
       '',
       'Review pass: {{reviewPassLabel}}',
       '{{reviewPassFocus}}',
@@ -253,6 +259,8 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     scope: 'scoring',
     body: [
       'Score whether this GitLab merge request review finding is real.',
+      '',
+      'Time budget: hard timeout {{timeoutMinutes}} minutes; finish verification by {{softDeadlineMinutes}} minutes; reserve {{wrapUpMinutes}} minutes to return JSON.',
       '',
       'You are performing the confidence-scoring stage of a multi-pass code review.',
       'Verify the finding against the merge request diff, relevant CLAUDE.md files, and git history as needed.',
@@ -882,13 +890,37 @@ export class ReviewCustomizationService {
         continue;
       }
 
-      existing.defaultBody = existing.defaultBody || defaultTemplate.defaultBody;
+      const previousDefaultBody = existing.defaultBody;
+      const onlySystemDefaultVersion =
+        existing.currentVersion === 1 &&
+        Array.isArray(existing.versions) &&
+        existing.versions.length === 1 &&
+        existing.versions[0]?.createdBy === 'system';
+      const draftMatchesPreviousDefault =
+        Boolean(previousDefaultBody) && existing.draft?.body === previousDefaultBody;
+      const versionMatchesPreviousDefault =
+        Boolean(previousDefaultBody) && existing.versions?.[0]?.body === previousDefaultBody;
+
+      existing.defaultBody = defaultTemplate.defaultBody;
       existing.provider = existing.provider || defaultTemplate.provider;
       existing.scope = existing.scope || defaultTemplate.scope;
       existing.versions = Array.isArray(existing.versions) ? existing.versions : [];
       if (existing.versions.length === 0) {
         existing.versions.push(defaultTemplate.versions[0]!);
         existing.currentVersion = 1;
+      } else if (
+        onlySystemDefaultVersion &&
+        draftMatchesPreviousDefault &&
+        versionMatchesPreviousDefault &&
+        previousDefaultBody !== defaultTemplate.defaultBody
+      ) {
+        existing.draft = clone(defaultTemplate.draft);
+        existing.versions[0] = {
+          ...defaultTemplate.versions[0]!,
+          createdAt: existing.versions[0]!.createdAt,
+          changelog: 'Refreshed built-in default prompt template',
+        };
+        existing.updatedAt = now();
       }
       existing.draft = this.sanitizePromptTemplateDraft(
         existing.draft || defaultTemplate.draft,

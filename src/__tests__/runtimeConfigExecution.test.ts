@@ -376,6 +376,54 @@ describe('runtime config execution paths', () => {
     await fs.rm(dataDir, { recursive: true, force: true });
   });
 
+  it('renders timeout budget variables in Claude prompt templates', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-time-budget-template-'));
+    const customization = new ReviewCustomizationService({ dataDir });
+    await customization.initialize();
+    await customization.updatePromptTemplate('claude.review.system', {
+      draft: {
+        body:
+          'Hard timeout {{timeoutMinutes}}m; finish analysis by {{softDeadlineMinutes}}m; reserve {{wrapUpMinutes}}m.',
+      },
+    });
+    await customization.publishPromptTemplate('claude.review.system', 'Custom time budget');
+
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([
+        {
+          type: 'result',
+          subtype: 'success',
+          result: 'Claude output',
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+        },
+      ])
+    );
+
+    const executor = new StreamingClaudeExecutor(customization);
+    const result = await executor.executeWithStreaming(
+      'Review the requested change',
+      '/tmp/project',
+      createExecutionContext({ timeoutMs: 7 * 60 * 1000 }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          systemPrompt: expect.objectContaining({
+            append: 'Hard timeout 7m; finish analysis by 5m; reserve 1m.',
+          }),
+        }),
+      })
+    );
+
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
   it('continues a normal MR review request with read-only fallback when a validation command is missing', async () => {
     const runtimeConfig = createRuntimeConfig({
       claude: {
@@ -1229,6 +1277,50 @@ describe('runtime config execution paths', () => {
     await fs.rm(dataDir, { recursive: true, force: true });
   });
 
+  it('renders timeout budget variables in Codex prompt templates', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-time-budget-template-'));
+    const customization = new ReviewCustomizationService({ dataDir });
+    await customization.initialize();
+    await customization.updatePromptTemplate('codex.context.wrapper', {
+      draft: {
+        body:
+          'Budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}\n{{instructionsBlock}}\n**Request:** {{command}}',
+      },
+    });
+    await customization.publishPromptTemplate('codex.context.wrapper', 'Custom time budget');
+
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const mockRunStreamed = jest.fn().mockResolvedValue({
+      events: createAsyncGenerator([
+        {
+          type: 'item.completed',
+          item: {
+            type: 'agent_message',
+            text: 'Codex output',
+          },
+        },
+      ]),
+    });
+    mockCodexConstructor.mockImplementation(() => ({
+      startThread: jest.fn().mockReturnValue({
+        runStreamed: mockRunStreamed,
+      }),
+    }));
+
+    const executor = new CodexExecutor(customization);
+    const result = await executor.executeWithStreaming(
+      'Review the requested change',
+      '/tmp/project',
+      createExecutionContext({ timeoutMs: 17 * 60 * 1000 }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockRunStreamed.mock.calls[0]?.[0]).toContain('Budget 17/13/3');
+
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
   it('uses runtime GitLab base URL and token in the service constructor and direct fetch helper', async () => {
     const runtimeConfig = createRuntimeConfig({
       gitlab: {
@@ -1497,6 +1589,64 @@ describe('runtime config execution paths', () => {
     expect(mockReviewService.postReview).not.toHaveBeenCalled();
   });
 
+  it('passes timeout budget variables into code review prompt builders', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+
+    const reviewContext = createReviewContext();
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([]),
+      buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn(),
+      postReview: jest.fn(),
+    };
+
+    const processor = new EventProcessor();
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeReviewPass = jest.fn().mockResolvedValue({
+      passId: 'pass-1',
+      label: 'Pass 1',
+      summary: 'No issues',
+      findings: [],
+    });
+
+    const event = createMergeRequestEvent();
+    const instruction: AIInstruction = {
+      command: '/code-review',
+      context: 'MR #2',
+      branch: 'feature/runtime-config',
+      provider: 'claude',
+      timeoutMs: 11 * 60 * 1000,
+    };
+
+    await (processor as any).executeCodeReview(
+      event,
+      instruction,
+      'main',
+      '/tmp/project',
+      createCallback(),
+      (processor as any).createRunContext()
+    );
+
+    expect(mockReviewService.buildReviewPasses).toHaveBeenCalledWith(
+      reviewContext,
+      undefined,
+      expect.objectContaining({
+        timeoutMinutes: 11,
+        softDeadlineMinutes: 8,
+        wrapUpMinutes: 2,
+      })
+    );
+  });
+
   it('skips review commands when runtime review is disabled', async () => {
     const runtimeConfig = createRuntimeConfig({
       review: {
@@ -1598,7 +1748,12 @@ describe('runtime config execution paths', () => {
 
     expect(mockReviewService.buildReviewPasses).toHaveBeenCalledWith(
       reviewContext,
-      'auth edge cases'
+      'auth edge cases',
+      expect.objectContaining({
+        timeoutMinutes: 30,
+        softDeadlineMinutes: 24,
+        wrapUpMinutes: 3,
+      })
     );
   });
 

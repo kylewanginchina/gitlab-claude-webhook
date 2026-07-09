@@ -16,18 +16,21 @@ import { ProjectManager } from './projectManager';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
+import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 
 const CLAUDE_EDIT_SYSTEM_PROMPT =
-  'You are working in an automated webhook environment. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.';
+  'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.';
 
 const CLAUDE_REVIEW_SYSTEM_PROMPT =
-  'You are working in an automated webhook environment in read-only review mode. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. For merge request contexts, use git commands to inspect changes, history, and blame when needed. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.';
+  'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. Prefer diff-first review and avoid broad repository exploration. For merge request contexts, use git commands to inspect changes, history, and blame only when needed to validate a concrete concern. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.';
 
 const CLAUDE_CONTEXT_WRAPPER =
-  '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Request:** {{command}}';
+  '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}';
 
 const CLAUDE_STATIC_REVIEW_FALLBACK = [
   'Continue the merge request review after a build, test, lint, compile, or validation command failed before the review produced findings.',
+  '',
+  'Time budget: hard timeout {{timeoutMinutes}} minutes; finish analysis by {{softDeadlineMinutes}} minutes; reserve {{wrapUpMinutes}} minutes to summarize.',
   '',
   'Original request: {{originalCommand}}',
   '',
@@ -152,11 +155,12 @@ export class StreamingClaudeExecutor {
     context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const fullPrompt = this.buildPromptWithContext(command, context);
     const runtimeConfig = runtimeConfigService.getConfig();
     const model = context.model || runtimeConfig.claude.defaultModel;
     const effort = runtimeConfig.claude.reasoningEffort;
     const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
+    const timeBudget = createTimeBudget(timeoutMs);
+    const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
     const isReviewMode = context.mode === 'review';
 
     const env: Record<string, string> = {
@@ -237,7 +241,7 @@ export class StreamingClaudeExecutor {
             preset: 'claude_code',
             append: this.renderPromptTemplate(
               isReviewMode ? 'claude.review.system' : 'claude.edit.system',
-              {},
+              { ...timeBudget },
               isReviewMode ? CLAUDE_REVIEW_SYSTEM_PROMPT : CLAUDE_EDIT_SYSTEM_PROMPT
             ),
           },
@@ -308,7 +312,11 @@ export class StreamingClaudeExecutor {
     }
   }
 
-  private buildPromptWithContext(command: string, context: AIExecutionContext): string {
+  private buildPromptWithContext(
+    command: string,
+    context: AIExecutionContext,
+    timeBudget: TimeBudget
+  ): string {
     const contextBlock =
       context.context && context.context.trim() ? `**Context:** ${context.context}\n\n` : '';
 
@@ -333,6 +341,7 @@ export class StreamingClaudeExecutor {
         command,
         projectUrl: context.projectUrl,
         branch: context.branch,
+        ...timeBudget,
       },
       CLAUDE_CONTEXT_WRAPPER
     );
@@ -354,7 +363,13 @@ export class StreamingClaudeExecutor {
     context: AIExecutionContext,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const fallbackCommand = this.buildStaticReviewFallbackCommand(originalCommand, previousOutput);
+    const runtimeConfig = runtimeConfigService.getConfig();
+    const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
+    const fallbackCommand = this.buildStaticReviewFallbackCommand(
+      originalCommand,
+      previousOutput,
+      createTimeBudget(timeoutMs)
+    );
 
     try {
       const fallbackResult = await this.runClaudeWithSDK(
@@ -480,13 +495,15 @@ export class StreamingClaudeExecutor {
 
   private buildStaticReviewFallbackCommand(
     originalCommand: string,
-    previousOutput: string
+    previousOutput: string,
+    timeBudget: TimeBudget
   ): string {
     return this.renderPromptTemplate(
       'claude.review.fallback',
       {
         originalCommand,
         previousOutput: previousOutput.trim().slice(0, 4000),
+        ...timeBudget,
       },
       CLAUDE_STATIC_REVIEW_FALLBACK
     );

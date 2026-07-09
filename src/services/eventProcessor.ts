@@ -19,6 +19,7 @@ import {
   ReviewPassResult,
 } from './gitlabReviewService';
 import { runtimeConfigService } from '../utils/runtimeConfig';
+import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 import {
   formatProgressComment,
   inferProgressStatus,
@@ -620,8 +621,15 @@ export class EventProcessor {
       timeoutMs: instruction.timeoutMs,
       mode: 'review' as const,
     };
+    const reviewTimeBudget = createTimeBudget(
+      this.resolveInstructionTimeoutMs(reviewInstruction)
+    );
 
-    const reviewPasses = this.gitlabReviewService.buildReviewPasses(reviewContext, userFocus);
+    const reviewPasses = this.gitlabReviewService.buildReviewPasses(
+      reviewContext,
+      userFocus,
+      reviewTimeBudget
+    );
     await this.updateProgressComment(
       event,
       runContext,
@@ -737,6 +745,7 @@ export class EventProcessor {
           executionContext,
           reviewContext,
           userFocus,
+          reviewTimeBudget,
           callback
         )
     );
@@ -901,10 +910,16 @@ export class EventProcessor {
     executionContext: AIExecutionContext,
     reviewContext: PreparedReviewContext,
     userFocus: string | undefined,
+    timeBudget: TimeBudget,
     callback: StreamingProgressCallback
   ): Promise<ReviewFinding | null> {
     const stageLabel = `Scorer ${index}`;
-    const prompt = this.gitlabReviewService.buildScoringPrompt(reviewContext, finding, userFocus);
+    const prompt = this.gitlabReviewService.buildScoringPrompt(
+      reviewContext,
+      finding,
+      userFocus,
+      timeBudget
+    );
 
     const result = await this.executeWithProvider(
       instruction,
@@ -962,6 +977,17 @@ export class EventProcessor {
     provider: RuntimeConfig['review']['defaultProvider']
   ): AIInstruction['provider'] {
     return provider === 'codex-multipass' ? 'codex' : 'claude';
+  }
+
+  private resolveInstructionTimeoutMs(instruction: AIInstruction): number {
+    if (instruction.timeoutMs) {
+      return instruction.timeoutMs;
+    }
+
+    const runtimeConfig = runtimeConfigService.getConfig();
+    return instruction.provider === 'codex'
+      ? runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000
+      : runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
   }
 
   private async runWithConcurrency<T, R>(
