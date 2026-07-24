@@ -15,8 +15,10 @@ import {
 import { ProjectManager } from './projectManager';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import type { RuntimeConfig } from '../admin/adminTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
+import { createClaudeExecutionEnvironment } from '../utils/providerEnvironment';
 
 const CLAUDE_EDIT_SYSTEM_PROMPT =
   'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.';
@@ -61,6 +63,8 @@ export class StreamingClaudeExecutor {
     callback: StreamingProgressCallback
   ): Promise<ProcessResult> {
     try {
+      const runtimeConfig = runtimeConfigService.getConfig();
+
       logger.info('Starting streaming Claude execution via SDK', {
         command: command.substring(0, 100),
         projectPath,
@@ -74,7 +78,13 @@ export class StreamingClaudeExecutor {
       let result: { output: string; error?: string };
       let usedStaticReviewFallback = false;
       try {
-        result = await this.runClaudeWithSDK(command, projectPath, context, callback);
+        result = await this.runClaudeWithSDK(
+          command,
+          projectPath,
+          context,
+          runtimeConfig,
+          callback
+        );
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (!this.shouldContinueWithStaticReview(command, context, errorMessage, true)) {
@@ -93,6 +103,7 @@ export class StreamingClaudeExecutor {
           errorMessage,
           projectPath,
           context,
+          runtimeConfig,
           callback
         );
         usedStaticReviewFallback = true;
@@ -111,6 +122,7 @@ export class StreamingClaudeExecutor {
           result.output,
           projectPath,
           context,
+          runtimeConfig,
           callback
         );
         usedStaticReviewFallback = true;
@@ -153,9 +165,9 @@ export class StreamingClaudeExecutor {
     command: string,
     projectPath: string,
     context: AIExecutionContext,
+    runtimeConfig: RuntimeConfig,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const runtimeConfig = runtimeConfigService.getConfig();
     const model = context.model || runtimeConfig.claude.defaultModel;
     const effort = runtimeConfig.claude.reasoningEffort;
     const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
@@ -163,15 +175,10 @@ export class StreamingClaudeExecutor {
     const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
     const isReviewMode = context.mode === 'review';
 
-    const env: Record<string, string> = {
-      ...Object.fromEntries(
-        Object.entries(process.env).filter(
-          (entry): entry is [string, string] => entry[1] !== undefined
-        )
-      ),
-      ANTHROPIC_BASE_URL: runtimeConfig.claude.baseUrl,
-      ANTHROPIC_API_KEY: runtimeConfig.claude.authToken,
-    };
+    const env = createClaudeExecutionEnvironment(
+      runtimeConfig.claude.authToken,
+      runtimeConfig.claude.baseUrl
+    );
 
     logger.info('Executing Claude via Agent SDK', {
       model,
@@ -361,9 +368,9 @@ export class StreamingClaudeExecutor {
     previousOutput: string,
     projectPath: string,
     context: AIExecutionContext,
+    runtimeConfig: RuntimeConfig,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const runtimeConfig = runtimeConfigService.getConfig();
     const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
     const fallbackCommand = this.buildStaticReviewFallbackCommand(
       originalCommand,
@@ -380,6 +387,7 @@ export class StreamingClaudeExecutor {
           instruction: fallbackCommand,
           mode: 'review',
         },
+        runtimeConfig,
         callback
       );
 

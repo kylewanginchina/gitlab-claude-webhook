@@ -271,6 +271,15 @@ describe('runtime config execution paths', () => {
   });
 
   it('uses runtime Claude model, base URL, auth token, reasoning effort, and default timeout for new executions', async () => {
+    const previousClaudeEnvironment = {
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    };
+    process.env.ANTHROPIC_AUTH_TOKEN = 'anthropic-stale-auth-token';
+    process.env.ANTHROPIC_API_KEY = 'anthropic-stale-api-key';
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'claude-stale-oauth-token';
+
     const runtimeConfig = createRuntimeConfig({
       claude: {
         defaultModel: 'claude-runtime-model',
@@ -305,26 +314,37 @@ describe('runtime config execution paths', () => {
     const executor = new StreamingClaudeExecutor();
     const callback = createCallback();
 
-    const result = await executor.executeWithStreaming(
-      'Summarize the diff',
-      '/tmp/project',
-      createExecutionContext(),
-      callback
-    );
+    let result;
+    try {
+      result = await executor.executeWithStreaming(
+        'Summarize the diff',
+        '/tmp/project',
+        createExecutionContext(),
+        callback
+      );
+    } finally {
+      for (const [key, value] of Object.entries(previousClaudeEnvironment)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
 
     expect(result.success).toBe(true);
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.objectContaining({
-          model: 'claude-runtime-model',
-          effort: 'max',
-          env: expect.objectContaining({
-            ANTHROPIC_BASE_URL: 'https://claude.runtime.example',
-            ANTHROPIC_API_KEY: 'anthropic-runtime-token',
-          }),
-        }),
-      })
+    const claudeOptions = mockQuery.mock.calls[0][0].options;
+    const claudeEnvironment = claudeOptions.env;
+    expect(claudeOptions.model).toBe('claude-runtime-model');
+    expect(claudeOptions.effort).toBe('max');
+    expect(claudeEnvironment.ANTHROPIC_BASE_URL).toBe(
+      'https://claude.runtime.example'
     );
+    expect(claudeEnvironment.ANTHROPIC_AUTH_TOKEN).toBe(
+      'anthropic-runtime-token'
+    );
+    expect(claudeEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(claudeEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2460000);
   });
 
@@ -432,7 +452,17 @@ describe('runtime config execution paths', () => {
         authToken: 'anthropic-runtime-token',
       },
     });
-    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+    const updatedRuntimeConfig = createRuntimeConfig({
+      claude: {
+        defaultModel: 'claude-updated-model',
+        baseUrl: 'https://claude.updated.example',
+        authToken: 'anthropic-updated-token',
+      },
+    });
+    const getConfigSpy = jest
+      .spyOn(runtimeConfigService, 'getConfig')
+      .mockReturnValueOnce(runtimeConfig)
+      .mockReturnValue(updatedRuntimeConfig);
     jest.spyOn(ProjectManager.prototype, 'getChangedFiles').mockResolvedValue([]);
 
     mockQuery
@@ -473,7 +503,14 @@ describe('runtime config execution paths', () => {
     );
 
     expect(result.success).toBe(true);
+    expect(getConfigSpy).toHaveBeenCalledTimes(1);
     expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery.mock.calls[0][0].options.env.ANTHROPIC_AUTH_TOKEN).toBe(
+      'anthropic-runtime-token'
+    );
+    expect(mockQuery.mock.calls[1][0].options.env.ANTHROPIC_AUTH_TOKEN).toBe(
+      'anthropic-runtime-token'
+    );
     expect(mockQuery).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -1173,6 +1210,15 @@ describe('runtime config execution paths', () => {
   });
 
   it('uses runtime Codex model, base URL, API key, reasoning effort, and default timeout for new executions', async () => {
+    const previousCodexEnvironment = {
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      CODEX_API_KEY: process.env.CODEX_API_KEY,
+      CODEX_ACCESS_TOKEN: process.env.CODEX_ACCESS_TOKEN,
+    };
+    process.env.OPENAI_API_KEY = 'openai-stale-api-key';
+    process.env.CODEX_API_KEY = 'codex-stale-api-key';
+    process.env.CODEX_ACCESS_TOKEN = 'codex-stale-access-token';
+
     const runtimeConfig = createRuntimeConfig({
       codex: {
         defaultModel: 'codex-runtime-model',
@@ -1182,9 +1228,21 @@ describe('runtime config execution paths', () => {
         defaultTimeoutMinutes: 17,
       },
     });
-    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig);
+    const updatedRuntimeConfig = createRuntimeConfig({
+      codex: {
+        defaultModel: 'codex-updated-model',
+        baseUrl: 'https://codex.updated.example/v1',
+        apiKey: 'openai-updated-key',
+        reasoningEffort: 'high',
+        defaultTimeoutMinutes: 23,
+      },
+    });
+    let activeRuntimeConfig = runtimeConfig;
+    const getConfigSpy = jest
+      .spyOn(runtimeConfigService, 'getConfig')
+      .mockImplementation(() => activeRuntimeConfig);
     const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
-    const mockRunStreamed = jest.fn().mockResolvedValue({
+    const mockRunStreamed = jest.fn().mockImplementation(async () => ({
       events: createAsyncGenerator([
         { type: 'thread.started' },
         {
@@ -1202,7 +1260,7 @@ describe('runtime config execution paths', () => {
           },
         },
       ]),
-    });
+    }));
     const mockStartThread = jest.fn().mockReturnValue({
       runStreamed: mockRunStreamed,
     });
@@ -1212,26 +1270,75 @@ describe('runtime config execution paths', () => {
 
     const executor = new CodexExecutor();
     const callback = createCallback();
+    (callback.onProgress as jest.Mock).mockImplementation(async () => {
+      activeRuntimeConfig = updatedRuntimeConfig;
+    });
 
-    const result = await executor.executeWithStreaming(
-      'Implement the change',
-      '/tmp/project',
-      createExecutionContext(),
-      callback
-    );
+    let result;
+    let updatedResult;
+    try {
+      result = await executor.executeWithStreaming(
+        'Implement the change',
+        '/tmp/project',
+        createExecutionContext(),
+        callback
+      );
+      updatedResult = await executor.executeWithStreaming(
+        'Implement the next change',
+        '/tmp/project',
+        createExecutionContext(),
+        callback
+      );
+    } finally {
+      for (const [key, value] of Object.entries(previousCodexEnvironment)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
 
     expect(result.success).toBe(true);
-    expect(mockCodexConstructor).toHaveBeenCalledWith({
-      apiKey: 'openai-runtime-key',
-      baseUrl: 'https://codex.runtime.example/v1',
+    expect(updatedResult.success).toBe(true);
+    expect(getConfigSpy).toHaveBeenCalledTimes(2);
+    const codexOptions = mockCodexConstructor.mock.calls[0][0];
+    expect(codexOptions.apiKey).toBe('openai-runtime-key');
+    expect(codexOptions.baseUrl).toBe('https://codex.runtime.example/v1');
+    expect(codexOptions.config).toEqual({
+      model_provider: 'gitlab_webhook_runtime',
+      model_providers: {
+        gitlab_webhook_runtime: {
+          name: 'gitlab_webhook_runtime',
+          base_url: 'https://codex.runtime.example/v1',
+          wire_api: 'responses',
+          env_key: 'OPENAI_API_KEY',
+        },
+      },
     });
+    const codexEnvironment = codexOptions.env;
+    expect(codexEnvironment.OPENAI_API_KEY).toBe('openai-runtime-key');
+    expect(codexEnvironment.CODEX_API_KEY).toBe('openai-runtime-key');
+    expect(codexEnvironment.CODEX_ACCESS_TOKEN).toBeUndefined();
+    const updatedCodexOptions = mockCodexConstructor.mock.calls[1][0];
+    expect(updatedCodexOptions.apiKey).toBe('openai-updated-key');
+    expect(updatedCodexOptions.baseUrl).toBe('https://codex.updated.example/v1');
+    expect(updatedCodexOptions.env.OPENAI_API_KEY).toBe('openai-updated-key');
+    expect(updatedCodexOptions.env.CODEX_API_KEY).toBe('openai-updated-key');
     expect(mockStartThread).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'codex-runtime-model',
         modelReasoningEffort: 'medium',
       })
     );
+    expect(mockStartThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'codex-updated-model',
+        modelReasoningEffort: 'high',
+      })
+    );
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1020000);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1380000);
   });
 
   it('uses published admin Codex edit instruction templates for ordinary requests', async () => {

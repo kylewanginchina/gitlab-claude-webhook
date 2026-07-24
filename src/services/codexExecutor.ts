@@ -19,8 +19,10 @@ import {
 import { ProjectManager } from './projectManager';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import type { RuntimeConfig } from '../admin/adminTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
+import { createCodexExecutionEnvironment } from '../utils/providerEnvironment';
 
 const CODEX_EDIT_INSTRUCTIONS =
   'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.';
@@ -47,6 +49,8 @@ export class CodexExecutor {
     callback: StreamingProgressCallback
   ): Promise<ProcessResult> {
     try {
+      const runtimeConfig = runtimeConfigService.getConfig();
+
       logger.info('Starting streaming Codex execution via SDK', {
         command: command.substring(0, 100),
         projectPath,
@@ -58,7 +62,13 @@ export class CodexExecutor {
       await callback.onProgress('🚀 Codex is analyzing your request...', false);
 
       // Execute codex command with streaming via SDK
-      const result = await this.runCodexWithSDK(command, projectPath, context, callback);
+      const result = await this.runCodexWithSDK(
+        command,
+        projectPath,
+        context,
+        runtimeConfig,
+        callback
+      );
 
       // Check for file changes
       const changes = context.mode === 'review' ? [] : await this.getFileChanges(projectPath);
@@ -97,9 +107,9 @@ export class CodexExecutor {
     command: string,
     projectPath: string,
     context: AIExecutionContext,
+    runtimeConfig: RuntimeConfig,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const runtimeConfig = runtimeConfigService.getConfig();
     const model = context.model || runtimeConfig.codex.defaultModel;
     const timeoutMs =
       context.timeoutMs || runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000;
@@ -119,6 +129,18 @@ export class CodexExecutor {
     const codex = new (sdk.Codex || sdk.default?.Codex || sdk.default || sdk)({
       apiKey: runtimeConfig.codex.apiKey,
       baseUrl: runtimeConfig.codex.baseUrl,
+      env: createCodexExecutionEnvironment(runtimeConfig.codex.apiKey),
+      config: {
+        model_provider: 'gitlab_webhook_runtime',
+        model_providers: {
+          gitlab_webhook_runtime: {
+            name: 'gitlab_webhook_runtime',
+            base_url: runtimeConfig.codex.baseUrl,
+            wire_api: 'responses',
+            env_key: 'OPENAI_API_KEY',
+          },
+        },
+      },
     });
 
     // Start a thread with full-auto equivalent settings
