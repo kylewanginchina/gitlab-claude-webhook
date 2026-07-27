@@ -6,14 +6,14 @@
 cp .env.example .env
 ```
 
-启动时必须提供 `GITLAB_TOKEN`、`WEBHOOK_SECRET`，并至少提供 `ANTHROPIC_AUTH_TOKEN` 或 `OPENAI_API_KEY` 之一。`ADMIN_TOKEN` 用于访问管理页面和管理 API，应使用足够长的随机值。
+启动时必须提供 `GITLAB_TOKEN`、`WEBHOOK_SECRET`，并至少提供 `ANTHROPIC_AUTH_TOKEN` 或 `OPENAI_API_KEY` 之一。静态 `/admin` SPA 可以直接加载；SPA 的数据操作访问 `/api/admin/*`，这些管理 API 通过请求头 `X-Admin-Key` 与 `ADMIN_TOKEN` 认证。未配置 `ADMIN_TOKEN` 时管理 API 返回 `503`，认证 key 错误时返回 `401`。`ADMIN_TOKEN` 应使用足够长的随机值。
 
 ## 管理认证与数据目录
 
-| 变量          | 默认值                                | 允许值       | 用途                                                    |
-| ------------- | ------------------------------------- | ------------ | ------------------------------------------------------- |
-| `ADMIN_TOKEN` | 无                                    | 非空字符串   | 管理页面 `/admin` 与管理 API 的认证令牌。               |
-| `DATA_DIR`    | `data`（Docker 镜像中为 `/app/data`） | 可写目录路径 | 持久化 `runtime-config.json` 及 Review 配置数据的目录。 |
+| 变量          | 默认值                                | 允许值       | 用途                                                              |
+| ------------- | ------------------------------------- | ------------ | ----------------------------------------------------------------- |
+| `ADMIN_TOKEN` | 无                                    | 非空字符串   | `/api/admin/*` 管理 API 的认证令牌；不用于保护静态 `/admin` SPA。 |
+| `DATA_DIR`    | `data`（Docker 镜像中为 `/app/data`） | 可写目录路径 | 持久化 `runtime-config.json` 及 Review 配置数据的目录。           |
 
 ## GitLab 与 Webhook
 
@@ -110,7 +110,7 @@ DeepFlow overlay 是供 AI Review 执行常见 DeepFlow 编译和验证命令的
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
-./scripts/verify-deepflow-image-files.sh
+bash scripts/verify-deepflow-image-files.sh
 ```
 
 | 变量                              | 默认值                                                                | 用途                     |
