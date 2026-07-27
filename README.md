@@ -1,409 +1,201 @@
-# GitLab Claude Webhook Service 🚀
+# GitLab Claude Webhook Service
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kylewanginchina/gitlab-claude-webhook)
-[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/kylewanginchina/gitlab-claude-webhook)
 [![CI](https://github.com/kylewanginchina/gitlab-claude-webhook/actions/workflows/ci.yml/badge.svg)](https://github.com/kylewanginchina/gitlab-claude-webhook/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A robust webhook service that integrates GitLab with AI-powered code assistants (Claude Agent SDK and OpenAI Codex SDK), enabling AI-powered code assistance directly from GitLab issues, merge requests, and comments.
+面向 GitLab Issue、Merge Request（MR）及其评论的 AI Webhook 服务。它通过 Claude Agent SDK 和 OpenAI Codex SDK 执行任务，将处理进度、审查结论或代码变更反馈到 GitLab。
 
-## ✨ Features
+## 功能总览
 
-- **GitLab Integration**: Receives webhook events from GitLab for issues, merge requests, and comments
-- **Multi-Provider AI Processing**: Supports both Claude Code (`@claude`) and OpenAI Codex (`@codex`) with automatic provider detection
-- **Model Selection**: Optionally specify models with `@claude[model=xxx]` or `@codex[model=xxx]` syntax
-- **Secure Webhook Verification**: Validates webhook signatures to ensure security
-- **Branch-aware Processing**: Automatically creates new branches for AI changes with merge request workflow
-- **Automatic Code Changes**: Commits and pushes changes made by AI back to the repository
-- **Smart Merge Requests**: Creates professional MRs with conventional commit titles and structured descriptions
-- **Real-time Feedback**: Posts results and errors as comments back to GitLab
+- 使用 `@claude` 或 `@codex` 显式选择 Claude Agent SDK 或 OpenAI Codex SDK。
+- 在 mention 后使用 `[model=...,timeout=...]` 覆盖模型与任务超时；`timeout` 的单位为分钟。
+- 普通指令按 edit 模式执行；仅有效文件变更才会创建分支并发起 MR。
+- MR 上的自然语言 review 请求以只读模式执行，使用 mention 指定的 provider，不修改工作区或 Git 状态。
+- `@claude /code-review` 与 `@codex /code-review` 执行多轮 GitLab MR 审查，可附加关注点；该命令只支持 MR。
+- 默认全局并发为 2；同一 MR 或 Issue 串行，不同资源可并行执行。
+- Webhook 立即返回已入队响应；排队任务会发布队列评论，执行期间持续更新带起始时间和耗时的进度评论。
+- 审查结果可生成源码行链接并发布为 GitLab 行内讨论。
+- `/admin` 提供运行时配置与审查定制入口：Prompt Template、Review Prompt、Skill、Feedback 和 Proposal。
+- 运行时配置持久化保存，凭据按 provider 隔离；管理页面的新配置会由后续任务直接读取。
+- 可选使用包含 DeepFlow 工具链的容器镜像，以在任务中运行所需的构建或验证工具。
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 前置条件
 
-- Node.js 18+ or Docker
-- GitLab project with webhook access
-- Anthropic API key (for Claude) and/or OpenAI API key (for Codex)
-- GitLab API token
+- Node.js 18+ 或 Docker。
+- 可配置 Webhook 的 GitLab 项目。
+- GitLab API Token。
+- 至少一个 provider 的凭据：Claude 使用 Anthropic Token，Codex 使用 OpenAI API Key。
 
-### Installation
-
-1. Clone the repository:
+### 配置
 
 ```bash
 git clone <repository-url>
 cd gitlab-claude-webhook
-```
-
-2. Copy environment configuration:
-
-```bash
 cp .env.example .env
 ```
 
-3. Configure environment variables in `.env`:
+在 `.env` 中填写至少以下值：
 
 ```bash
-# Claude API Configuration
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_AUTH_TOKEN=sk-your-anthropic-token
-
-# OpenAI/Codex API Configuration (optional, for Codex provider)
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_API_KEY=sk-proj-your-openai-key
-
-# AI Provider Configuration (optional, all have defaults)
-AI_DEFAULT_PROVIDER=claude
-CLAUDE_DEFAULT_MODEL=claude-sonnet-4-20250514
-CLAUDE_REASONING_EFFORT=high
-CODEX_DEFAULT_MODEL=gpt-5.1-codex-max
-CODEX_REASONING_EFFORT=high
-
-# GitLab Configuration
-GITLAB_BASE_URL=https://gitlab.com
+ANTHROPIC_AUTH_TOKEN=your-anthropic-token
+OPENAI_API_KEY=your-openai-key
 GITLAB_TOKEN=glpat-your-gitlab-token
-
-# Webhook Configuration
 WEBHOOK_SECRET=your-webhook-secret
-PORT=3000
-
-# Working Directory
-WORK_DIR=/tmp/gitlab-claude-work
-
-# Logging
-LOG_LEVEL=info
+ADMIN_TOKEN=change-me-admin-token
 ```
 
-### Running with Docker (Recommended)
+只使用一个 provider 时，可省略另一个 provider 的凭据。随后在 GitLab 项目中将 Webhook URL 设置为 `http://<host>:3000/webhook`，并启用 Issue、Merge request 和 Comment 事件。Token 需要 `api`、`read_repository` 与 `write_repository` 权限。
+
+完整的 GitLab 配置说明见 [docs/gitlab-setup.md](docs/gitlab-setup.md)，环境变量说明见 [docs/CONFIG.md](docs/CONFIG.md)。
+
+### 启动
+
+本地运行：
 
 ```bash
-# Build and run with Docker Compose
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-```
-
-### Optional DeepFlow Build-Tool Image
-
-The default Docker image stays small and includes only the tools needed by normal webhook and review workflows. If you want `@claude`/`@codex` review tasks to run DeepFlow compile or validation commands inside the webhook container, use the optional DeepFlow image profile:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
-docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
-```
-
-The DeepFlow profile is Debian-based and adds current stable Rust/Cargo via rustup, Go, protobuf, Clang/LLVM, `libpcap`, `libelf`, `libbpf`, `make`, `pkg-config`, and related build tools. It also mounts named caches for Cargo, Go, npm, and DeepFlow scratch work so repeated reviews do not redownload everything. It is intended for automated review validation; for release-grade DeepFlow builds, keep using DeepFlow's official build images and scripts.
-
-Verify the active container:
-
-```bash
-docker exec gitlab-claude-webhook sh -lc 'node --version && npm --version && cargo --version && rustc --version && go version && protoc --version && clang --version | head -n 1 && make --version | head -n 1 && pkg-config --version'
-```
-
-### Running Locally
-
-```bash
-# Install dependencies
 npm install
-
-# Build the project
 npm run build
-
-# Start the service
-# Note: must run with non-root privilege, as required by the AI SDKs' permission bypass mode
 npm start
-
-# For development with hot reload
-# Note: must run with non-root privilege, as required by the AI SDKs' permission bypass mode
-npm run dev
 ```
 
-## GitLab Configuration
+开发模式使用 `npm run dev`。AI SDK 的权限绕过模式要求以非 root 用户运行。
 
-For detailed GitLab setup instructions, including webhook configuration, token permissions, and troubleshooting, see:
-
-📋 **[Complete GitLab Setup Guide](docs/gitlab-setup.md)**
-
-### Quick Setup Summary
-
-1. **Create GitLab Token**: Generate a personal or project access token with `api`, `read_repository`, and `write_repository` scopes
-2. **Configure Webhook**: Add webhook to your project with URL `http://your-domain:3000/webhook` and secret token
-3. **Set Trigger Events**: Enable Issues events, Merge request events, and Comments
-4. **Test Integration**: Create an issue with `@claude` mention to verify setup
-
-## Usage
-
-### In GitLab Issues
-
-Create or comment on an issue with:
-
-```
-@claude Please help me optimize this function in src/utils/helper.js
-```
-
-Or use Codex:
-
-```
-@codex Please help me optimize this function in src/utils/helper.js
-```
-
-### In Merge Requests
-
-Add to MR description or comment:
-
-```
-@claude Review the security implications of these changes and suggest improvements
-```
-
-### Model Selection
-
-Specify a specific model:
-
-```
-@claude[model=claude-sonnet-4-20250514] Fix the TypeScript errors in the authentication module
-```
-
-```
-@codex[model=gpt-5.1-codex-max] Refactor this function for better performance
-```
-
-### Advanced Usage
-
-You can provide specific instructions:
-
-```
-@claude
-- Fix the TypeScript errors in the authentication module
-- Add proper error handling
-- Update the unit tests accordingly
-```
-
-## How It Works
-
-1. **Webhook Reception**: Service receives GitLab webhook events
-2. **Signature Verification**: Validates webhook authenticity using secret
-3. **Content Analysis**: Scans for `@claude` mentions in issues/MRs/comments
-4. **Project Preparation**: Clones the GitLab project to a temporary directory
-5. **Branch Management**: Creates timestamp-based branch for Claude changes
-6. **AI Execution**: Runs AI via official SDKs with the extracted instructions
-7. **Change Handling**: Commits and pushes any code changes made by Claude
-8. **Smart MR Creation**: Automatically creates merge requests with conventional commit format
-9. **Feedback**: Posts results or errors as comments back to GitLab
-
-## Integration Example
-
-Here's what the GitLab integration looks like in action when you use `@claude` mentions:
-
-![GitLab Claude Integration Example](docs/images/gitlab-integration-example.png)
-
-The screenshot shows the complete workflow:
-
-1. **Request**: User creates an issue or comment with `@claude` mention and specific instructions
-2. **Instant Reply**: Service immediately acknowledges the request and starts processing
-3. **Final Reply**: Claude processes the request, makes the necessary changes, and creates a merge request with detailed information about what was modified
-
-The service automatically:
-
-- Creates a timestamped branch for the changes
-- Executes the AI SDK with the provided instructions
-- Commits and pushes any code modifications
-- Generates a professional merge request with conventional commit format
-- Provides a direct link to review and merge the changes
-
-## API Endpoints
-
-- `GET /` - Service information
-- `GET /health` - Health check endpoint
-- `POST /webhook` - GitLab webhook receiver
-
-## Configuration
-
-For detailed configuration instructions including environment variable expansion, Docker setup, and troubleshooting, see:
-
-📋 **[Environment Configuration Guide](docs/CONFIG.md)**
-
-### Admin Console
-
-The service includes an authenticated admin console at `/admin` for runtime configuration, masked secret visibility, provider status checks, review prompt management, review skill management, and feedback-driven prompt proposals.
-
-Set `ADMIN_TOKEN` before enabling the console in production. Runtime settings are stored in `${DATA_DIR}/runtime-config.json` and are initialized from environment variables on first startup. Prompt, skill, feedback, and proposal data are stored in JSON files under `${DATA_DIR}`.
-
-See [Admin Console Guide](docs/admin-console.md).
-
-### Environment Variables
-
-**Core Required:**
-
-| Variable         | Description               |
-| ---------------- | ------------------------- |
-| `GITLAB_TOKEN`   | GitLab API token          |
-| `WEBHOOK_SECRET` | Webhook validation secret |
-
-**AI Provider Required (based on usage):**
-
-| Variable               | Description                |
-| ---------------------- | -------------------------- |
-| `ANTHROPIC_AUTH_TOKEN` | Required when using Claude |
-| `OPENAI_API_KEY`       | Required when using Codex  |
-
-**Optional (all have defaults):**
-
-| Variable                 | Description              | Default                     |
-| ------------------------ | ------------------------ | --------------------------- |
-| `AI_DEFAULT_PROVIDER`    | Default AI provider      | `claude`                    |
-| `ANTHROPIC_BASE_URL`     | Anthropic API base URL   | `https://api.anthropic.com` |
-| `OPENAI_BASE_URL`        | OpenAI API base URL      | `https://api.openai.com/v1` |
-| `CLAUDE_DEFAULT_MODEL`   | Default model for Claude | `claude-sonnet-4-20250514`  |
-| `CLAUDE_REASONING_EFFORT` | Claude reasoning level   | `high`                      |
-| `CODEX_DEFAULT_MODEL`    | Default model for Codex  | `gpt-5.1-codex-max`         |
-| `CODEX_REASONING_EFFORT` | Codex reasoning level    | `high`                      |
-| `GITLAB_BASE_URL`        | GitLab instance URL      | `https://gitlab.com`        |
-| `PORT`                   | Server port              | `3000`                      |
-| `WORK_DIR`               | Temporary work directory | `/tmp/gitlab-claude-work`   |
-| `LOG_LEVEL`              | Logging level            | `info`                      |
-
-### Codex Custom Provider Configuration
-
-Codex configuration is **automatically generated** from environment variables at container startup. No manual `config.toml` file is needed.
-
-**Environment variables for Codex config:**
-
-| Variable                 | Description      | Default                     |
-| ------------------------ | ---------------- | --------------------------- |
-| `OPENAI_BASE_URL`        | API endpoint URL | `https://api.openai.com/v1` |
-| `OPENAI_API_KEY`         | API key          | Required for Codex          |
-| `CODEX_DEFAULT_MODEL`    | Model name       | `gpt-5.1-codex-max`         |
-| `CODEX_REASONING_EFFORT` | Reasoning level  | `high`                      |
-
-Provider name is auto-extracted from `OPENAI_BASE_URL` (e.g., `https://88code.org/...` → `88code`).
-
-**Example for custom endpoint (e.g., 88code.org):**
+Docker 运行：
 
 ```bash
-OPENAI_BASE_URL=https://88code.org/openai/v1
-OPENAI_API_KEY=your-api-key
-CODEX_DEFAULT_MODEL=gpt-5.1-codex-max
-CODEX_REASONING_EFFORT=high
+docker compose up -d
+docker compose logs -f gitlab-claude-webhook
 ```
 
-The container entrypoint script automatically generates `~/.codex/config.toml` with:
+默认镜像只包含常规 Webhook 和 review 所需工具。需要在容器内执行 DeepFlow 编译或验证时，使用仓库提供的可选 DeepFlow 工具链镜像；该镜像增加 Rust/Cargo、Go、protobuf、Clang/LLVM、`libpcap`、`libelf`、`libbpf`、`make` 与 `pkg-config`，并为常用依赖提供缓存。
 
-- Custom model provider configuration
-- Base URL and API key settings
-- Reasoning effort and model selection
+## 使用方式
 
-### GitLab Token Permissions
+在 Issue、MR 描述或评论中写入以下指令：
 
-Your GitLab token needs the following scopes:
-
-- `api` - Full API access
-- `read_user` - Read user information
-- `read_repository` - Read repository
-- `write_repository` - Write to repository
-
-## Security Considerations
-
-- Always use webhook secrets for signature verification
-- Limit GitLab token permissions to minimum required
-- Run the service in a secure environment
-- Monitor logs for suspicious activity
-- Consider network restrictions and firewall rules
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Claude execution failed"**
-   - Ensure `@anthropic-ai/claude-agent-sdk` is properly installed (the SDK bundles the CLI binary)
-   - For Docker: ensure the Docker image is built with all npm dependencies
-
-2. **"Invalid webhook signature"**
-   - Verify `WEBHOOK_SECRET` matches GitLab webhook configuration
-   - Check that GitLab is sending the correct header
-
-3. **"Failed to clone project"**
-   - Verify GitLab token has repository access
-   - Check network connectivity to GitLab
-   - Ensure branch exists
-
-4. **"Permission denied"**
-   - Verify GitLab token has write permissions
-   - Check repository settings and branch protection rules
-
-### Logs
-
-View detailed logs:
-
-```bash
-# Docker
-docker-compose logs -f gitlab-claude-webhook
-
-# Local
-tail -f combined.log
+```text
+@claude 请分析这个问题并给出修改
 ```
 
-## Development
+```text
+@codex[model=gpt-5.1-codex-max,timeout=20] 修复认证模块
+```
 
-### Building
+`model` 可选；`timeout` 可选，单位为分钟。解析器只接受 `@claude` 和 `@codex` mention，并读取方括号内以逗号分隔的 `model`、`timeout` 参数。
+
+### 普通 edit
+
+普通指令在独立工作目录中执行。任务完成后，服务只会在存在可发布的有效文件变更时创建分支、提交并创建 MR；无变更时仅发布执行结果。
+
+### MR 自然语言 review
+
+在 MR 或其评论中使用包含 review 语义的自然语言：
+
+```text
+@claude review this merge request
+```
+
+这类请求仅在 MR 上识别为只读 review，使用 mention 指定的 provider。它不会修改文件或 Git 状态，结果作为评论发布到 MR。
+
+### 多轮 `/code-review`
+
+`/code-review` 只支持 MR 或 MR 评论，不支持 Issue。它会按配置执行多轮审查、合并候选问题、评分并发布结果；可在命令后附加专项关注点：
+
+```text
+@claude /code-review
+@codex /code-review 重点检查并发安全
+```
+
+此模式的执行 provider 由运行时配置 `REVIEW_DEFAULT_PROVIDER` 决定，而不是由 mention 决定。可选值为 `claude-multipass` 与 `codex-multipass`。
+
+## 处理流程
+
+1. 验证 GitLab Webhook 签名。
+2. 提取 `@claude` 或 `@codex` 指令及可选参数。
+3. 使用项目与 MR/Issue 生成资源键，并将任务加入队列。
+4. 立即返回 `queued` 响应。
+5. 克隆独立工作目录。
+6. 判断任务是 `/code-review`、自然语言 review 还是普通 edit。
+7. 执行多轮 review，或执行单次 SDK 任务。
+8. 发布 Review 结果；或在 edit 产生有效文件变更时创建分支和 MR。
+9. 清理临时工作目录。
+
+队列以资源键保证同一 MR 或 Issue 的任务串行，并在全局并发限制内调度不同资源。服务会对未立即启动的 AI 任务发布队列状态评论；执行开始后创建并更新包含开始时间的进度评论。
+
+## 接口摘要
+
+| 方法   | 路径           | 用途                    |
+| ------ | -------------- | ----------------------- |
+| `GET`  | `/`            | 服务信息                |
+| `GET`  | `/health`      | 健康检查                |
+| `POST` | `/webhook`     | GitLab Webhook 接收端点 |
+| `GET`  | `/admin`       | 管理页面                |
+| `*`    | `/api/admin/*` | 管理 API                |
+
+`/admin` 与 `/api/admin/*` 需要管理认证。生产环境必须设置 `ADMIN_TOKEN`。
+
+## 配置摘要
+
+服务首次启动时从环境变量初始化运行时配置，并持久化到 `${DATA_DIR}/runtime-config.json`；后续由管理页面保存的配置会直接用于新任务。密码、Token 和 API Key 在管理 API 中以掩码状态返回，且每个 SDK 任务只注入其所需 provider 凭据。
+
+| 分类       | 主要变量                                                                                               | 默认值或说明                      |
+| ---------- | ------------------------------------------------------------------------------------------------------ | --------------------------------- |
+| Claude     | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_DEFAULT_MODEL`、`CLAUDE_DEFAULT_TIMEOUT_MINUTES` | Claude provider；默认超时 30 分钟 |
+| Codex      | `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODEX_DEFAULT_MODEL`、`CODEX_DEFAULT_TIMEOUT_MINUTES`            | Codex provider；默认超时 30 分钟  |
+| GitLab     | `GITLAB_BASE_URL`、`GITLAB_TOKEN`                                                                      | GitLab 实例与 API Token           |
+| Webhook    | `WEBHOOK_SECRET`、`PORT`、`WEBHOOK_TASK_CONCURRENCY`                                                   | 默认端口 3000、全局并发 2         |
+| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`                                 | 默认命令为 `/code-review`         |
+| 管理与存储 | `ADMIN_TOKEN`、`DATA_DIR`                                                                              | 管理认证与运行时数据目录          |
+| 工作与日志 | `WORK_DIR`、`LOG_LEVEL`                                                                                | 临时工作目录与日志级别            |
+
+更多变量、默认值和部署配置见 [docs/CONFIG.md](docs/CONFIG.md)。
+
+### Codex provider
+
+启动时服务仍会生成 `~/.codex/config.toml`，以兼容本地与容器环境。每次 Codex SDK 调用都会同时传入当前运行时 Base URL、API Key 和任务本地的 provider 配置。管理页面保存的新 Codex 配置由后续执行直接读取，不需要依赖重启来重新生成 `config.toml`。
+
+## 管理控制台
+
+访问 `/admin` 管理运行时配置、检查 provider 状态，并维护以下审查资产：
+
+- Prompt Template：edit、review、上下文和评分提示词模板。
+- Review Prompt：多轮 review 的审查阶段与专项提示。
+- Skill：按文件、语言和 provider 匹配的审查规则。
+- Feedback：记录有效、误报、遗漏或不清晰的审查反馈。
+- Proposal：基于反馈生成并应用或驳回的提示词优化建议。
+
+详细操作见 [docs/admin-console.md](docs/admin-console.md)。
+
+## 项目结构
+
+```text
+frontend/                         管理控制台前端
+src/admin/                        管理 API、运行时配置与审查定制
+src/server/webhookServer.ts       Express Webhook、管理路由与队列入口
+src/services/eventProcessor.ts    指令分流、edit 与 review 执行编排
+src/services/runQueue.ts          按资源串行、全局并发队列
+src/services/gitlabReviewService.ts 多轮 MR review 与结果发布
+src/storage/                      JSON 持久化存储
+src/utils/webhook.ts              签名校验、mention 和参数解析
+src/utils/gitlabMarkdown.ts       进度评论、源码链接与行内讨论格式化
+src/utils/providerEnvironment.ts  provider 凭据隔离的执行环境
+src/utils/timeBudget.ts           任务超时与收尾时间预算
+```
+
+## 开发
 
 ```bash
 npm run build
-```
-
-### Linting
-
-```bash
 npm run lint
+npm test
 ```
 
-### Project Structure
+## 安全注意事项
 
-```
-src/
-├── __tests__/                   # Test files
-│   ├── setup.ts                 # Jest test setup
-│   └── webhook.test.ts          # Webhook functionality tests
-├── index.ts                     # Main entry point with environment loading
-├── server/
-│   └── webhookServer.ts         # Express server and webhook handling
-├── services/
-│   ├── eventProcessor.ts        # GitLab event processing logic
-│   ├── projectManager.ts        # Git operations and project management
-│   ├── claudeExecutor.ts        # Basic Claude Code CLI execution
-│   ├── streamingClaudeExecutor.ts # Streaming Claude execution with real-time updates
-│   ├── codexExecutor.ts         # OpenAI Codex CLI execution with streaming
-│   └── gitlabService.ts         # GitLab API interactions
-├── types/
-│   ├── gitlab.ts                # GitLab-related type definitions
-│   └── common.ts                # Common type definitions
-└── utils/
-    ├── config.ts                # Configuration management with variable expansion
-    ├── configDebug.ts           # Configuration debugging utilities
-    ├── codexConfig.ts           # Auto-generate Codex config.toml at startup
-    ├── logger.ts                # Winston-based logging utility
-    ├── webhook.ts               # Webhook utilities and signature verification
-    └── mrGenerator.ts           # Smart merge request generation
-```
-
-## Documentation
-
-- 📋 [GitLab Configuration Guide](docs/gitlab-setup.md) - Complete setup instructions for GitLab integration
-- ⚙️ [Environment Configuration Guide](docs/CONFIG.md) - Detailed configuration instructions with variable expansion and Docker setup
-- 🔧 [API Reference](#api-endpoints) - Available endpoints and usage
-- 🏗️ [Project Structure](#project-structure) - Codebase organization
-- 🐛 [Troubleshooting](#troubleshooting) - Common issues and solutions
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details
+- 为每个 GitLab Webhook 配置强随机 `WEBHOOK_SECRET`。
+- 按最小权限原则授予 GitLab Token 权限。
+- 在生产环境设置强随机 `ADMIN_TOKEN`，并限制管理入口的网络访问。
+- 将 `DATA_DIR` 放在受保护的持久化存储中，避免泄露运行时配置和凭据。
