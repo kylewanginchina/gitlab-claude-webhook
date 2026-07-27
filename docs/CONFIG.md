@@ -1,301 +1,124 @@
-# 环境配置指南
+# 配置参考
 
-## 配置文件支持
-
-本项目支持多种环境变量配置方式：
-
-### 1. `.env` 文件配置
-
-在项目根目录创建 `.env` 文件：
+服务从系统环境变量和项目根目录的 `.env` 读取初始值。可先复制模板并替换示例凭据：
 
 ```bash
-# Claude API配置
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_AUTH_TOKEN=sk-your-token-here
-
-# OpenAI/Codex API配置 (可选，用于Codex提供者)
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_API_KEY=sk-proj-your-openai-key
-
-# AI 提供者配置 (可选，都有默认值)
-AI_DEFAULT_PROVIDER=claude                     # 默认: claude
-CLAUDE_DEFAULT_MODEL=claude-sonnet-4-20250514  # 默认: claude-sonnet-4-20250514
-CLAUDE_REASONING_EFFORT=high                   # 默认: high，可选: low, medium, high, xhigh, max
-CODEX_DEFAULT_MODEL=gpt-5.1-codex-max          # 默认: gpt-5.1-codex-max
-CODEX_REASONING_EFFORT=high                    # 默认: high
-
-# GitLab配置
-GITLAB_BASE_URL=https://gitlab.com
-GITLAB_TOKEN=glpat-your-token-here
-
-# Webhook配置
-WEBHOOK_SECRET=your-secret-here
-PORT=3000
-
-# 管理后台配置
-ADMIN_TOKEN=change-me-admin-token
-DATA_DIR=/app/data
-
-# 运行时默认配置
-CLAUDE_DEFAULT_TIMEOUT_MINUTES=30
-CODEX_DEFAULT_TIMEOUT_MINUTES=30
-REVIEW_ENABLED=true
-REVIEW_MIN_CONFIDENCE=80
-REVIEW_MAX_CANDIDATE_FINDINGS=12
-REVIEW_MAX_FINAL_FINDINGS=8
-
-# 其他配置
-WORK_DIR=/tmp/gitlab-claude-work
-LOG_LEVEL=info
+cp .env.example .env
 ```
 
-### 2. 变量替换功能
+启动时必须提供 `GITLAB_TOKEN`、`WEBHOOK_SECRET`，并至少提供 `ANTHROPIC_AUTH_TOKEN` 或 `OPENAI_API_KEY` 之一。`ADMIN_TOKEN` 用于访问管理页面和管理 API，应使用足够长的随机值。
 
-支持在 `.env` 文件中引用其他环境变量：
+## 管理认证与数据目录
 
-```bash
-# 基础配置
-BASE_URL=https://api.example.com
-API_VERSION=v1
-HOME_DIR=/home/user
+| 变量          | 默认值                                | 允许值       | 用途                                                    |
+| ------------- | ------------------------------------- | ------------ | ------------------------------------------------------- |
+| `ADMIN_TOKEN` | 无                                    | 非空字符串   | 管理页面 `/admin` 与管理 API 的认证令牌。               |
+| `DATA_DIR`    | `data`（Docker 镜像中为 `/app/data`） | 可写目录路径 | 持久化 `runtime-config.json` 及 Review 配置数据的目录。 |
 
-# 使用变量替换
-ANTHROPIC_BASE_URL=${BASE_URL}
-LOG_FILE=${WORK_DIR}/app.log
-```
+## GitLab 与 Webhook
 
-支持两种语法：
+| 变量                       | 默认值               | 允许值            | 用途                             |
+| -------------------------- | -------------------- | ----------------- | -------------------------------- |
+| `GITLAB_BASE_URL`          | `https://gitlab.com` | GitLab 基础 URL   | GitLab API 地址。                |
+| `GITLAB_TOKEN`             | 无                   | 非空字符串        | GitLab API 访问令牌。            |
+| `WEBHOOK_SECRET`           | 无                   | 非空字符串        | Webhook 请求验证密钥。           |
+| `WEBHOOK_TASK_CONCURRENCY` | `2`                  | 大于等于 1 的整数 | 不同 MR/Issue 任务的全局并发数。 |
+| `PORT`                     | `3000`               | `1..65535` 的整数 | Webhook 监听端口。               |
 
-- `${VAR}` - 推荐格式
-- `$VAR` - 简化格式
+所有 Webhook 指令仍必须显式使用 `@claude` 或 `@codex` 选择执行器，例如 `@claude 修复测试` 或 `@codex[timeout=30] 重构模块`。`AI_DEFAULT_PROVIDER` 不会覆盖指令中的 provider，也不会使省略 mention 的文本成为可执行指令。
 
-### 3. Docker 环境配置
+## Claude
 
-#### 方法1：环境变量传递
+| 变量                             | 默认值                      | 允许值                                  | 用途                                             |
+| -------------------------------- | --------------------------- | --------------------------------------- | ------------------------------------------------ |
+| `ANTHROPIC_BASE_URL`             | `https://api.anthropic.com` | Claude API 基础 URL                     | Claude API 端点。                                |
+| `ANTHROPIC_AUTH_TOKEN`           | 无                          | 非空字符串                              | Claude API 认证令牌。                            |
+| `CLAUDE_DEFAULT_MODEL`           | `claude-sonnet-4-20250514`  | 非空字符串                              | 未在 `@claude[...]` 指令中指定模型时使用的模型。 |
+| `CLAUDE_REASONING_EFFORT`        | `high`                      | `low`、`medium`、`high`、`xhigh`、`max` | Claude 默认推理强度。                            |
+| `CLAUDE_DEFAULT_TIMEOUT_MINUTES` | `30`                        | 大于等于 1 的整数                       | Claude 单次调用的默认超时分钟数。                |
 
-```bash
-docker run -d \
-  -e ANTHROPIC_AUTH_TOKEN=sk-your-token \
-  -e GITLAB_TOKEN=glpat-your-token \
-  -e WEBHOOK_SECRET=your-secret \
-  -p 3000:3000 \
-  gitlab-claude-webhook
-```
+## Codex
 
-#### 方法2：.env文件挂载
+| 变量                            | 默认值                      | 允许值                                      | 用途                                            |
+| ------------------------------- | --------------------------- | ------------------------------------------- | ----------------------------------------------- |
+| `OPENAI_BASE_URL`               | `https://api.openai.com/v1` | OpenAI API 基础 URL                         | Codex API 端点。                                |
+| `OPENAI_API_KEY`                | 无                          | 非空字符串                                  | Codex API 密钥。                                |
+| `CODEX_DEFAULT_MODEL`           | `gpt-5.1-codex-max`         | 非空字符串                                  | 未在 `@codex[...]` 指令中指定模型时使用的模型。 |
+| `CODEX_REASONING_EFFORT`        | `high`                      | `minimal`、`low`、`medium`、`high`、`xhigh` | Codex 默认推理强度。                            |
+| `CODEX_DEFAULT_TIMEOUT_MINUTES` | `30`                        | 大于等于 1 的整数                           | Codex 单次调用的默认超时分钟数。                |
 
-```bash
-docker run -d \
-  -v $(pwd)/.env:/app/.env:ro \
-  -p 3000:3000 \
-  gitlab-claude-webhook
-```
+## 任务队列
 
-#### 方法3：Docker Compose
+| 变量                       | 默认值   | 允许值            | 用途                                                                        |
+| -------------------------- | -------- | ----------------- | --------------------------------------------------------------------------- |
+| `AI_DEFAULT_PROVIDER`      | `claude` | `claude`、`codex` | 运行时默认 AI provider 设置；不会改变 Webhook 指令必须显式 mention 的规则。 |
+| `WEBHOOK_TASK_CONCURRENCY` | `2`      | 大于等于 1 的整数 | 任务队列全局并发数；同时见“GitLab 与 Webhook”。                             |
 
-```yaml
-version: '3.8'
-services:
-  gitlab-claude-webhook:
-    build: .
-    ports:
-      - '3000:3000'
-    env_file:
-      - .env
-    # 或者直接指定环境变量
-    environment:
-      - ANTHROPIC_AUTH_TOKEN=sk-your-token
-      - GITLAB_TOKEN=glpat-your-token
-      - WEBHOOK_SECRET=your-secret
-```
+## 多轮 Review
 
-#### 方法4：可选 DeepFlow 构建工具镜像
+| 变量                            | 默认值             | 允许值                                | 用途                                                            |
+| ------------------------------- | ------------------ | ------------------------------------- | --------------------------------------------------------------- |
+| `REVIEW_ENABLED`                | `true`             | `true`、`false`                       | 是否启用多轮 Review。只有值恰为 `false` 时关闭。                |
+| `REVIEW_DEFAULT_PROVIDER`       | `claude-multipass` | `claude-multipass`、`codex-multipass` | 多轮 Review 的执行器。                                          |
+| `REVIEW_MIN_CONFIDENCE`         | `80`               | `0..100` 的整数                       | 保留 finding 所需的最低置信度。                                 |
+| `REVIEW_MAX_CANDIDATE_FINDINGS` | `12`               | 大于等于 1 的整数                     | 进入评分阶段的候选 finding 上限。                               |
+| `REVIEW_MAX_FINAL_FINDINGS`     | `8`                | 大于等于 1 的整数                     | 最终输出 finding 上限。                                         |
+| `REVIEW_PASS_CONCURRENCY`       | `4`                | 大于等于 1 的整数                     | Review pass 的并发数。                                          |
+| `REVIEW_SCORING_CONCURRENCY`    | `4`                | 大于等于 1 的整数                     | Review finding 评分的并发数。                                   |
+| `REVIEW_SKIP_DRAFT`             | `true`             | `true`、`false`                       | 是否跳过草稿 MR。只有值恰为 `false` 时关闭。                    |
+| `REVIEW_SKIP_EXISTING_SHA`      | `true`             | `true`、`false`                       | 是否跳过已处理过相同 SHA 的 Review。只有值恰为 `false` 时关闭。 |
+| `REVIEW_ALLOWED_COMMANDS`       | `/code-review`     | 逗号或换行分隔的非空字符串            | 可触发 Review 的命令列表，例如 `/code-review,/review`。         |
 
-默认镜像保持轻量，只包含 webhook 服务和常规 review/edit 所需工具。如果希望 AI review 在容器内执行 DeepFlow 的编译或验证命令，可以使用可选覆盖文件：
+## 工作目录与日志
+
+| 变量        | 默认值                    | 允许值                           | 用途                               |
+| ----------- | ------------------------- | -------------------------------- | ---------------------------------- |
+| `WORK_DIR`  | `/tmp/gitlab-claude-work` | 可写目录路径                     | 克隆仓库和执行任务使用的工作目录。 |
+| `LOG_LEVEL` | `info`                    | `debug`、`info`、`warn`、`error` | 服务日志最低级别。                 |
+
+## 配置校验
+
+管理 API 保存运行时配置时执行以下校验：端口必须是 `1..65535` 的整数；超时、并发数和 finding 上限必须是大于等于 1 的整数；`minConfidence` 必须是 `0..100` 的整数。Claude reasoning effort 仅可为 `low`、`medium`、`high`、`xhigh` 或 `max`；Codex reasoning effort 仅可为 `minimal`、`low`、`medium`、`high` 或 `xhigh`；Review provider 仅可为 `claude-multipass` 或 `codex-multipass`；日志级别仅可为 `debug`、`info`、`warn` 或 `error`。`allowedCommands` 在运行时配置中必须是每项均为非空字符串的数组；环境变量输入时使用逗号或换行分隔。
+
+## 运行时配置、优先级与热更新
+
+运行时配置文件位于 `${DATA_DIR}/runtime-config.json`。首次启动时，服务按“环境变量、`.env`、内置默认值”的结果创建完整配置并写入该文件。后续启动时，`runtime-config.json` 是运行时事实来源；文件中缺失的字段才由环境变量或默认值补齐，补齐后的完整结果会重新写入文件。管理页面保存配置时同样写入该文件。
+
+每次新的执行任务会读取当前运行时配置。每次单独的 Claude 或 Codex executor 调用会在开始时捕获一次配置快照，并在整个调用中使用该快照；已经运行中的调用不会受到之后管理页面保存的影响。因此下列保存会立即影响后续执行，无需重启容器：
+
+- Claude 与 Codex 的 base URL、凭据、默认模型、reasoning effort 和超时。
+- GitLab base URL 与令牌、Webhook secret、任务并发数、`AI_DEFAULT_PROVIDER`。
+- 全部 Review 控制项：启用状态、provider、置信度、finding 上限、两个并发数、两个跳过开关和允许命令。
+- `LOG_LEVEL`。
+
+管理 API 的 `requiresRestart` 返回字段只会报告 `webhook.port` 和 `workDir`。端口或工作目录变更后需要重启服务；Docker volume 和 network 属于部署变更，应通过 Compose 或容器部署更新，而不是作为运行时 API 的重启字段处理。
+
+## 凭据替换与隔离
+
+管理 API 对 Claude token、Codex API key、GitLab token 和 Webhook secret 只返回 `configured` 与 `masked` 状态，不返回明文。更新时将密钥输入留空表示保留旧值；提供新值后会写入 `runtime-config.json`。
+
+启动时会生成不含 provider 凭据的子进程基础环境。Claude 执行环境会移除继承的 Anthropic 凭据、Anthropic base URL 和 Claude OAuth 凭据，再注入运行时的 `ANTHROPIC_AUTH_TOKEN` 与 `ANTHROPIC_BASE_URL`。Codex 执行环境会移除继承的 OpenAI/Codex 凭据和 OpenAI base URL，再注入运行时 API key；运行时 base URL 由 Codex SDK 配置提供。替换凭据后无需通过重启容器来清理旧的 provider 环境变量。
+
+## Docker 配置
+
+可通过环境变量、`.env` 或 Compose 的 `env_file` 向容器传入初始配置。默认 Compose 配置将 `./data` 挂载为 `/app/data`，使 `runtime-config.json` 在容器重建后仍可保留。
+
+## DeepFlow 构建参数
+
+DeepFlow overlay 是供 AI Review 执行常见 DeepFlow 编译和验证命令的可选构建环境。它使用 Node 20 Bookworm、rustup stable、Go、protobuf、Clang/LLVM、`libpcap`、`libelf`、`libbpf` 以及 named volume 缓存；它不替代 DeepFlow 官方发布构建镜像或官方构建流程。
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
+./scripts/verify-deepflow-image-files.sh
 ```
 
-该镜像会额外包含：
+| 变量                              | 默认值                                                                | 用途                     |
+| --------------------------------- | --------------------------------------------------------------------- | ------------------------ |
+| `DEEPFLOW_DEBIAN_MIRROR`          | `https://mirrors.aliyun.com/debian`                                   | Debian 主与更新源。      |
+| `DEEPFLOW_DEBIAN_SECURITY_MIRROR` | `https://mirrors.aliyun.com/debian-security`                          | Debian security 源。     |
+| `DEEPFLOW_RUSTUP_INIT_URL`        | `https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init` | `rustup-init` 下载地址。 |
+| `DEEPFLOW_RUSTUP_DIST_SERVER`     | `https://rsproxy.cn`                                                  | Rust toolchain 分发源。  |
+| `DEEPFLOW_RUSTUP_UPDATE_ROOT`     | `https://rsproxy.cn/rustup`                                           | Rustup 更新源。          |
 
-- rustup stable 提供的 Rust/Cargo，用于 DeepFlow agent 相关 `cargo build`/`cargo test`
-- Go，用于 DeepFlow server/controller 相关构建检查
-- `protobuf-compiler`，提供 `protoc`
-- Clang/LLVM、gcc、make、cmake、`pkg-config`
-- `libpcap-dev`、`libelf-dev`、`libbpf-dev`
-- bash、git、curl、ripgrep 等仓库检查工具
-
-覆盖文件会增加以下 named volume 缓存：
-
-| Volume                    | 用途                      |
-| ------------------------- | ------------------------- |
-| `deepflow-cargo-registry` | Cargo registry 缓存       |
-| `deepflow-cargo-git`      | Cargo git dependency 缓存 |
-| `deepflow-go-cache`       | Go build cache            |
-| `deepflow-go-mod-cache`   | Go module cache           |
-| `deepflow-npm-cache`      | npm cache                 |
-| `deepflow-work`           | DeepFlow 临时构建目录     |
-
-可以用以下命令确认当前容器内工具链：
-
-```bash
-docker exec gitlab-claude-webhook sh -lc 'node --version && npm --version && cargo --version && rustc --version && go version && protoc --version && clang --version | head -n 1 && make --version | head -n 1 && pkg-config --version'
-```
-
-该镜像基于 Debian/Node 20 安装通用构建工具，并通过 rustup 安装当前 stable Rust/Cargo，避免 Debian 仓库内 Rust 版本过旧导致无法解析 DeepFlow 的新版 `Cargo.lock`。目标是让 AI review 可以执行常见 DeepFlow 编译/验证命令。若要生产级复刻 DeepFlow 官方发布构建，请仍以 DeepFlow 官方 `hub.deepflow.yunshan.net/public/rust-build` 镜像和官方构建脚本为准。
-
-可选构建参数：
-
-| 变量                              | 默认值                                       | 说明                  |
-| --------------------------------- | -------------------------------------------- | --------------------- |
-| `DEEPFLOW_DEBIAN_MIRROR`          | `https://mirrors.aliyun.com/debian`          | Debian main/update 源 |
-| `DEEPFLOW_DEBIAN_SECURITY_MIRROR` | `https://mirrors.aliyun.com/debian-security` | Debian security 源    |
-| `DEEPFLOW_RUSTUP_INIT_URL`        | `https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init` | rustup-init 下载地址 |
-| `DEEPFLOW_RUSTUP_DIST_SERVER`     | `https://rsproxy.cn`                         | Rust toolchain dist 源 |
-| `DEEPFLOW_RUSTUP_UPDATE_ROOT`     | `https://rsproxy.cn/rustup`                  | rustup update 源      |
-
-如果构建环境访问官方 Debian 源更快，可以覆盖为：
-
-```bash
-DEEPFLOW_DEBIAN_MIRROR=http://deb.debian.org/debian \
-DEEPFLOW_DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security \
-docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
-```
-
-如果构建环境访问 Rust 官方源更快，可以覆盖为：
-
-```bash
-DEEPFLOW_RUSTUP_INIT_URL=https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
-DEEPFLOW_RUSTUP_DIST_SERVER=https://static.rust-lang.org \
-DEEPFLOW_RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup \
-docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
-```
-
-### 4. 配置优先级
-
-服务启动时会先加载环境变量和 `.env`，再用管理后台保存的运行时配置覆盖这些默认来源。
-
-运行时配置优先级（高到低）：
-
-1. 管理后台保存的 `${DATA_DIR}/runtime-config.json`
-2. 系统环境变量
-3. `.env` 文件
-4. 默认值
-
-第一次启动且 `${DATA_DIR}/runtime-config.json` 不存在时，服务会从环境变量、`.env` 和默认值生成初始运行时配置。
-
-### 5. 调试配置
-
-在非生产环境下，应用启动时会显示配置调试信息：
-
-```bash
-NODE_ENV=development npm start
-```
-
-输出示例：
-
-```
-🔧 Configuration Debug Information:
-=====================================
-
-📁 Environment Files:
-Working Directory: /app
-NODE_ENV: development
-
-🔑 Loaded Configuration:
-Anthropic Base URL: https://api.anthropic.com
-Anthropic Auth Token: ***e4f5g6h7
-GitLab Base URL: https://gitlab.com
-GitLab Token: ***h7i8j9k0
-...
-```
-
-### 6. 必需与可选配置项
-
-#### 核心必需配置（启动时验证）
-
-- `GITLAB_TOKEN` - GitLab API 令牌
-- `WEBHOOK_SECRET` - Webhook 验证密钥
-
-#### AI 提供者配置（根据使用情况）
-
-**使用 Claude 时必需：**
-
-- `ANTHROPIC_AUTH_TOKEN` - Anthropic API 令牌
-
-**使用 Codex 时必需：**
-
-- `OPENAI_API_KEY` - OpenAI API 令牌
-
-**可选配置（都有默认值）：**
-
-| 配置项                           | 说明                        | 默认值                      |
-| -------------------------------- | --------------------------- | --------------------------- |
-| `AI_DEFAULT_PROVIDER`            | 默认 AI 提供者              | `claude`                    |
-| `ANTHROPIC_BASE_URL`             | Anthropic API 基础 URL      | `https://api.anthropic.com` |
-| `OPENAI_BASE_URL`                | OpenAI API 基础 URL         | `https://api.openai.com/v1` |
-| `CLAUDE_DEFAULT_MODEL`           | Claude 默认模型             | `claude-sonnet-4-20250514`  |
-| `CLAUDE_REASONING_EFFORT`        | Claude 推理等级             | `high`                      |
-| `CODEX_DEFAULT_MODEL`            | Codex 默认模型              | `gpt-5.1-codex-max`         |
-| `CODEX_REASONING_EFFORT`         | Codex 推理等级              | `high`                      |
-| `CLAUDE_DEFAULT_TIMEOUT_MINUTES` | Claude 默认超时时间（分钟） | `30`                        |
-| `CODEX_DEFAULT_TIMEOUT_MINUTES`  | Codex 默认超时时间（分钟）  | `30`                        |
-| `REVIEW_ENABLED`                 | 是否默认启用 review         | `true`                      |
-| `REVIEW_MIN_CONFIDENCE`          | review 置信度阈值           | `80`                        |
-| `REVIEW_MAX_CANDIDATE_FINDINGS`  | review 候选问题上限         | `12`                        |
-| `REVIEW_MAX_FINAL_FINDINGS`      | review 最终问题上限         | `8`                         |
-
-### 7. 配置模板
-
-复制 `.env.example` 文件作为配置模板：
-
-```bash
-cp .env.example .env
-# 然后编辑 .env 文件，填入实际的配置值
-```
-
-这样可以确保包含所有必要的配置项。
-
-## 管理后台配置
-
-管理后台路径为 `/admin`，管理 API 前缀为 `/api/admin`。
-
-必需变量：
-
-| 配置项        | 说明                                    |
-| ------------- | --------------------------------------- |
-| `ADMIN_TOKEN` | 管理后台登录密钥，请使用长随机字符串    |
-| `DATA_DIR`    | 运行时配置目录，Docker 默认 `/app/data` |
-
-保存到管理后台的运行时配置位于 `${DATA_DIR}/runtime-config.json`。第一次启动时如果文件不存在，服务会从 `.env` 生成初始配置。
-
-Prompt/Skill/反馈优化数据也位于 `${DATA_DIR}`：
-
-| 文件                    | 说明                                   |
-| ----------------------- | -------------------------------------- |
-| `review-prompts.json`   | review prompt 草稿、发布版本和回滚历史 |
-| `review-skills.json`    | 可启停的 review skill 指令             |
-| `review-feedback.json`  | 管理后台录入的 review 反馈             |
-| `prompt-proposals.json` | 基于反馈生成的 prompt 优化建议         |
-
-新的 review 任务会读取当前已发布 prompt 版本和启用的匹配 skill，不需要重启服务。优化建议只会应用到草稿，不会自动发布。
-
-保存后立即影响新任务的配置包括：
-
-- 默认 Claude/Codex 模型
-- 默认 Claude/Codex 超时时间
-- Codex reasoning effort
-- 默认 AI provider
-- review confidence 阈值
-- review candidate/final finding 数量
-- GitLab/Claude/Codex token
-- 已发布 review prompt
-- 启用的 review skill
-
-以下配置需要重启服务后生效：
-
-- webhook 监听端口
-- 工作目录
-- Docker volume 和 Docker network
+overlay 定义 `deepflow-cargo-registry`、`deepflow-cargo-git`、`deepflow-go-cache`、`deepflow-go-mod-cache`、`deepflow-npm-cache` 和 `deepflow-work` named volume，用于保留依赖、构建缓存和临时工作目录。
