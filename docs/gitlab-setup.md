@@ -21,7 +21,7 @@ ANTHROPIC_AUTH_TOKEN=<Claude token>
 OPENAI_API_KEY=<Codex token>
 ```
 
-常用可选项包括 `AI_DEFAULT_PROVIDER`（`claude` 或 `codex`）、`CLAUDE_DEFAULT_MODEL`、`CODEX_DEFAULT_MODEL`、两个提供方的 `*_BASE_URL`、`WORK_DIR` 和 `LOG_LEVEL`。`WEBHOOK_TASK_CONCURRENCY` 必须为正整数；未设置或无效时，队列并发度为 `2`。
+常用可选项包括 `AI_DEFAULT_PROVIDER`（`claude` 或 `codex`）、`CLAUDE_DEFAULT_MODEL`、`CODEX_DEFAULT_MODEL`、两个提供方的 `*_BASE_URL`、`WORK_DIR` 和 `LOG_LEVEL`。`WEBHOOK_TASK_CONCURRENCY` 必须配置为正整数；未设置时默认值为 `2`。
 
 服务启动后会加载持久化 runtime config。该配置中的同名运行时设置会覆盖 `.env` 或进程环境变量中的初始值，包括 Webhook 密钥、端口、并发度、AI 提供方和 Review 设置。
 
