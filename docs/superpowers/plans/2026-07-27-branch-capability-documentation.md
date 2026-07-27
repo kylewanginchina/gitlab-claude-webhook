@@ -247,7 +247,7 @@ Codex 执行环境会移除继承的 OpenAI/Codex 凭据，再注入 runtime API
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
 docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
-./scripts/verify-deepflow-image-files.sh
+bash scripts/verify-deepflow-image-files.sh
 ```
 
 说明镜像使用 Node 20 Bookworm、rustup stable、Go、protobuf、Clang/LLVM、
@@ -552,7 +552,7 @@ NODE
 
 ```bash
 GITLAB_TOKEN=test WEBHOOK_SECRET=test ANTHROPIC_AUTH_TOKEN=test ADMIN_TOKEN=test docker compose config >/tmp/gitlab-claude-webhook-compose.yml
-./scripts/verify-deepflow-image-files.sh
+bash scripts/verify-deepflow-image-files.sh
 ```
 
 预期：Compose 配置解析成功；DeepFlow 文件校验通过。
