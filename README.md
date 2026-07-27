@@ -142,7 +142,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 | `GET`  | `/admin`       | 管理页面                |
 | `*`    | `/api/admin/*` | 管理 API                |
 
-`/admin` 与 `/api/admin/*` 需要管理认证。生产环境必须设置 `ADMIN_TOKEN`。
+`/admin` 是可直接加载的静态管理 SPA 入口，本身不要求管理认证。浏览器加载页面后，前端 AuthGate 会要求输入 `ADMIN_TOKEN`，并在访问 `/api/admin/*` 时通过 `X-Admin-Key` 携带该令牌；所有管理 API 请求都由管理认证中间件保护。要使用管理 API，必须设置 `ADMIN_TOKEN`。
 
 ## 配置摘要
 
