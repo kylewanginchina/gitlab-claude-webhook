@@ -47,7 +47,7 @@ Runtime Settings 保存新任务使用的运行时配置，包含：
 - Review provider、启用状态、最低置信度、候选/最终发现上限、pass/评分并发、跳过 Draft MR、跳过已处理 SHA 和允许命令。
 - 工作目录、日志级别、Webhook 端口、Webhook 任务并发和替换 Webhook 密钥。
 
-保存时，前端只会提交非空的替换凭据；已有密钥保持不变。大多数保存后的配置对新任务立即生效。`webhook.port` 和 `workDir` 变更会在响应的 `requiresRestart` 中标记，需重启服务后才使用新值。页面的 Reset draft 只恢复本页尚未保存的编辑。
+保存时，前端只会提交非空的替换凭据；已有密钥保持不变。大多数保存后的配置对新任务立即生效。`webhook.port` 和 `workDir` 变更会在响应的 `requiresRestart` 中标记，需重启服务后才使用新值。`LOG_LEVEL` 虽不会列入该返回字段，但 Winston 实例仅在进程启动时读取它；保存会持久化，仍需重启服务才影响当前 logger。页面的 Reset draft 只恢复本页尚未保存的编辑。
 
 页面中的 GitLab、Claude、Codex Test 按钮分别调用对应的 `/test/*` 接口。这三个接口只检查相应 Base URL 与凭据是否配置，**不会**向 GitLab、Claude 或 Codex 发起远程请求，也不验证凭据可用性。
 
@@ -86,9 +86,11 @@ review.scoring.template
 3. `history-context`：History and blame context。
 4. `comments-and-contracts`：Comments and local contracts。
 
-每个 Review Prompt 有标签、enabled 状态、provider 字段、focus 行和 systemInstructions 草稿。focus 和 systemInstructions 的 Save draft 仅保存草稿；Publish 才会创建新的不可变版本并使其成为当前发布版本。Rollback 会从选中的历史版本复制内容并发布为一个新版本。标签、enabled 和 provider 是直接保存的元数据；enabled 会立即影响该 Prompt 是否包含在后续多轮 Review 中。
+每个 Review Prompt 有标签、enabled 状态、provider 字段、focus 行和 systemInstructions 草稿。focus 的 Save draft 仅保存草稿，必须 Publish 才会进入当前发布版本；systemInstructions 也应 Publish 后再依赖其版本生效。Rollback 会从选中的历史版本复制内容并发布为一个新版本。标签、enabled 和 provider 是直接保存的元数据；enabled 会立即影响该 Prompt 是否包含在后续多轮 Review 中。
 
-当前多轮 Review 会使用**所有 enabled Review Prompt** 的已发布版本。Review Prompt 的 `provider` 字段当前只作为保存的元数据，不会据此筛选多轮 Review 的 Prompt。
+当前实现有一个例外：若已发布版本的 `systemInstructions` 为空，会回退使用 draft `systemInstructions`。因此该字段的草稿可能在未 Publish 时影响后续 Review；不能笼统认为所有草稿绝不生效。
+
+当前多轮 Review 会使用**所有 enabled Review Prompt** 的已发布 `focus`，并通常使用已发布的 `systemInstructions`；上文所述空 `systemInstructions` 回退是例外。Review Prompt 的 `provider` 字段当前只作为保存的元数据，不会据此筛选多轮 Review 的 Prompt。
 
 ## Skill
 
@@ -112,7 +114,7 @@ Analyze feedback 只会使用同时满足下列条件的记录：
 - 有非空 `note`。
 - 标签为 `false_positive`、`missed_issue`、`unclear`、`accepted` 或 `rejected`。
 
-分析会按 Prompt 分组创建 Proposal，Proposal 记录基准版本、建议草稿、所用反馈和状态。Apply proposal 只能应用 open 状态的提案，且**只更新目标 Review Prompt 的草稿**；不会创建版本，也不会自动发布。应用后仍须检查草稿并点击 Publish，新的 Review 才会使用修改。
+分析会按 Prompt 分组创建 Proposal，Proposal 记录基准版本、建议草稿、所用反馈和状态。Proposal 只支持 Analyze 和 Apply：Apply proposal 只能应用 open 状态的提案，且**只更新目标 Review Prompt 的草稿**；不会创建版本，也不会自动发布。应用后仍须检查草稿并点击 Publish，新的 Review 才会使用修改。当前没有 reject/dismiss 操作。
 
 ## 管理 API
 

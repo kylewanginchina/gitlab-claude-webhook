@@ -11,7 +11,7 @@
 - 使用 `@claude` 或 `@codex` 显式选择 Claude Agent SDK 或 OpenAI Codex SDK。
 - 在 mention 后使用 `[model=...,timeout=...]` 覆盖模型与任务超时；`timeout` 的单位为分钟。
 - 普通指令按 edit 模式执行；仅有效文件变更才会创建分支并发起 MR。
-- MR 上的自然语言 review 请求以只读模式执行，使用 mention 指定的 provider，不修改工作区或 Git 状态。
+- MR 上的自然语言 review 请求使用 mention 指定的 provider；Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR。
 - `@claude /code-review` 与 `@codex /code-review` 执行多轮 GitLab MR 审查，可附加关注点；该命令只支持 MR。
 - 默认全局并发为 2；同一 MR 或 Issue 串行，不同资源可并行执行。
 - Webhook 立即返回已入队响应；排队任务会发布队列评论，执行期间持续更新带起始时间和耗时的进度评论。
@@ -57,18 +57,31 @@ ADMIN_TOKEN=change-me-admin-token
 
 ```bash
 npm install
-npm run build
+npm run build:all
 npm start
 ```
 
-开发模式使用 `npm run dev`。AI SDK 的权限绕过模式要求以非 root 用户运行。
+从干净 clone 启动时必须使用 `npm run build:all`，它同时生成后端和 `/admin` 前端。`npm run dev` 只启动后端开发进程；需要管理台时，先执行或另行执行 `npm run build:admin`。AI SDK 的权限绕过模式要求以非 root 用户运行。
+
+开发时可使用：
+
+```bash
+npm run build:admin
+npm run dev
+```
 
 Docker 运行：
 
 ```bash
+mkdir -p data logs
+sudo chown -R 1001:1001 data logs
 docker compose up -d
 docker compose logs -f gitlab-claude-webhook
 ```
+
+镜像以 UID/GID `1001:1001` 运行；`./data` 和 `./logs` 的 bind mount 会覆盖镜像内目录的 ownership，因此宿主机目录必须可由 `1001:1001` 写入。当前运行日志应以 `docker compose logs` 为准；`./logs:/app/logs` 只是挂载，并不表示 Winston 文件日志已实际写入 `/app/logs`。
+
+基础 `docker-compose.yml` 只把其 `environment` 列出的变量传入容器。`.env` 中未列出的 `CLAUDE_DEFAULT_TIMEOUT_MINUTES`、`CODEX_DEFAULT_TIMEOUT_MINUTES`、`REVIEW_*` 等变量不会自动注入；`WORK_DIR` 与 `DATA_DIR` 也固定为容器路径。首次部署请通过 `/admin` 保存这些运行时字段到 `runtime-config.json`，或由运维使用 Compose override 显式传入所需变量。
 
 默认镜像只包含常规 Webhook 和 review 所需工具。需要在容器内执行 DeepFlow 编译或验证时，使用仓库提供的可选 DeepFlow 工具链镜像；该镜像增加 Rust/Cargo、Go、protobuf、Clang/LLVM、`libpcap`、`libelf`、`libbpf`、`make` 与 `pkg-config`，并为常用依赖提供缓存。该镜像用于自动化 Review/验证，不替代 DeepFlow 官方发布构建镜像和脚本。
 
@@ -105,11 +118,11 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 @claude review this merge request
 ```
 
-这类请求仅在 MR 上识别为只读 review，使用 mention 指定的 provider。它不会修改文件或 Git 状态，结果作为评论发布到 MR。
+这类请求仅在 MR 上识别为只读 review，使用 mention 指定的 provider。Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR，结果作为评论发布到 MR。提示词要求执行器只读，但当前 Claude/Codex 执行器不是强制只读沙箱，不能将其视为 OS 级写保护保证。
 
 ### 多轮 `/code-review`
 
-`/code-review` 只支持 MR 或 MR 评论，不支持 Issue。它会按配置执行多轮审查、合并候选问题、评分并发布结果；可在命令后附加专项关注点：
+`/code-review` 只支持 MR 或 MR 评论，不支持 Issue。它会按配置执行多轮审查、合并候选问题、评分并发布结果；Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR。可在命令后附加专项关注点：
 
 ```text
 @claude /code-review
@@ -170,9 +183,9 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 - Prompt Template：edit、review、上下文和评分提示词模板。
 - Review Prompt：多轮 review 的审查阶段与专项提示。
-- Skill：按文件、语言和 provider 匹配的审查规则。
+- Skill：按 `enabled`、provider（当前实际匹配 `any`/`claude`）、`promptIds`、`fileGlobs` 和 `priority` 匹配的审查规则；`languageHints` 仅为元数据。
 - Feedback：记录有效、误报、遗漏或不清晰的审查反馈。
-- Proposal：基于反馈生成并应用或驳回的提示词优化建议。
+- Proposal：基于反馈生成的提示词优化建议；只支持 Analyze 和 Apply 到草稿，Apply 后仍需 Publish，不提供 reject/dismiss 操作。
 
 详细操作见 [docs/admin-console.md](docs/admin-console.md)。
 
@@ -195,7 +208,7 @@ src/utils/timeBudget.ts           任务超时与收尾时间预算
 ## 开发
 
 ```bash
-npm run build
+npm run build:all
 npm run lint
 npm test
 ```

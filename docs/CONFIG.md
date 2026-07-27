@@ -8,6 +8,8 @@ cp .env.example .env
 
 注意：`.env.example` 中的 `DATA_DIR=/app/data` 是 Docker Compose 容器内使用的模板值，不是代码未设置 `DATA_DIR` 时的默认值。非 Compose 部署或直接在宿主机运行时，请将 `DATA_DIR` 改为宿主机上存在且可写的目录，或删除该变量以使用代码默认值 `path.resolve(process.cwd(), 'data')`（当前工作目录下 `data` 的绝对路径）；不要在宿主机直接使用容器内的 `/app/data`。
 
+基础 `docker-compose.yml` 不会把 `.env` 的所有变量自动传入容器，只会显式传入其 `environment` 列出的变量。因此 `.env` 中的 `CLAUDE_DEFAULT_TIMEOUT_MINUTES`、`CODEX_DEFAULT_TIMEOUT_MINUTES`、`REVIEW_*` 等未列字段不会作为容器进程环境变量生效；`WORK_DIR` 与 `DATA_DIR` 在基础 Compose 中固定为容器路径。首次部署应通过 `/admin` 保存这些字段到 `runtime-config.json`，或由运维创建 Compose override 并显式传入需要的变量。
+
 启动时必须提供 `GITLAB_TOKEN`、`WEBHOOK_SECRET`，并至少提供 `ANTHROPIC_AUTH_TOKEN` 或 `OPENAI_API_KEY` 之一。静态 `/admin` SPA 可以直接加载；SPA 的数据操作访问 `/api/admin/*`，这些管理 API 通过请求头 `X-Admin-Key` 与 `ADMIN_TOKEN` 认证。未配置 `ADMIN_TOKEN` 时管理 API 返回 `503`，认证密钥错误时返回 `401`。`ADMIN_TOKEN` 应使用足够长的随机值。
 
 ## 管理认证与数据目录
@@ -91,9 +93,8 @@ cp .env.example .env
 - Claude 与 Codex 的基础地址、凭据、默认模型、推理强度和超时。
 - GitLab 基础地址与令牌、Webhook 密钥、任务并发数、`AI_DEFAULT_PROVIDER`。
 - 全部代码审查控制项：启用状态、服务提供方、置信度、发现项上限、两个并发数、两个跳过开关和允许命令。
-- `LOG_LEVEL`。
 
-管理 API 的 `requiresRestart` 返回字段只会报告 `webhook.port` 和 `workDir`。端口或工作目录变更后需要重启服务；Docker 数据卷和网络属于部署变更，应通过 Compose 或容器部署更新，而不是作为运行时 API 的重启字段处理。
+管理 API 的 `requiresRestart` 返回字段只会报告 `webhook.port` 和 `workDir`。端口或工作目录变更后需要重启服务；Docker 数据卷和网络属于部署变更，应通过 Compose 或容器部署更新，而不是作为运行时 API 的重启字段处理。环境变量 `LOG_LEVEL` 仅在进程启动时生效；管理页面保存后会持久化，但 Winston 实例仅在进程启动时读取该值，必须重启服务才会影响当前 logger；它不会出现在 `requiresRestart` 返回列表中。
 
 ## 凭据替换与隔离
 
@@ -103,7 +104,14 @@ cp .env.example .env
 
 ## Docker 配置
 
-可通过环境变量、`.env` 或 Compose 的 `env_file` 向容器传入初始配置。默认 Compose 配置将 `./data` 挂载为 `/app/data`，使 `runtime-config.json` 在容器重建后仍可保留。
+默认镜像以 UID/GID `1001:1001` 运行。基础 Compose 将 `./data` 和 `./logs` 分别 bind mount 到 `/app/data` 和 `/app/logs`，这会覆盖镜像内目录的 ownership；启动前先创建目录并确保宿主机可由 `1001:1001` 写入：
+
+```bash
+mkdir -p data logs
+sudo chown -R 1001:1001 data logs
+```
+
+`./data` 使 `runtime-config.json` 在容器重建后仍可保留。运行日志以 `docker compose logs` 为准；虽然 `./logs` 挂载到 `/app/logs`，当前实现不保证 Winston 文件日志已写入该目录。
 
 ## DeepFlow 构建参数
 
