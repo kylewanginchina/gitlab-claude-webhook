@@ -70,7 +70,14 @@ docker compose up -d
 docker compose logs -f gitlab-claude-webhook
 ```
 
-默认镜像只包含常规 Webhook 和 review 所需工具。需要在容器内执行 DeepFlow 编译或验证时，使用仓库提供的可选 DeepFlow 工具链镜像；该镜像增加 Rust/Cargo、Go、protobuf、Clang/LLVM、`libpcap`、`libelf`、`libbpf`、`make` 与 `pkg-config`，并为常用依赖提供缓存。
+默认镜像只包含常规 Webhook 和 review 所需工具。需要在容器内执行 DeepFlow 编译或验证时，使用仓库提供的可选 DeepFlow 工具链镜像；该镜像增加 Rust/Cargo、Go、protobuf、Clang/LLVM、`libpcap`、`libelf`、`libbpf`、`make` 与 `pkg-config`，并为常用依赖提供缓存。该镜像用于自动化 Review/验证，不替代 DeepFlow 官方发布构建镜像和脚本。
+
+使用 DeepFlow compose overlay 构建并启动：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml build gitlab-claude-webhook
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab-claude-webhook
+```
 
 ## 使用方式
 
