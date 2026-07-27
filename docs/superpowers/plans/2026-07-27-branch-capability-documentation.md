@@ -115,10 +115,10 @@ Codex 部分明确：
 
 ```bash
 npx prettier --check README.md
-rg -n "docker-compose|每个请求.*Merge Request|自动生成.*唯一|Pipeline events|Wiki" README.md
+rg -n "(^|[[:space:]])docker-compose[[:space:]]|每个请求.*Merge Request|自动生成.*唯一|Pipeline events|Wiki" README.md
 ```
 
-预期：Prettier 通过；`rg` 不应发现旧版 `docker-compose` 命令或不准确能力描述。
+预期：Prettier 通过；`rg` 不应发现旧版 `docker-compose ` 可执行命令或不准确能力描述。
 
 - [ ] **Step 6：提交 README**
 
@@ -484,7 +484,7 @@ POST /webhook 在入队后返回 200 和 runId/queuePosition 等信息。
 
 ```bash
 npx prettier --check docs/gitlab-setup.md
-rg -n "Pipeline events|Wiki Page events|GITLAB_USE_MR|GITLAB_AUTO_MERGE|docker-compose" docs/gitlab-setup.md
+rg -n "Pipeline events|Wiki Page events|GITLAB_USE_MR|GITLAB_AUTO_MERGE|(^|[[:space:]])docker-compose[[:space:]]" docs/gitlab-setup.md
 ```
 
 预期：Prettier 通过；`rg` 无输出。
