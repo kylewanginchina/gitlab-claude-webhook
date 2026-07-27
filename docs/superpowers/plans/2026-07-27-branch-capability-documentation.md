@@ -25,9 +25,11 @@
 ### Task 1：重写 README 能力与使用入口
 
 **文件：**
+
 - 修改：`README.md`
 
 **接口：**
+
 - 输入：`src/utils/webhook.ts` 的 mention 与参数解析规则
 - 输入：`src/services/eventProcessor.ts` 的 edit/review 分流和多轮 Review
 - 输入：`src/services/runQueue.ts`、`src/server/webhookServer.ts` 的队列行为
@@ -132,10 +134,12 @@ git commit -m "docs: refresh current capability overview"
 ### Task 2：补齐环境变量模板和配置参考
 
 **文件：**
+
 - 修改：`.env.example`
 - 修改：`docs/CONFIG.md`
 
 **接口：**
+
 - 输入：`RuntimeConfig` 和 `RuntimeConfigService.createConfigFromEnv`
 - 输入：`RuntimeConfigService.restartRequiredFields`
 - 输入：`providerEnvironment.ts`
@@ -223,9 +227,10 @@ allowed commands: 逗号或换行分隔的非空字符串
 ```
 
 热更新列表必须包含 Claude/Codex base URL、凭据、模型、reasoning effort、
-timeout，GitLab 配置、Webhook secret、task concurrency、全部 Review 控制和
-log level。重启项仅写 `webhook.port` 与 `workDir`；Docker volume/network
-单独标为部署变更。
+timeout，GitLab 配置、Webhook secret、task concurrency 和全部 Review 控制。
+重启项说明除 `webhook.port` 与 `workDir` 外，还必须明确 `log level` 虽不在
+`requiresRestart` 返回字段中，但当前 Winston 实例只在进程启动时读取，保存后
+仍需重启才会影响当前 logger；Docker volume/network 单独标为部署变更。
 
 - [ ] **Step 4：说明凭据替换与隔离**
 
@@ -278,9 +283,11 @@ git commit -m "docs: complete runtime configuration reference"
 ### Task 3：完善管理页面操作手册
 
 **文件：**
+
 - 修改：`docs/admin-console.md`
 
 **接口：**
+
 - 输入：`src/admin/adminRoutes.ts`
 - 输入：`src/admin/reviewCustomizationService.ts`
 - 输入：`frontend/src/pages/*.tsx`
@@ -417,9 +424,11 @@ git commit -m "docs: document admin console operations"
 ### Task 4：校正 GitLab 接入和 Review 使用说明
 
 **文件：**
+
 - 修改：`docs/gitlab-setup.md`
 
 **接口：**
+
 - 输入：`WebhookServer.getInstructionText`
 - 输入：`EventProcessor.extractInstruction`
 - 输入：`GitLabReviewService.postReview`
@@ -501,6 +510,7 @@ git commit -m "docs: align GitLab setup with current behavior"
 ### Task 5：执行跨文档一致性校验
 
 **文件：**
+
 - 检查：`README.md`
 - 检查：`.env.example`
 - 检查：`docs/CONFIG.md`
@@ -508,6 +518,7 @@ git commit -m "docs: align GitLab setup with current behavior"
 - 检查：`docs/gitlab-setup.md`
 
 **接口：**
+
 - 输入：Tasks 1-4 的全部文档
 - 输出：格式、链接、命令、代码事实和工作树状态的最终证据
 

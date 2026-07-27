@@ -54,7 +54,7 @@
 当前 review 逻辑有比较强的质量控制：
 
 - 只支持 MR 或 MR comment 的 `/code-review`
-- review mode 禁止写文件、提交、改 git state
+- review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR；只读主要由提示词和工作流约束，不是 OS 级写保护
 - 获取 GitLab diff version 的 `baseSha/startSha/headSha`
 - 同一 head SHA 使用 marker 防重复 review
 - 多 pass 并发产生 candidate findings
@@ -331,7 +331,7 @@ interface ReviewSkill {
   provider: 'claude' | 'codex' | 'coderabbit' | 'any';
   fileGlobs: string[];
   languageHints: string[];
-  passTemplateIds: string[];
+  promptIds: string[];
   systemInstructions: string;
   priority: number;
 }
@@ -448,7 +448,11 @@ interface ReviewProvider {
   id: string;
   label: string;
   prepare?(context: PreparedReviewContext, projectPath: string): Promise<void>;
-  review(context: PreparedReviewContext, projectPath: string, options: ReviewProviderOptions): Promise<ProviderReviewResult>;
+  review(
+    context: PreparedReviewContext,
+    projectPath: string,
+    options: ReviewProviderOptions
+  ): Promise<ProviderReviewResult>;
   healthCheck(): Promise<TestResult>;
 }
 ```
@@ -633,14 +637,14 @@ data/gitlab-claude-webhook.sqlite
 
 ## 风险与应对
 
-| 风险 | 影响 | 应对 |
-|---|---|---|
-| 当前代码大量 import 静态 config | 热生效不完整 | 先做兼容层，再逐步替换读取点 |
-| Prompt 过度自由导致输出不可解析 | review 中断 | 模板校验、render preview、JSON schema parser 容错 |
-| CodeRabbit CLI 输出格式变化 | provider 失效 | health check 记录版本，parser 分版本处理 |
-| 自动优化 prompt 污染全局行为 | review 质量下降 | 只生成 proposal，人工发布 |
-| 管理后台暴露 secret | 安全事故 | 脱敏、留空保持、audit 不记录明文 |
-| JSON store 并发写冲突 | 配置损坏 | 文件锁、原子写、备份上一版本 |
+| 风险                            | 影响            | 应对                                              |
+| ------------------------------- | --------------- | ------------------------------------------------- |
+| 当前代码大量 import 静态 config | 热生效不完整    | 先做兼容层，再逐步替换读取点                      |
+| Prompt 过度自由导致输出不可解析 | review 中断     | 模板校验、render preview、JSON schema parser 容错 |
+| CodeRabbit CLI 输出格式变化     | provider 失效   | health check 记录版本，parser 分版本处理          |
+| 自动优化 prompt 污染全局行为    | review 质量下降 | 只生成 proposal，人工发布                         |
+| 管理后台暴露 secret             | 安全事故        | 脱敏、留空保持、audit 不记录明文                  |
+| JSON store 并发写冲突           | 配置损坏        | 文件锁、原子写、备份上一版本                      |
 
 ## 推荐默认配置
 

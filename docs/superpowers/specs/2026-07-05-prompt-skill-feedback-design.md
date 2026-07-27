@@ -19,7 +19,7 @@ This slice uses local JSON persistence under `DATA_DIR`, matching the existing r
 - Keep a draft and version history for every prompt.
 - Publishing a prompt creates a new immutable version.
 - Rolling back creates a new version copied from an earlier version.
-- Skills are enabled/disabled instruction bundles that can target providers, changed file globs, languages, and prompt IDs.
+- Skills are enabled/disabled instruction bundles that can target providers, changed file globs, and prompt IDs. Language hints are stored as metadata but do not participate in matching.
 - Feedback records are admin-entered first. GitLab-derived feedback can be added later without changing the API shape.
 - Optimization proposals are deterministic and reviewable. The service analyzes feedback labels and notes, then writes proposals that update prompt drafts only when an admin applies them.
 

@@ -109,8 +109,9 @@ GitLab 配置指南将在 Webhook 安装说明之外补充：
 - 超时时间既由执行器强制执行，也作为时间预算注入 Prompt。
 - 运行时 Claude 和 Codex 凭据会覆盖新执行任务继承到的 provider 凭据。
 - 每次执行器调用只捕获一次运行时配置快照；后续管理页面修改不会改变正在运行的调用。
-- Prompt Template 和 Review Prompt 草稿只有发布后才影响执行；应用优化建议只修改
-  Review Prompt 草稿。
+- Prompt Template 草稿和 Review Prompt 的 focus 草稿只有发布后才影响执行；已发布
+  Review Prompt 的 `systemInstructions` 为空时会回退到 draft 值。应用优化建议只修改
+  Review Prompt 草稿，仍需人工检查并发布。
 - Skill 保存、启用或停用后，无需发布步骤即可影响后续 Review 匹配。
 - 当前多轮 Review 以 `claude` 作为 Skill 匹配 provider，因此实际命中
   `any` 或 `claude` Skill。
