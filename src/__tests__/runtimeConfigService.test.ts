@@ -10,7 +10,42 @@ async function tempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'runtime-config-'));
 }
 
+async function buildRuntimeConfigService() {
+  const dir = await tempDir();
+  const service = new RuntimeConfigService({
+    dataDir: dir,
+    env: {
+      GITLAB_TOKEN: 'glpat-secret',
+      WEBHOOK_SECRET: 'webhook-secret',
+      ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+    } as NodeJS.ProcessEnv,
+  });
+  await service.initialize();
+  return service;
+}
+
 describe('RuntimeConfigService', () => {
+  it('notifies subscribers only after a runtime config update is persisted', async () => {
+    const service = await buildRuntimeConfigService();
+    const observed: string[] = [];
+    const unsubscribe = service.subscribe(config => observed.push(config.logLevel));
+
+    await service.updateConfig({ logLevel: 'debug' }, 'admin');
+
+    expect(observed.at(-1)).toBe('debug');
+    unsubscribe();
+  });
+
+  it('does not notify subscribers when persistence fails', async () => {
+    const service = await buildRuntimeConfigService();
+    const observed: string[] = [];
+    service.subscribe(config => observed.push(config.logLevel));
+    jest.spyOn((service as any).store, 'write').mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(service.updateConfig({ logLevel: 'debug' }, 'admin')).rejects.toThrow('disk full');
+    expect(observed).toEqual([]);
+  });
+
   it('creates config from environment variables with defaults', () => {
     const config = createConfigFromEnv({
       GITLAB_BASE_URL: 'https://gitlab.example.com',

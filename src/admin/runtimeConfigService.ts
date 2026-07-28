@@ -141,6 +141,7 @@ export function createConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Runti
 
 export class RuntimeConfigService {
   private readonly store: JsonStore<RuntimeConfig>;
+  private readonly listeners = new Set<(config: RuntimeConfig) => void>();
   private config: RuntimeConfig;
   private loaded = false;
 
@@ -156,6 +157,7 @@ export class RuntimeConfigService {
     this.validateConfig(this.config);
     await this.store.write(this.config);
     this.loaded = true;
+    this.notifyConfigChanged();
   }
 
   public isLoaded(): boolean {
@@ -164,6 +166,11 @@ export class RuntimeConfigService {
 
   public getConfig(): RuntimeConfig {
     return this.cloneConfig(this.config);
+  }
+
+  public subscribe(listener: (config: RuntimeConfig) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   public getPublicConfig(): PublicRuntimeConfig {
@@ -244,6 +251,7 @@ export class RuntimeConfigService {
     this.validateConfig(next);
     await this.store.write(next);
     this.config = next;
+    this.notifyConfigChanged();
 
     return {
       config: this.toPublicConfig(next),
@@ -256,6 +264,14 @@ export class RuntimeConfigService {
     const next = this.applyDefaults(await this.store.read(fallback), fallback);
     this.validateConfig(next);
     this.config = next;
+    this.notifyConfigChanged();
+  }
+
+  private notifyConfigChanged(): void {
+    const snapshot = this.getConfig();
+    for (const listener of this.listeners) {
+      listener(snapshot);
+    }
   }
 
   public validateConfig(config: RuntimeConfig): void {
