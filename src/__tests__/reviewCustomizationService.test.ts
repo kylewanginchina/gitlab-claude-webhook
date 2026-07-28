@@ -64,7 +64,9 @@ describe('ReviewCustomizationService', () => {
   });
 
   it('falls back to the draft when an enabled published prompt has no versions', async () => {
-    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-customization-empty-versions-'));
+    const dataDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'review-customization-empty-versions-')
+    );
     await fs.writeFile(
       path.join(dataDir, 'review-prompts.json'),
       JSON.stringify([
@@ -118,6 +120,28 @@ describe('ReviewCustomizationService', () => {
     expect(rolledBack.currentVersion).toBe(3);
     expect(rolledBack.versions[2]?.focus[0]).toContain('Read only the merge request changes');
     expect(rolledBack.draft.focus[0]).toContain('Read only the merge request changes');
+  });
+
+  it('keeps prompt state unchanged when persistence fails and allows a retry', async () => {
+    const { service } = await buildService();
+    const original = service.getPrompt('bug-scan');
+    const promptStore = (service as any).promptStore;
+    jest.spyOn(promptStore, 'write').mockRejectedValueOnce(new Error('prompt write failed'));
+
+    await expect(
+      service.updatePrompt('bug-scan', {
+        draft: { focus: ['This update must not leak into memory.'] },
+      })
+    ).rejects.toThrow('prompt write failed');
+    expect(service.getPrompt('bug-scan')).toEqual(original);
+
+    await expect(
+      service.updatePrompt('bug-scan', {
+        draft: { focus: ['Retry after persistence recovers.'] },
+      })
+    ).resolves.toMatchObject({
+      draft: { focus: ['Retry after persistence recovers.'] },
+    });
   });
 
   it('initializes default prompt templates and renders published template variables', async () => {
@@ -509,6 +533,221 @@ describe('ReviewCustomizationService', () => {
     await expect(restarted.applyProposal(proposal!.id)).rejects.toThrow('proposal is not open');
   });
 
+  it('restores both stores after an apply proposal write fails and keeps the queue usable', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Apply must remain recoverable after a proposal write failure.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+    const oldPrompt = service.getPrompt('bug-scan');
+    const proposalStore = (service as any).proposalStore;
+    jest.spyOn(proposalStore, 'write').mockRejectedValueOnce(new Error('proposal write failed'));
+
+    await expect(service.applyProposal(proposal!.id)).rejects.toThrow('proposal write failed');
+    expect(service.getPrompt('bug-scan')).toEqual(oldPrompt);
+    expect(service.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'open',
+    });
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+    expect(restarted.getPrompt('bug-scan')).toEqual(oldPrompt);
+    expect(restarted.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'open',
+    });
+    expect(
+      JSON.parse(await fs.readFile(path.join(dataDir, 'prompt-proposal-transaction.json'), 'utf8'))
+    ).toBeNull();
+
+    await expect(service.dismissProposal(proposal!.id)).resolves.toMatchObject({
+      status: 'dismissed',
+    });
+  });
+
+  it('recovers old state on startup when a crash leaves the next prompt write and a prepared transaction', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Recover the old prompt after a partial apply.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+    const oldPrompts = service.listPrompts();
+    const oldProposals = service.listProposals();
+    const nextPrompts = oldPrompts.map(prompt =>
+      prompt.id === 'bug-scan'
+        ? {
+            ...prompt,
+            draft: {
+              ...proposal!.suggestedDraft,
+            },
+          }
+        : prompt
+    );
+
+    await fs.writeFile(path.join(dataDir, 'review-prompts.json'), JSON.stringify(nextPrompts));
+    await fs.writeFile(path.join(dataDir, 'prompt-proposals.json'), JSON.stringify(oldProposals));
+    await fs.writeFile(
+      path.join(dataDir, 'prompt-proposal-transaction.json'),
+      JSON.stringify({
+        version: 1,
+        operation: 'apply-proposal',
+        state: 'prepared',
+        previousPrompts: oldPrompts,
+        previousProposals: oldProposals,
+      })
+    );
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+
+    expect(restarted.getPrompt('bug-scan')).toEqual(
+      oldPrompts.find(prompt => prompt.id === 'bug-scan')
+    );
+    expect(restarted.listProposals()).toEqual(oldProposals);
+    expect(
+      JSON.parse(await fs.readFile(path.join(dataDir, 'prompt-proposal-transaction.json'), 'utf8'))
+    ).toBeNull();
+  });
+
+  it('recovers old state on startup when both next snapshots exist but the transaction was not cleared', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'The transaction log is the commit point.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+    const oldPrompts = service.listPrompts();
+    const oldProposals = service.listProposals();
+    const nextPrompts = oldPrompts.map(prompt =>
+      prompt.id === 'bug-scan'
+        ? {
+            ...prompt,
+            draft: {
+              ...proposal!.suggestedDraft,
+            },
+          }
+        : prompt
+    );
+    const nextProposals = oldProposals.map(item =>
+      item.id === proposal!.id
+        ? {
+            ...item,
+            status: 'applied',
+            appliedAt: '2026-07-28T00:00:00.000Z',
+          }
+        : item
+    );
+
+    await fs.writeFile(path.join(dataDir, 'review-prompts.json'), JSON.stringify(nextPrompts));
+    await fs.writeFile(path.join(dataDir, 'prompt-proposals.json'), JSON.stringify(nextProposals));
+    await fs.writeFile(
+      path.join(dataDir, 'prompt-proposal-transaction.json'),
+      JSON.stringify({
+        version: 1,
+        operation: 'apply-proposal',
+        state: 'prepared',
+        previousPrompts: oldPrompts,
+        previousProposals: oldProposals,
+      })
+    );
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+
+    expect(restarted.getPrompt('bug-scan')).toEqual(
+      oldPrompts.find(prompt => prompt.id === 'bug-scan')
+    );
+    expect(restarted.listProposals()).toEqual(oldProposals);
+    expect(
+      JSON.parse(await fs.readFile(path.join(dataDir, 'prompt-proposal-transaction.json'), 'utf8'))
+    ).toBeNull();
+  });
+
+  it('serializes apply proposal and update prompt writes without losing either committed state', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Apply should not overwrite a later prompt update.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+    const firstPromptWrite = deferred();
+    const secondPromptWrite = deferred();
+    const promptStore = (service as any).promptStore;
+    const originalWrite = promptStore.write.bind(promptStore);
+    let writeCount = 0;
+    jest.spyOn(promptStore, 'write').mockImplementation(async snapshot => {
+      writeCount += 1;
+      if (writeCount === 1) {
+        await firstPromptWrite.promise;
+      } else if (writeCount === 2) {
+        await secondPromptWrite.promise;
+      }
+      await originalWrite(snapshot);
+    });
+
+    const apply = service.applyProposal(proposal!.id);
+    await flushPromises();
+    const update = service.updatePrompt('bug-scan', {
+      draft: { focus: ['Admin update after proposal apply.'] },
+    });
+    await flushPromises();
+
+    firstPromptWrite.resolve();
+    await apply;
+    secondPromptWrite.resolve();
+    await update;
+
+    expect(service.getPrompt('bug-scan').draft.focus).toEqual([
+      'Admin update after proposal apply.',
+    ]);
+    expect(service.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'applied',
+    });
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+    expect(restarted.getPrompt('bug-scan').draft.focus).toEqual([
+      'Admin update after proposal apply.',
+    ]);
+    expect(restarted.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'applied',
+    });
+  });
+
+  it('persists a successful applied proposal and prompt draft after clearing the transaction log', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Successful apply commits only after the transaction log clears.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+
+    await expect(service.applyProposal(proposal!.id)).resolves.toMatchObject({
+      status: 'applied',
+    });
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+    expect(restarted.getPrompt('bug-scan').draft).toEqual(proposal!.suggestedDraft);
+    expect(restarted.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'applied',
+    });
+    expect(
+      JSON.parse(await fs.readFile(path.join(dataDir, 'prompt-proposal-transaction.json'), 'utf8'))
+    ).toBeNull();
+  });
+
   it('keeps a proposal open and retryable when dismissal persistence fails', async () => {
     const { dataDir, service } = await buildService();
 
@@ -520,9 +759,13 @@ describe('ReviewCustomizationService', () => {
     });
     const [proposal] = await service.analyzeFeedback();
     const proposalStore = (service as any).proposalStore;
-    jest.spyOn(proposalStore, 'write').mockRejectedValueOnce(new Error('proposal store write failed'));
+    jest
+      .spyOn(proposalStore, 'write')
+      .mockRejectedValueOnce(new Error('proposal store write failed'));
 
-    await expect(service.dismissProposal(proposal!.id)).rejects.toThrow('proposal store write failed');
+    await expect(service.dismissProposal(proposal!.id)).rejects.toThrow(
+      'proposal store write failed'
+    );
 
     expect(service.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
       status: 'open',

@@ -119,3 +119,54 @@ Results: 3 passed. The existing failed-write/retry case proves the queue continu
 - Deadlock: no queued mutation calls another queued public mutation; each critical section waits only for storage operations.
 - Error propagation and recovery: callers receive the original store error; `run.then(() => undefined, () => undefined)` restores the queue tail after either outcome.
 - State ordering: status is re-read after queue entry; all successful proposal transitions write their full snapshots before updating in-memory proposals. The Dismiss/Apply race test verifies a dismissed proposal cannot be applied or reopened in memory or after restart.
+
+## Follow-up: Recoverable Prompt/Proposal Apply Transaction
+
+### Root Cause
+
+`applyProposal()` updates `review-prompts.json` and `prompt-proposals.json` as one
+state transition, but the two `JsonStore` writes have separate atomic rename
+boundaries. A process failure or rejected second write could therefore leave a
+new Prompt draft with an open or dismissed Proposal. The single-process mutation
+queue prevents concurrent lost updates but cannot make two files atomic.
+
+### Implementation
+
+- `prompt-proposal-transaction.json` is a write-ahead log containing the previous
+  Prompt and Proposal snapshots for a prepared Apply.
+- Apply writes the WAL, writes both next snapshots, then clears the WAL. Clearing
+  the WAL is the commit point.
+- Initialization and every queued Prompt/Proposal mutation recover a prepared WAL
+  before doing new work. Recovery restores both before-images and only then clears
+  the WAL, so it is idempotent across repeated process failures.
+- Prompt creation, update, publish, rollback, feedback analysis, Apply, and Dismiss
+  share one FIFO mutation queue. Public methods re-read state inside the critical
+  section and assign memory only after persistence succeeds.
+- The admin documentation lists the recovery log as a service-managed file that
+  operators must not edit.
+
+### Regression Coverage
+
+- Proposal store failure after the Prompt write restores both files, leaves the
+  Proposal open, survives restart, and leaves the queue usable.
+- Startup recovers when only the next Prompt snapshot exists and when both next
+  snapshots exist but the WAL was not cleared.
+- Successful Apply survives restart with an applied Proposal and updated draft,
+  and the WAL is null.
+- Concurrent Apply followed by Prompt update preserves the committed operation
+  order without losing either state.
+- A failed Prompt update leaves memory unchanged and a later retry succeeds.
+
+### WAL Verification
+
+| Command | Actual result |
+| --- | --- |
+| `npm test -- --runInBand src/__tests__/reviewCustomizationService.test.ts` | PASS, 1 suite, 25 tests |
+| `npm test -- --runInBand src/__tests__/adminRoutes.test.ts` | PASS, 1 suite, 26 tests |
+| `npm run type-check` | PASS (`tsc --noEmit`) |
+| `npx prettier --check src/admin/reviewCustomizationService.ts src/__tests__/reviewCustomizationService.test.ts docs/admin-console.md docs/admin-console-design.md` | PASS after formatting |
+
+The existing `ts-jest` hybrid module warning remains non-fatal. The management
+route test required execution outside the restricted sandbox because Supertest
+binds a temporary local listener; it did not start or modify the production
+service.

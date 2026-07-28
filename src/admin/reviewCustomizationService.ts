@@ -28,6 +28,14 @@ export interface ReviewCustomizationServiceOptions {
   dataDir?: string;
 }
 
+interface PromptProposalTransaction {
+  version: 1;
+  operation: 'apply-proposal';
+  state: 'prepared';
+  previousPrompts: ReviewPrompt[];
+  previousProposals: PromptOptimizationProposal[];
+}
+
 const VALID_PROVIDERS: ReviewPromptProvider[] = ['claude', 'codex', 'coderabbit', 'any'];
 const VALID_PROMPT_TEMPLATE_PROVIDERS: PromptTemplateProvider[] = [
   'claude',
@@ -119,8 +127,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     description: 'System prompt append used by Claude ordinary edit tasks.',
     provider: 'claude',
     scope: 'edit',
-    body:
-      'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
+    body: 'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.',
   },
   {
     id: 'claude.review.system',
@@ -128,22 +135,22 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     description: 'System prompt append used by Claude read-only review tasks.',
     provider: 'claude',
     scope: 'review',
-    body:
-      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. Prefer diff-first review and avoid broad repository exploration. For merge request contexts, use git commands to inspect changes, history, and blame only when needed to validate a concrete concern. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection. Return a concise, structured review result.',
+    body: 'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. Prefer diff-first review and avoid broad repository exploration. For merge request contexts, use git commands to inspect changes, history, and blame only when needed to validate a concrete concern. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection. Return a concise, structured review result.',
   },
   {
     id: 'claude.context.wrapper',
     label: 'Claude request wrapper',
-    description: 'Prompt wrapper that combines context, MR hints, execution mode, and request text for Claude.',
+    description:
+      'Prompt wrapper that combines context, MR hints, execution mode, and request text for Claude.',
     provider: 'claude',
     scope: 'context',
-    body:
-      '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}',
+    body: '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}',
   },
   {
     id: 'claude.review.fallback',
     label: 'Claude static review fallback',
-    description: 'Fallback request used when a validation command fails before review findings are produced.',
+    description:
+      'Fallback request used when a validation command fails before review findings are produced.',
     provider: 'claude',
     scope: 'fallback',
     body: [
@@ -170,8 +177,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     description: 'Instruction block used by Codex ordinary edit tasks.',
     provider: 'codex',
     scope: 'edit',
-    body:
-      'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.',
+    body: 'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.',
   },
   {
     id: 'codex.review.instructions',
@@ -179,17 +185,16 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     description: 'Instruction block used by Codex read-only review tasks.',
     provider: 'codex',
     scope: 'review',
-    body:
-      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.',
+    body: 'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.',
   },
   {
     id: 'codex.context.wrapper',
     label: 'Codex request wrapper',
-    description: 'Prompt wrapper that combines context, MR hints, mode instructions, and request text for Codex.',
+    description:
+      'Prompt wrapper that combines context, MR hints, mode instructions, and request text for Codex.',
     provider: 'codex',
     scope: 'context',
-    body:
-      '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}',
+    body: '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}',
   },
   {
     id: 'review.pass.template',
@@ -447,12 +452,13 @@ export class ReviewCustomizationService {
   private readonly skillStore: JsonStore<ReviewSkill[]>;
   private readonly feedbackStore: JsonStore<ReviewFeedback[]>;
   private readonly proposalStore: JsonStore<PromptOptimizationProposal[]>;
+  private readonly promptProposalTransactionStore: JsonStore<PromptProposalTransaction | null>;
   private promptTemplates: PromptTemplate[] = [];
   private prompts: ReviewPrompt[] = [];
   private skills: ReviewSkill[] = [];
   private feedback: ReviewFeedback[] = [];
   private proposals: PromptOptimizationProposal[] = [];
-  private proposalMutationQueue: Promise<void> = Promise.resolve();
+  private promptProposalMutationQueue: Promise<void> = Promise.resolve();
   private loaded = false;
 
   constructor(options: ReviewCustomizationServiceOptions = {}) {
@@ -462,13 +468,19 @@ export class ReviewCustomizationService {
     );
     this.promptStore = new JsonStore<ReviewPrompt[]>(path.join(dataDir, 'review-prompts.json'));
     this.skillStore = new JsonStore<ReviewSkill[]>(path.join(dataDir, 'review-skills.json'));
-    this.feedbackStore = new JsonStore<ReviewFeedback[]>(path.join(dataDir, 'review-feedback.json'));
+    this.feedbackStore = new JsonStore<ReviewFeedback[]>(
+      path.join(dataDir, 'review-feedback.json')
+    );
     this.proposalStore = new JsonStore<PromptOptimizationProposal[]>(
       path.join(dataDir, 'prompt-proposals.json')
+    );
+    this.promptProposalTransactionStore = new JsonStore<PromptProposalTransaction | null>(
+      path.join(dataDir, 'prompt-proposal-transaction.json')
     );
   }
 
   public async initialize(): Promise<void> {
+    await this.recoverPreparedPromptProposalTransaction();
     const defaultPrompts = DEFAULT_REVIEW_PROMPTS.map(createDefaultPrompt);
     const defaultPromptTemplates = DEFAULT_PROMPT_TEMPLATES.map(createDefaultPromptTemplate);
     this.promptTemplates = this.ensureDefaultPromptTemplates(
@@ -563,10 +575,7 @@ export class ReviewCustomizationService {
     template.draft = {
       body: target.body,
     };
-    return this.publishPromptTemplate(
-      id,
-      changelog.trim() || `Rollback to version ${version}`
-    );
+    return this.publishPromptTemplate(id, changelog.trim() || `Rollback to version ${version}`);
   }
 
   public renderPromptTemplate(
@@ -585,76 +594,79 @@ export class ReviewCustomizationService {
   }
 
   public async createPrompt(input: CreateReviewPromptInput): Promise<ReviewPrompt> {
-    const label = requiredString(input.label, 'prompt.label');
-    const id = input.id ? slugify(input.id) : slugify(label);
-    if (this.prompts.some(prompt => prompt.id === id)) {
-      throw new Error('prompt id already exists');
-    }
+    return this.enqueuePromptProposalMutation(async () => {
+      const label = requiredString(input.label, 'prompt.label');
+      const id = input.id ? slugify(input.id) : slugify(label);
+      if (this.prompts.some(prompt => prompt.id === id)) {
+        throw new Error('prompt id already exists');
+      }
 
-    const createdAt = now();
-    const draft = this.sanitizeDraft(input.draft, 'prompt.draft');
-    const prompt: ReviewPrompt = {
-      id,
-      label,
-      description: optionalString(input.description, 'prompt.description'),
-      enabled: true,
-      provider: providerValue(input.provider, 'prompt.provider'),
-      currentVersion: 1,
-      draft,
-      versions: [
-        {
-          ...draft,
-          version: 1,
-          createdAt,
-          createdBy: 'admin',
-          changelog: 'Initial prompt',
-        },
-      ],
-      createdAt,
-      updatedAt: createdAt,
-    };
+      const createdAt = now();
+      const draft = this.sanitizeDraft(input.draft, 'prompt.draft');
+      const prompt: ReviewPrompt = {
+        id,
+        label,
+        description: optionalString(input.description, 'prompt.description'),
+        enabled: true,
+        provider: providerValue(input.provider, 'prompt.provider'),
+        currentVersion: 1,
+        draft,
+        versions: [
+          {
+            ...draft,
+            version: 1,
+            createdAt,
+            createdBy: 'admin',
+            changelog: 'Initial prompt',
+          },
+        ],
+        createdAt,
+        updatedAt: createdAt,
+      };
 
-    this.prompts.push(prompt);
-    await this.promptStore.write(this.prompts);
-    return clone(prompt);
+      await this.persistPromptSnapshot([...this.prompts, prompt]);
+      return clone(prompt);
+    });
   }
 
   public async updatePrompt(id: string, patch: ReviewPromptPatch): Promise<ReviewPrompt> {
-    const prompt = this.findPrompt(id);
-    if ('label' in patch) {
-      prompt.label = requiredString(patch.label, 'prompt.label');
-    }
-    if ('description' in patch) {
-      prompt.description = optionalString(patch.description, 'prompt.description');
-    }
-    if ('enabled' in patch) {
-      prompt.enabled = this.booleanValue(patch.enabled, 'prompt.enabled');
-    }
-    if ('provider' in patch) {
-      prompt.provider = providerValue(patch.provider, 'prompt.provider');
-    }
-    if (patch.draft) {
-      prompt.draft = this.mergeDraft(prompt.draft, patch.draft);
-    }
-    prompt.updatedAt = now();
-    await this.promptStore.write(this.prompts);
-    return clone(prompt);
+    return this.enqueuePromptProposalMutation(async () => {
+      const prompt = this.findPrompt(id);
+      const nextPrompt: ReviewPrompt = {
+        ...prompt,
+        draft: clone(prompt.draft),
+        updatedAt: now(),
+      };
+      if ('label' in patch) {
+        nextPrompt.label = requiredString(patch.label, 'prompt.label');
+      }
+      if ('description' in patch) {
+        nextPrompt.description = optionalString(patch.description, 'prompt.description');
+      }
+      if ('enabled' in patch) {
+        nextPrompt.enabled = this.booleanValue(patch.enabled, 'prompt.enabled');
+      }
+      if ('provider' in patch) {
+        nextPrompt.provider = providerValue(patch.provider, 'prompt.provider');
+      }
+      if (patch.draft) {
+        nextPrompt.draft = this.mergeDraft(prompt.draft, patch.draft);
+      }
+
+      await this.persistPromptSnapshot(
+        this.prompts.map(item => (item.id === id ? nextPrompt : item))
+      );
+      return clone(nextPrompt);
+    });
   }
 
-  public async publishPrompt(id: string, changelog = 'Published from admin draft'): Promise<ReviewPrompt> {
-    const prompt = this.findPrompt(id);
-    const nextVersion = Math.max(...prompt.versions.map(version => version.version), 0) + 1;
-    prompt.versions.push({
-      ...clone(prompt.draft),
-      version: nextVersion,
-      createdAt: now(),
-      createdBy: 'admin',
-      changelog: changelog.trim() || 'Published from admin draft',
-    });
-    prompt.currentVersion = nextVersion;
-    prompt.updatedAt = now();
-    await this.promptStore.write(this.prompts);
-    return clone(prompt);
+  public async publishPrompt(
+    id: string,
+    changelog = 'Published from admin draft'
+  ): Promise<ReviewPrompt> {
+    return this.enqueuePromptProposalMutation(() =>
+      this.publishPromptUnlocked(id, this.findPrompt(id).draft, changelog)
+    );
   }
 
   public async rollbackPrompt(
@@ -662,17 +674,22 @@ export class ReviewCustomizationService {
     version: number,
     changelog = `Rollback to version ${version}`
   ): Promise<ReviewPrompt> {
-    const prompt = this.findPrompt(id);
-    const target = prompt.versions.find(item => item.version === version);
-    if (!target) {
-      throw new Error('prompt version not found');
-    }
+    return this.enqueuePromptProposalMutation(async () => {
+      const prompt = this.findPrompt(id);
+      const target = prompt.versions.find(item => item.version === version);
+      if (!target) {
+        throw new Error('prompt version not found');
+      }
 
-    prompt.draft = {
-      focus: [...target.focus],
-      systemInstructions: target.systemInstructions,
-    };
-    return this.publishPrompt(id, changelog.trim() || `Rollback to version ${version}`);
+      return this.publishPromptUnlocked(
+        id,
+        {
+          focus: [...target.focus],
+          systemInstructions: target.systemInstructions,
+        },
+        changelog.trim() || `Rollback to version ${version}`
+      );
+    });
   }
 
   public getPublishedReviewPasses(): PublishedReviewPassTemplate[] {
@@ -827,13 +844,17 @@ export class ReviewCustomizationService {
   }
 
   public async analyzeFeedback(): Promise<PromptOptimizationProposal[]> {
-    return this.enqueueProposalMutation(async () => {
+    return this.enqueuePromptProposalMutation(async () => {
       const grouped = new Map<string, ReviewFeedback[]>();
       for (const item of this.feedback) {
         if (!item.promptId || !item.note.trim()) {
           continue;
         }
-        if (!['false_positive', 'missed_issue', 'unclear', 'accepted', 'rejected'].includes(item.label)) {
+        if (
+          !['false_positive', 'missed_issue', 'unclear', 'accepted', 'rejected'].includes(
+            item.label
+          )
+        ) {
           continue;
         }
         const group = grouped.get(item.promptId) || [];
@@ -866,14 +887,13 @@ export class ReviewCustomizationService {
       }
 
       const nextProposals = [...this.proposals, ...created];
-      await this.proposalStore.write(nextProposals);
-      this.proposals = nextProposals;
+      await this.persistProposalSnapshot(nextProposals);
       return clone(created);
     });
   }
 
   public async applyProposal(id: string): Promise<PromptOptimizationProposal> {
-    return this.enqueueProposalMutation(async () => {
+    return this.enqueuePromptProposalMutation(async () => {
       const proposal = this.findProposal(id);
       if (proposal.status !== 'open') {
         throw new Error('proposal is not open');
@@ -891,23 +911,16 @@ export class ReviewCustomizationService {
         status: 'applied',
         appliedAt,
       };
-      const nextPrompts = this.prompts.map(item =>
-        item.id === prompt.id ? nextPrompt : item
-      );
-      const nextProposals = this.proposals.map(item =>
-        item.id === id ? appliedProposal : item
-      );
+      const nextPrompts = this.prompts.map(item => (item.id === prompt.id ? nextPrompt : item));
+      const nextProposals = this.proposals.map(item => (item.id === id ? appliedProposal : item));
 
-      await this.promptStore.write(nextPrompts);
-      await this.proposalStore.write(nextProposals);
-      this.prompts = nextPrompts;
-      this.proposals = nextProposals;
+      await this.persistPromptProposalTransaction('apply-proposal', nextPrompts, nextProposals);
       return clone(appliedProposal);
     });
   }
 
   public async dismissProposal(id: string): Promise<PromptOptimizationProposal> {
-    return this.enqueueProposalMutation(async () => {
+    return this.enqueuePromptProposalMutation(async () => {
       const proposal = this.findProposal(id);
       if (proposal.status !== 'open') {
         throw new Error('proposal is not open');
@@ -918,23 +931,118 @@ export class ReviewCustomizationService {
         status: 'dismissed',
         dismissedAt: now(),
       };
-      const nextProposals = this.proposals.map(item =>
-        item.id === id ? dismissedProposal : item
-      );
+      const nextProposals = this.proposals.map(item => (item.id === id ? dismissedProposal : item));
 
-      await this.proposalStore.write(nextProposals);
-      this.proposals = nextProposals;
+      await this.persistProposalSnapshot(nextProposals);
       return clone(dismissedProposal);
     });
   }
 
-  private enqueueProposalMutation<T>(mutation: () => Promise<T>): Promise<T> {
-    const run = this.proposalMutationQueue.then(mutation, mutation);
-    this.proposalMutationQueue = run.then(
+  private enqueuePromptProposalMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const execute = async (): Promise<T> => {
+      await this.recoverPreparedPromptProposalTransaction();
+      return mutation();
+    };
+    const run = this.promptProposalMutationQueue.then(execute, execute);
+    this.promptProposalMutationQueue = run.then(
       () => undefined,
       () => undefined
     );
     return run;
+  }
+
+  private async publishPromptUnlocked(
+    id: string,
+    draft: ReviewPromptDraft,
+    changelog: string
+  ): Promise<ReviewPrompt> {
+    const prompt = this.findPrompt(id);
+    const nextVersion = Math.max(...prompt.versions.map(version => version.version), 0) + 1;
+    const nextPrompt: ReviewPrompt = {
+      ...prompt,
+      draft: clone(draft),
+      versions: [
+        ...prompt.versions,
+        {
+          ...clone(draft),
+          version: nextVersion,
+          createdAt: now(),
+          createdBy: 'admin',
+          changelog: changelog.trim() || 'Published from admin draft',
+        },
+      ],
+      currentVersion: nextVersion,
+      updatedAt: now(),
+    };
+
+    await this.persistPromptSnapshot(
+      this.prompts.map(item => (item.id === id ? nextPrompt : item))
+    );
+    return clone(nextPrompt);
+  }
+
+  private async persistPromptSnapshot(nextPrompts: ReviewPrompt[]): Promise<void> {
+    await this.promptStore.write(nextPrompts);
+    this.prompts = nextPrompts;
+  }
+
+  private async persistProposalSnapshot(
+    nextProposals: PromptOptimizationProposal[]
+  ): Promise<void> {
+    await this.proposalStore.write(nextProposals);
+    this.proposals = nextProposals;
+  }
+
+  private async persistPromptProposalTransaction(
+    operation: PromptProposalTransaction['operation'],
+    nextPrompts: ReviewPrompt[],
+    nextProposals: PromptOptimizationProposal[]
+  ): Promise<void> {
+    const transaction: PromptProposalTransaction = {
+      version: 1,
+      operation,
+      state: 'prepared',
+      previousPrompts: clone(this.prompts),
+      previousProposals: clone(this.proposals),
+    };
+
+    try {
+      await this.promptProposalTransactionStore.write(transaction);
+      await this.promptStore.write(nextPrompts);
+      await this.proposalStore.write(nextProposals);
+      await this.promptProposalTransactionStore.write(null);
+    } catch (error) {
+      await this.recoverPreparedPromptProposalTransaction();
+      throw error;
+    }
+
+    this.prompts = nextPrompts;
+    this.proposals = nextProposals;
+  }
+
+  private async recoverPreparedPromptProposalTransaction(): Promise<void> {
+    const transaction = await this.promptProposalTransactionStore.read(null);
+    if (transaction === null) {
+      return;
+    }
+    if (
+      transaction.version !== 1 ||
+      transaction.operation !== 'apply-proposal' ||
+      transaction.state !== 'prepared' ||
+      !Array.isArray(transaction.previousPrompts) ||
+      !Array.isArray(transaction.previousProposals)
+    ) {
+      throw new Error('prompt/proposal transaction is invalid');
+    }
+
+    // A prepared WAL has not crossed the commit point, so recovery always restores before-images.
+    const previousPrompts = clone(transaction.previousPrompts);
+    const previousProposals = clone(transaction.previousProposals);
+    await this.promptStore.write(previousPrompts);
+    await this.proposalStore.write(previousProposals);
+    await this.promptProposalTransactionStore.write(null);
+    this.prompts = previousPrompts;
+    this.proposals = previousProposals;
   }
 
   private ensureDefaultPrompts(prompts: ReviewPrompt[]): ReviewPrompt[] {
@@ -1056,7 +1164,8 @@ export class ReviewCustomizationService {
     patch: Partial<ReviewPromptDraft>
   ): ReviewPromptDraft {
     return {
-      focus: 'focus' in patch ? uniqueStrings(patch.focus, 'prompt.draft.focus') : [...current.focus],
+      focus:
+        'focus' in patch ? uniqueStrings(patch.focus, 'prompt.draft.focus') : [...current.focus],
       systemInstructions:
         'systemInstructions' in patch
           ? optionalString(patch.systemInstructions, 'prompt.draft.systemInstructions')
@@ -1162,23 +1271,25 @@ export class ReviewCustomizationService {
   }
 
   private feedbackToFocusLines(feedback: ReviewFeedback[]): string[] {
-    return feedback.map(item => {
-      const note = item.note.replace(/\s+/g, ' ').trim();
-      switch (item.label) {
-        case 'false_positive':
-        case 'rejected':
-          return `Avoid false positives like recent feedback: ${note}`;
-        case 'missed_issue':
-          return `Check for missed issues like recent feedback: ${note}`;
-        case 'unclear':
-          return `Make findings clearer when recent feedback says: ${note}`;
-        case 'accepted':
-        case 'useful':
-          return `Keep prioritizing patterns confirmed by feedback: ${note}`;
-        default:
-          return '';
-      }
-    }).filter(Boolean);
+    return feedback
+      .map(item => {
+        const note = item.note.replace(/\s+/g, ' ').trim();
+        switch (item.label) {
+          case 'false_positive':
+          case 'rejected':
+            return `Avoid false positives like recent feedback: ${note}`;
+          case 'missed_issue':
+            return `Check for missed issues like recent feedback: ${note}`;
+          case 'unclear':
+            return `Make findings clearer when recent feedback says: ${note}`;
+          case 'accepted':
+          case 'useful':
+            return `Keep prioritizing patterns confirmed by feedback: ${note}`;
+          default:
+            return '';
+        }
+      })
+      .filter(Boolean);
   }
 
   private buildProposalRationale(feedback: ReviewFeedback[]): string {

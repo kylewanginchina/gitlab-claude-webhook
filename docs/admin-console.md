@@ -22,6 +22,8 @@ Docker Compose 将宿主机 `./data` 挂载到容器内 `/app/data`，并设置 
 - `review-skills.json`：Review Skill。
 - `review-feedback.json`：Review 反馈记录。
 - `prompt-proposals.json`：反馈分析生成的优化提案。
+- `prompt-proposal-transaction.json`：Apply Proposal 的自动恢复事务日志；由服务维护，
+  不要手工编辑。
 
 首次启动时，缺失的配置文件会以当前环境变量和内置默认值初始化；之后持久化配置会在后续启动中使用。
 

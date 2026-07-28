@@ -95,6 +95,7 @@ Feedback 可关联 Review Prompt，并保存标签、备注和来源。Analyze f
 - `review-skills.json`：Review Skill。
 - `review-feedback.json`：Review 反馈。
 - `prompt-proposals.json`：优化 Proposal。
+- `prompt-proposal-transaction.json`：Apply Proposal 的自动恢复事务日志，由服务内部维护。
 
 基础 Compose 将宿主机 `./data` 挂载为 `/app/data`，入口脚本会自动修复 `./data` 和
 `./logs` 的 ownership；Node 进程以 UID/GID `1001:1001` 运行。Winston 将错误日志与综合
