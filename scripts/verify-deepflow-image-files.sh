@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKERFILE="$ROOT_DIR/Dockerfile.deepflow"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.deepflow.yml"
+ENTRYPOINT="$ROOT_DIR/docker-entrypoint.sh"
 
 require_file() {
   local file_path="$1"
@@ -22,8 +23,32 @@ require_text() {
   fi
 }
 
+require_line() {
+  local file_path="$1"
+  local text="$2"
+  if ! grep -Fxq "$text" "$file_path"; then
+    echo "Missing exact line '$text' in ${file_path#$ROOT_DIR/}" >&2
+    exit 1
+  fi
+}
+
+require_regex() {
+  local file_path="$1"
+  local regex="$2"
+  if ! grep -Eq "$regex" "$file_path"; then
+    echo "Missing pattern '$regex' in ${file_path#$ROOT_DIR/}" >&2
+    exit 1
+  fi
+}
+
 require_file "$DOCKERFILE"
 require_file "$COMPOSE_FILE"
+require_file "$ENTRYPOINT"
+[[ -x "$ENTRYPOINT" ]] || { echo "Entrypoint is not executable" >&2; exit 1; }
+sh -n "$ENTRYPOINT"
+require_regex "$ENTRYPOINT" '^[[:space:]]*canonicalize_runtime_path\(\)'
+require_text "$ENTRYPOINT" 'fs.realpathSync.native'
+require_text "$ENTRYPOINT" 'exec gosu 1001:1001 "$@"'
 
 require_text "$DOCKERFILE" "ARG DEBIAN_MIRROR"
 require_text "$DOCKERFILE" "ARG DEBIAN_SECURITY_MIRROR"
@@ -51,8 +76,13 @@ done
 require_text "$DOCKERFILE" "https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
 require_text "$DOCKERFILE" "rustup component add rustfmt clippy"
 require_text "$DOCKERFILE" "cargo metadata --locked --format-version=1"
-require_text "$DOCKERFILE" "gosu"
-require_text "$DOCKERFILE" "docker-entrypoint.sh"
+require_regex "$DOCKERFILE" '^[[:space:]]*gosu[[:space:]]*\\$'
+require_line "$DOCKERFILE" 'COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh'
+require_line "$DOCKERFILE" 'ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]'
+if grep -Eq '^[[:space:]]*USER[[:space:]]+' "$DOCKERFILE"; then
+  echo "Unexpected USER instruction in Dockerfile.deepflow; entrypoint must start as root." >&2
+  exit 1
+fi
 
 for volume in \
   deepflow-cargo-registry \
