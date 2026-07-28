@@ -253,6 +253,61 @@ describe('ReviewCustomizationService', () => {
     ).toEqual([]);
   });
 
+  it('matches skills with no language hints regardless of detected languages', async () => {
+    const { service } = await buildService();
+    const skill = await service.createSkill({
+      name: 'Codex review without language limit',
+      description: '',
+      provider: 'codex',
+      fileGlobs: ['src/**'],
+      languageHints: [],
+      promptIds: ['bug-scan'],
+      systemInstructions: 'Review all supported languages.',
+      priority: 10,
+    });
+
+    expect(
+      service
+        .getMatchingSkills(
+          { diffs: [{ new_path: 'src/app.py' }, { new_path: 'src/main.rs' }] },
+          'bug-scan',
+          'codex'
+        )
+        .map(item => item.id)
+    ).toContain(skill.id);
+  });
+
+  it('matches multi-language hints when one changed-file language intersects', async () => {
+    const { service } = await buildService();
+    const skill = await service.createSkill({
+      name: 'TypeScript or Python review',
+      description: '',
+      provider: 'codex',
+      fileGlobs: ['src/**'],
+      languageHints: ['TS', 'Py'],
+      promptIds: ['bug-scan'],
+      systemInstructions: 'Review TypeScript and Python changes.',
+      priority: 10,
+    });
+
+    expect(
+      service
+        .getMatchingSkills(
+          { diffs: [{ new_path: 'src/main.rs' }, { new_path: 'src/worker.py' }] },
+          'bug-scan',
+          'codex'
+        )
+        .map(item => item.id)
+    ).toContain(skill.id);
+    expect(
+      service.getMatchingSkills(
+        { diffs: [{ new_path: 'src/main.rs' }, { new_path: 'src/worker.go' }] },
+        'bug-scan',
+        'codex'
+      )
+    ).toEqual([]);
+  });
+
   it('records feedback and creates reviewable prompt optimization proposals', async () => {
     const { service } = await buildService();
 
