@@ -52,8 +52,8 @@ Admin SPA (/admin)
 
 `/code-review` 根据运行时 Review provider 执行多个 Review pass，合并候选 finding，
 再评分并按置信度阈值发布。所有终态汇总在发布前重新读取 MR，检查其状态与 head SHA；
-已关闭、被跳过的草稿 MR、head SHA 已变化或已存在相同 SHA Review 的 MR 不会发布新的
-终态汇总。
+已关闭、被跳过的草稿 MR、head SHA 已变化，或在 `REVIEW_SKIP_EXISTING_SHA=true` 时已有
+相同 SHA Review 的 MR 不会发布新的终态汇总。
 
 Review 不收集或发布文件变更，也不创建 commit、branch 或 Merge Request。可定位的高
 置信度 finding 会尝试发布为 GitLab 行内 discussion，汇总中保留 head SHA 标记。
