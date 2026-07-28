@@ -6,16 +6,12 @@ LOG_DIR="${LOG_DIR:-/app/logs}"
 WORK_DIR="${WORK_DIR:-/tmp/gitlab-claude-work}"
 
 canonicalize_runtime_path() {
-  node - "$1" <<'NODE'
+  node - "$1" "$2" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 
 const input = process.argv[2];
-const allowedRoots = ['/app', '/tmp'];
-
-function isWithinAllowedRoot(candidate) {
-  return allowedRoots.some((root) => candidate.startsWith(`${root}${path.sep}`));
-}
+const allowedPaths = process.argv[3].split('\n').filter(Boolean);
 
 try {
   if (!path.isAbsolute(input)) {
@@ -58,8 +54,8 @@ try {
 
   const canonicalParent = fs.realpathSync.native(existingParent);
   const canonicalPath = path.join(canonicalParent, ...missingParts);
-  if (!isWithinAllowedRoot(canonicalPath)) {
-    throw new Error('path resolves outside approved runtime roots');
+  if (!allowedPaths.includes(canonicalPath)) {
+    throw new Error('path is not an approved runtime directory');
   }
 
   process.stdout.write(`${canonicalPath}\n`);
@@ -70,11 +66,33 @@ try {
 NODE
 }
 
-for dir in "$DATA_DIR" "$LOG_DIR" "$WORK_DIR"; do
-  canonical_dir="$(canonicalize_runtime_path "$dir")" || exit 1
+if [ "$DATA_DIR" != "/app/data" ] || \
+  [ "$LOG_DIR" != "/app/logs" ] || \
+  [ "$WORK_DIR" != "/tmp/gitlab-claude-work" ]; then
+  echo "Refusing unsupported runtime directory configuration" >&2
+  exit 1
+fi
+
+allowed_runtime_dirs='/app/data
+/app/logs
+/tmp/gitlab-claude-work'
+
+if [ "${DEEPFLOW_BUILD_TOOLS_ENABLED:-false}" = "true" ]; then
+  allowed_runtime_dirs="$allowed_runtime_dirs
+/home/claude/.cargo
+/home/claude/.cache
+/home/claude/go
+/home/claude/.npm
+/tmp/deepflow-work"
+fi
+
+set -f
+for dir in $allowed_runtime_dirs; do
+  canonical_dir="$(canonicalize_runtime_path "$dir" "$allowed_runtime_dirs")" || exit 1
   mkdir -p "$canonical_dir"
-  chown -R 1001:1001 "$canonical_dir"
+  chown -R -h 1001:1001 "$canonical_dir"
 done
+set +f
 
 if command -v su-exec >/dev/null 2>&1; then
   exec su-exec 1001:1001 "$@"

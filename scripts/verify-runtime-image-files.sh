@@ -44,7 +44,17 @@ require_entrypoint_contract() {
   sh -n "$ENTRYPOINT"
   require_regex "$ENTRYPOINT" '^[[:space:]]*canonicalize_runtime_path\(\)'
   require_text "$ENTRYPOINT" 'fs.realpathSync.native'
-  require_text "$ENTRYPOINT" 'chown -R 1001:1001 "$canonical_dir"'
+  require_text "$ENTRYPOINT" 'allowedPaths.includes(canonicalPath)'
+  require_text "$ENTRYPOINT" '/app/data'
+  require_text "$ENTRYPOINT" '/app/logs'
+  require_text "$ENTRYPOINT" '/tmp/gitlab-claude-work'
+  require_text "$ENTRYPOINT" 'DEEPFLOW_BUILD_TOOLS_ENABLED'
+  require_text "$ENTRYPOINT" '/home/claude/.cargo'
+  require_text "$ENTRYPOINT" '/home/claude/.cache'
+  require_text "$ENTRYPOINT" '/home/claude/go'
+  require_text "$ENTRYPOINT" '/home/claude/.npm'
+  require_text "$ENTRYPOINT" '/tmp/deepflow-work'
+  require_text "$ENTRYPOINT" 'chown -R -h 1001:1001 "$canonical_dir"'
   require_text "$ENTRYPOINT" 'exec su-exec 1001:1001 "$@"'
   require_text "$ENTRYPOINT" 'exec gosu 1001:1001 "$@"'
 }

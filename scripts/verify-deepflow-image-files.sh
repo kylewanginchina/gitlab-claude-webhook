@@ -48,6 +48,9 @@ require_file "$ENTRYPOINT"
 sh -n "$ENTRYPOINT"
 require_regex "$ENTRYPOINT" '^[[:space:]]*canonicalize_runtime_path\(\)'
 require_text "$ENTRYPOINT" 'fs.realpathSync.native'
+require_text "$ENTRYPOINT" 'allowedPaths.includes(canonicalPath)'
+require_text "$ENTRYPOINT" 'DEEPFLOW_BUILD_TOOLS_ENABLED'
+require_text "$ENTRYPOINT" 'chown -R -h 1001:1001 "$canonical_dir"'
 require_text "$ENTRYPOINT" 'exec gosu 1001:1001 "$@"'
 
 require_text "$DOCKERFILE" "ARG DEBIAN_MIRROR"
@@ -85,13 +88,23 @@ if grep -Eq '^[[:space:]]*USER[[:space:]]+' "$DOCKERFILE"; then
 fi
 
 for volume in \
+  webhook-work \
   deepflow-cargo-registry \
   deepflow-cargo-git \
   deepflow-go-cache \
+  deepflow-go-mod-cache \
   deepflow-npm-cache \
   deepflow-work; do
   require_text "$COMPOSE_FILE" "$volume"
 done
+
+require_line "$COMPOSE_FILE" '      - webhook-work:/tmp/gitlab-claude-work'
+require_line "$COMPOSE_FILE" '      - deepflow-work:/tmp/deepflow-work'
+require_line "$COMPOSE_FILE" '      - deepflow-cargo-registry:/home/claude/.cargo/registry'
+require_line "$COMPOSE_FILE" '      - deepflow-cargo-git:/home/claude/.cargo/git'
+require_line "$COMPOSE_FILE" '      - deepflow-go-cache:/home/claude/.cache/go-build'
+require_line "$COMPOSE_FILE" '      - deepflow-go-mod-cache:/home/claude/go/pkg/mod'
+require_line "$COMPOSE_FILE" '      - deepflow-npm-cache:/home/claude/.npm'
 
 require_text "$COMPOSE_FILE" "Dockerfile.deepflow"
 require_text "$COMPOSE_FILE" "gitlab-claude-webhook-deepflow"
