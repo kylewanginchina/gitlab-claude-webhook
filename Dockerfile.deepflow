@@ -35,6 +35,7 @@ RUN sed -i \
       gcc \
       git \
       golang-go \
+      gosu \
       jq \
       libbpf-dev \
       libelf-dev \
@@ -139,15 +140,18 @@ RUN mkdir -p \
       /tmp/deepflow-work \
       /tmp/gitlab-claude-work
 
-USER claude
-
 ENV HOME=/home/claude
 ENV DATA_DIR=/app/data
+ENV LOG_DIR=/app/logs
 ENV npm_config_cache=/home/claude/.npm
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "const port = process.env.PORT || 3000; require('http').get(`http://localhost:${port}/health`, (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

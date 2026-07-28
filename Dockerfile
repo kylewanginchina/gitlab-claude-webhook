@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # Install shell and repository tooling used by review/edit workflows
-RUN apk add --no-cache bash git curl ripgrep
+RUN apk add --no-cache bash git curl ripgrep su-exec
 
 # Create app directory
 WORKDIR /app
@@ -46,12 +46,13 @@ RUN mkdir -p /home/claude/.codex && \
 # root-owned but readable, which avoids a slow recursive chown over node_modules.
 RUN chown -R claude:claude /tmp/gitlab-claude-work /app/data /app/logs
 
-# Switch to non-root user
-USER claude
-
 # Set HOME environment for the claude user
 ENV HOME=/home/claude
 ENV DATA_DIR=/app/data
+ENV LOG_DIR=/app/logs
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 
 # Expose port
 EXPOSE 3000
@@ -60,5 +61,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "const port = process.env.PORT || 3000; require('http').get(`http://localhost:${port}/health`, (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-# Start the application (config.toml is generated at startup by the app)
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

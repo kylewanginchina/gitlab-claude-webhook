@@ -51,6 +51,8 @@ done
 require_text "$DOCKERFILE" "https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
 require_text "$DOCKERFILE" "rustup component add rustfmt clippy"
 require_text "$DOCKERFILE" "cargo metadata --locked --format-version=1"
+require_text "$DOCKERFILE" "gosu"
+require_text "$DOCKERFILE" "docker-entrypoint.sh"
 
 for volume in \
   deepflow-cargo-registry \
