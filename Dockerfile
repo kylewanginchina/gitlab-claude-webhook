@@ -24,7 +24,7 @@ COPY frontend/src/ ./frontend/src/
 COPY .env.example ./
 
 # Build the application
-RUN npm run build
+RUN npm run build:server
 RUN npm --prefix frontend run build
 
 # Remove dev dependencies after build

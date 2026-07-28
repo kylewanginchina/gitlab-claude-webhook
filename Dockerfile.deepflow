@@ -114,7 +114,7 @@ COPY src/ ./src/
 COPY frontend/src/ ./frontend/src/
 COPY .env.example ./
 
-RUN npm run build
+RUN npm run build:server
 RUN npm --prefix frontend run build
 
 RUN npm prune --omit=dev
