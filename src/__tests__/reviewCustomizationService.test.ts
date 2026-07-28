@@ -100,7 +100,12 @@ describe('ReviewCustomizationService', () => {
   it('keeps built-in review templates static-first unless validation is explicitly requested', async () => {
     const { service } = await buildService();
 
-    for (const id of ['claude.review.system', 'codex.review.instructions', 'review.pass.template']) {
+    for (const id of [
+      'claude.review.system',
+      'codex.review.instructions',
+      'review.pass.template',
+      'review.scoring.template',
+    ]) {
       const body = service.getPromptTemplate(id).versions[0]?.body || '';
       expect(body).toContain(
         'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation.'
