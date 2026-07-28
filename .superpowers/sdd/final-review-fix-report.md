@@ -71,3 +71,51 @@
 
 - The Jest command passes, but `ts-jest` emits its existing hybrid Node module-kind warning about `isolatedModules`. It is unrelated to this change and did not affect results.
 - RED evidence above was collected after taking over the interrupted work by controlled mutation and immediate restoration. It is evidence that the tests detect the stated regressions, not a claim that the original changes were written test-first.
+
+## Follow-up: Proposal Mutation Concurrency Review
+
+- Review base SHA: `b61c3bb7f49e9814a9f3b50e3b2015aa724d302c`
+- Files changed: `src/admin/reviewCustomizationService.ts`, `src/__tests__/reviewCustomizationService.test.ts`
+- No Claude/Codex permission, sandbox, Docker, or unrelated module changed.
+
+### Root Cause
+
+`analyzeFeedback`, `applyProposal`, and `dismissProposal` previously read and changed `this.proposals` outside a shared critical section. Deferred `proposalStore.write` calls therefore allowed two callers to create independent snapshots from the same old array. A later completion could overwrite a prior status; an Apply started while Dismiss was waiting could still observe `open`.
+
+### RED
+
+Before the queue implementation, the following command deterministically failed:
+
+```bash
+npx jest --runInBand src/__tests__/reviewCustomizationService.test.ts --testNamePattern='serializes concurrent dismissals|serializes a dismiss and apply race'
+```
+
+- Concurrent Dismiss test: first proposal returned to `open` after the second deferred write completed from an old snapshot.
+- Dismiss/Apply race: both operations fulfilled; Apply did not reject after Dismiss had begun persisting.
+
+### GREEN
+
+The service now uses a private single-process Promise tail for proposal mutations. `analyzeFeedback`, `applyProposal`, and `dismissProposal` enter it before locating and validating proposal state; each writes a complete replacement snapshot and assigns in-memory state only after required writes resolve. The tail converts each operation outcome to `void`, so a rejected write rejects only that caller and cannot poison later work.
+
+The following focused GREEN command passed after correcting an assertion that treated an already-captured `Error` object as a matcher callback:
+
+```bash
+npx jest --runInBand src/__tests__/reviewCustomizationService.test.ts --testNamePattern='serializes concurrent dismissals|serializes a dismiss and apply race|keeps a proposal open and retryable when dismissal persistence fails'
+```
+
+Results: 3 passed. The existing failed-write/retry case proves the queue continues after a rejected mutation.
+
+### Final Follow-up Verification
+
+| Command | Actual result |
+| --- | --- |
+| `npx jest --runInBand src/__tests__/reviewCustomizationService.test.ts src/__tests__/adminRoutes.test.ts` | PASS, 2 suites, 45 tests |
+| `npm run type-check` | PASS (`tsc --noEmit`) |
+| `git diff --check` | PASS |
+| Persistence suite discovery | No separate `reviewCustomizationServicePersistence` test file exists in this repository; coverage is in `reviewCustomizationService.test.ts` and restart assertions. |
+
+### Self-review
+
+- Deadlock: no queued mutation calls another queued public mutation; each critical section waits only for storage operations.
+- Error propagation and recovery: callers receive the original store error; `run.then(() => undefined, () => undefined)` restores the queue tail after either outcome.
+- State ordering: status is re-read after queue entry; all successful proposal transitions write their full snapshots before updating in-memory proposals. The Dismiss/Apply race test verifies a dismissed proposal cannot be applied or reopened in memory or after restart.

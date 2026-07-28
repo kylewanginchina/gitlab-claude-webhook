@@ -452,6 +452,7 @@ export class ReviewCustomizationService {
   private skills: ReviewSkill[] = [];
   private feedback: ReviewFeedback[] = [];
   private proposals: PromptOptimizationProposal[] = [];
+  private proposalMutationQueue: Promise<void> = Promise.resolve();
   private loaded = false;
 
   constructor(options: ReviewCustomizationServiceOptions = {}) {
@@ -826,82 +827,114 @@ export class ReviewCustomizationService {
   }
 
   public async analyzeFeedback(): Promise<PromptOptimizationProposal[]> {
-    const grouped = new Map<string, ReviewFeedback[]>();
-    for (const item of this.feedback) {
-      if (!item.promptId || !item.note.trim()) {
-        continue;
-      }
-      if (!['false_positive', 'missed_issue', 'unclear', 'accepted', 'rejected'].includes(item.label)) {
-        continue;
-      }
-      const group = grouped.get(item.promptId) || [];
-      group.push(item);
-      grouped.set(item.promptId, group);
-    }
-
-    const created: PromptOptimizationProposal[] = [];
-    for (const [promptId, feedback] of grouped.entries()) {
-      const prompt = this.findPrompt(promptId);
-      const additions = this.feedbackToFocusLines(feedback);
-      if (additions.length === 0) {
-        continue;
+    return this.enqueueProposalMutation(async () => {
+      const grouped = new Map<string, ReviewFeedback[]>();
+      for (const item of this.feedback) {
+        if (!item.promptId || !item.note.trim()) {
+          continue;
+        }
+        if (!['false_positive', 'missed_issue', 'unclear', 'accepted', 'rejected'].includes(item.label)) {
+          continue;
+        }
+        const group = grouped.get(item.promptId) || [];
+        group.push(item);
+        grouped.set(item.promptId, group);
       }
 
-      const proposal: PromptOptimizationProposal = {
-        id: randomUUID(),
-        promptId,
-        baseVersion: prompt.currentVersion,
-        title: `Tune ${prompt.label} from ${feedback.length} feedback item(s)`,
-        rationale: this.buildProposalRationale(feedback),
-        suggestedDraft: {
-          focus: Array.from(new Set([...prompt.draft.focus, ...additions])),
-          systemInstructions: prompt.draft.systemInstructions,
-        },
-        feedbackIds: feedback.map(item => item.id),
-        status: 'open',
-        createdAt: now(),
-      };
-      this.proposals.push(proposal);
-      created.push(proposal);
-    }
+      const created: PromptOptimizationProposal[] = [];
+      for (const [promptId, feedback] of grouped.entries()) {
+        const prompt = this.findPrompt(promptId);
+        const additions = this.feedbackToFocusLines(feedback);
+        if (additions.length === 0) {
+          continue;
+        }
 
-    await this.proposalStore.write(this.proposals);
-    return clone(created);
+        created.push({
+          id: randomUUID(),
+          promptId,
+          baseVersion: prompt.currentVersion,
+          title: `Tune ${prompt.label} from ${feedback.length} feedback item(s)`,
+          rationale: this.buildProposalRationale(feedback),
+          suggestedDraft: {
+            focus: Array.from(new Set([...prompt.draft.focus, ...additions])),
+            systemInstructions: prompt.draft.systemInstructions,
+          },
+          feedbackIds: feedback.map(item => item.id),
+          status: 'open',
+          createdAt: now(),
+        });
+      }
+
+      const nextProposals = [...this.proposals, ...created];
+      await this.proposalStore.write(nextProposals);
+      this.proposals = nextProposals;
+      return clone(created);
+    });
   }
 
   public async applyProposal(id: string): Promise<PromptOptimizationProposal> {
-    const proposal = this.findProposal(id);
-    if (proposal.status !== 'open') {
-      throw new Error('proposal is not open');
-    }
-    const prompt = this.findPrompt(proposal.promptId);
-    prompt.draft = clone(proposal.suggestedDraft);
-    prompt.updatedAt = now();
-    proposal.status = 'applied';
-    proposal.appliedAt = now();
-    await this.promptStore.write(this.prompts);
-    await this.proposalStore.write(this.proposals);
-    return clone(proposal);
+    return this.enqueueProposalMutation(async () => {
+      const proposal = this.findProposal(id);
+      if (proposal.status !== 'open') {
+        throw new Error('proposal is not open');
+      }
+
+      const appliedAt = now();
+      const prompt = this.findPrompt(proposal.promptId);
+      const nextPrompt: ReviewPrompt = {
+        ...prompt,
+        draft: clone(proposal.suggestedDraft),
+        updatedAt: appliedAt,
+      };
+      const appliedProposal: PromptOptimizationProposal = {
+        ...proposal,
+        status: 'applied',
+        appliedAt,
+      };
+      const nextPrompts = this.prompts.map(item =>
+        item.id === prompt.id ? nextPrompt : item
+      );
+      const nextProposals = this.proposals.map(item =>
+        item.id === id ? appliedProposal : item
+      );
+
+      await this.promptStore.write(nextPrompts);
+      await this.proposalStore.write(nextProposals);
+      this.prompts = nextPrompts;
+      this.proposals = nextProposals;
+      return clone(appliedProposal);
+    });
   }
 
   public async dismissProposal(id: string): Promise<PromptOptimizationProposal> {
-    const proposal = this.findProposal(id);
-    if (proposal.status !== 'open') {
-      throw new Error('proposal is not open');
-    }
+    return this.enqueueProposalMutation(async () => {
+      const proposal = this.findProposal(id);
+      if (proposal.status !== 'open') {
+        throw new Error('proposal is not open');
+      }
 
-    const dismissedProposal: PromptOptimizationProposal = {
-      ...proposal,
-      status: 'dismissed',
-      dismissedAt: now(),
-    };
-    const nextProposals = this.proposals.map(item =>
-      item.id === id ? dismissedProposal : item
+      const dismissedProposal: PromptOptimizationProposal = {
+        ...proposal,
+        status: 'dismissed',
+        dismissedAt: now(),
+      };
+      const nextProposals = this.proposals.map(item =>
+        item.id === id ? dismissedProposal : item
+      );
+
+      await this.proposalStore.write(nextProposals);
+      this.proposals = nextProposals;
+      return clone(dismissedProposal);
+    });
+  }
+
+  private enqueueProposalMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const run = this.proposalMutationQueue.then(mutation, mutation);
+    this.proposalMutationQueue = run.then(
+      () => undefined,
+      () => undefined
     );
-
-    await this.proposalStore.write(nextProposals);
-    this.proposals = nextProposals;
-    return clone(dismissedProposal);
+    return run;
   }
 
   private ensureDefaultPrompts(prompts: ReviewPrompt[]): ReviewPrompt[] {

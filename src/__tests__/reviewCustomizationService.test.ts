@@ -10,6 +10,20 @@ async function buildService() {
   return { dataDir, service };
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushPromises(): Promise<void> {
+  await new Promise(resolve => setImmediate(resolve));
+}
+
 describe('ReviewCustomizationService', () => {
   it('initializes the default review prompts as published passes', async () => {
     const { service } = await buildService();
@@ -394,6 +408,105 @@ describe('ReviewCustomizationService', () => {
     await expect(service.applyProposal(proposal!.id)).rejects.toThrow('proposal is not open');
     await expect(service.dismissProposal(proposal!.id)).rejects.toThrow('proposal is not open');
     expect(service.getPrompt('bug-scan').draft).not.toEqual(proposal!.suggestedDraft);
+  });
+
+  it('serializes concurrent dismissals so persisted proposal snapshots retain both states', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Dismiss the bug scan proposal.',
+      source: 'admin',
+    });
+    await service.createFeedback({
+      promptId: 'history-context',
+      label: 'false_positive',
+      note: 'Dismiss the history proposal.',
+      source: 'admin',
+    });
+    const [firstProposal, secondProposal] = await service.analyzeFeedback();
+    const firstWrite = deferred();
+    const secondWrite = deferred();
+    const proposalStore = (service as any).proposalStore;
+    const originalWrite = proposalStore.write.bind(proposalStore);
+    const pendingWrites = [firstWrite, secondWrite];
+    const write = jest.spyOn(proposalStore, 'write').mockImplementation(async snapshot => {
+      await pendingWrites.shift()?.promise;
+      await originalWrite(snapshot);
+    });
+
+    const firstDismissal = service.dismissProposal(firstProposal!.id);
+    await flushPromises();
+    const secondDismissal = service.dismissProposal(secondProposal!.id);
+    await flushPromises();
+
+    firstWrite.resolve();
+    await firstDismissal;
+    secondWrite.resolve();
+    await secondDismissal;
+
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(service.listProposals()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: firstProposal!.id, status: 'dismissed' }),
+        expect.objectContaining({ id: secondProposal!.id, status: 'dismissed' }),
+      ])
+    );
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+    expect(restarted.listProposals()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: firstProposal!.id, status: 'dismissed' }),
+        expect.objectContaining({ id: secondProposal!.id, status: 'dismissed' }),
+      ])
+    );
+  });
+
+  it('serializes a dismiss and apply race so a dismissed proposal cannot be applied or reopened', async () => {
+    const { dataDir, service } = await buildService();
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Dismiss before any concurrent apply can succeed.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+    const firstWrite = deferred();
+    const proposalStore = (service as any).proposalStore;
+    const originalWrite = proposalStore.write.bind(proposalStore);
+    let writeCount = 0;
+    jest.spyOn(proposalStore, 'write').mockImplementation(async snapshot => {
+      writeCount += 1;
+      if (writeCount === 1) {
+        await firstWrite.promise;
+      }
+      await originalWrite(snapshot);
+    });
+
+    const dismissal = service.dismissProposal(proposal!.id);
+    await flushPromises();
+    const apply = service.applyProposal(proposal!.id);
+    await flushPromises();
+
+    firstWrite.resolve();
+    const results = await Promise.allSettled([dismissal, apply]);
+
+    expect(results[0]?.status).toBe('fulfilled');
+    expect(results[1]?.status).toBe('rejected');
+    if (results[1]?.status === 'rejected') {
+      expect((results[1].reason as Error).message).toBe('proposal is not open');
+    }
+    expect(service.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'dismissed',
+    });
+
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+    expect(restarted.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'dismissed',
+    });
+    await expect(restarted.applyProposal(proposal!.id)).rejects.toThrow('proposal is not open');
   });
 
   it('keeps a proposal open and retryable when dismissal persistence fails', async () => {
