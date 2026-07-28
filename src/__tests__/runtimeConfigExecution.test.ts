@@ -346,6 +346,10 @@ describe('runtime config execution paths', () => {
     expect(claudeEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
     expect(claudeEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2460000);
+    const executedSystemPrompt = mockQuery.mock.calls[0]?.[0]?.options?.systemPrompt?.append as string;
+    expect(executedSystemPrompt).toContain(
+      'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation.'
+    );
   });
 
   it('uses published admin Claude edit system prompt templates for ordinary requests', async () => {
@@ -1339,6 +1343,10 @@ describe('runtime config execution paths', () => {
     );
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1020000);
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1380000);
+    const executedPrompt = mockRunStreamed.mock.calls[0]?.[0] as string;
+    expect(executedPrompt).toContain(
+      'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation.'
+    );
   });
 
   it('uses published admin Codex edit instruction templates for ordinary requests', async () => {

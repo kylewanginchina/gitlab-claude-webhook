@@ -128,7 +128,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     provider: 'claude',
     scope: 'review',
     body:
-      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. Prefer diff-first review and avoid broad repository exploration. For merge request contexts, use git commands to inspect changes, history, and blame only when needed to validate a concrete concern. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Return a concise, structured review result.',
+      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools such as Bash, Read, Glob, and Grep. Prefer diff-first review and avoid broad repository exploration. For merge request contexts, use git commands to inspect changes, history, and blame only when needed to validate a concrete concern. If any build, test, lint, compile, or validation command fails for any reason, record that verification result and continue the code review with static repository inspection. Do not stop solely because a command failed. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection. Return a concise, structured review result.',
   },
   {
     id: 'claude.context.wrapper',
@@ -179,7 +179,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
     provider: 'codex',
     scope: 'review',
     body:
-      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result.',
+      'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.',
   },
   {
     id: 'codex.context.wrapper',
@@ -207,6 +207,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
       'Do not use Task, Agent, WebFetch, or WebSearch.',
       'Use only local repository inspection tools and keep exploration narrow.',
       'Review only issues introduced or made worse by this merge request.',
+      'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.',
       'Ignore formatting, lint, type errors, missing imports, tests, or other CI/build output.',
       'Prefer fewer, high-signal issues instead of broad feedback.',
       '',
@@ -267,6 +268,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
       'Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools.',
       'Only score issues introduced or made worse by this merge request.',
       'If this is a CLAUDE.md-related issue, confirm that an applicable CLAUDE.md explicitly calls it out.',
+      'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.',
       'Ignore lint, formatting, type errors, imports, and test failures that CI would catch separately.',
       '',
       'Merge request: {{mergeRequestUrl}}',
