@@ -1712,7 +1712,7 @@ describe('runtime config execution paths', () => {
     expect(mockReviewService.postReview).not.toHaveBeenCalled();
   });
 
-  it('does not publish a no-candidate review after the MR head changes', async () => {
+  it('does not publish a no-candidate review after the MR diff_refs head changes', async () => {
     const processor = new EventProcessor();
     const reviewContext = createReviewContext();
     const postComment = jest.fn().mockResolvedValue(undefined);
@@ -1735,7 +1735,7 @@ describe('runtime config execution paths', () => {
         state: 'opened',
         draft: false,
         work_in_progress: false,
-        sha: 'new-head-sha',
+        diff_refs: { head_sha: 'new-head-sha' },
       }),
     };
     (processor as any).postComment = postComment;
@@ -1769,7 +1769,7 @@ describe('runtime config execution paths', () => {
     );
   });
 
-  it('does not publish a below-threshold review after the MR head changes', async () => {
+  it('does not publish a below-threshold review after the MR diff_refs head changes', async () => {
     const processor = new EventProcessor();
     const reviewContext = createReviewContext();
     const finding: ReviewFinding = {
@@ -1800,7 +1800,7 @@ describe('runtime config execution paths', () => {
         state: 'opened',
         draft: false,
         work_in_progress: false,
-        sha: 'new-head-sha',
+        diff_refs: { head_sha: 'new-head-sha' },
       }),
     };
     (processor as any).postComment = postComment;
@@ -1869,6 +1869,89 @@ describe('runtime config execution paths', () => {
       )
     ).resolves.toBe(false);
     expect(postComment).toHaveBeenCalledWith(expect.any(Object), expected, expect.any(Object));
+  });
+
+  it('fails closed when GitLab does not return a latest merge request head SHA', async () => {
+    const processor = new EventProcessor();
+    const postComment = jest.fn().mockResolvedValue(undefined);
+    const updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+      }),
+    };
+    (processor as any).gitlabReviewService = {
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+    };
+    (processor as any).postComment = postComment;
+    (processor as any).updateProgressComment = updateProgressComment;
+
+    await expect(
+      (processor as any).ensureReviewCanPublish(
+        createMergeRequestEvent(),
+        createReviewContext(),
+        createRuntimeConfig().review,
+        (processor as any).createRunContext()
+      )
+    ).resolves.toBe(false);
+
+    const message =
+      'Skipped posting code review: unable to verify the latest merge request head SHA.';
+    expect(postComment).toHaveBeenCalledWith(expect.any(Object), message, expect.any(Object));
+    expect(updateProgressComment).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      message,
+      true
+    );
+  });
+
+  it.each([
+    ['allows publication when top-level SHA matches', { sha: 'head-sha' }, true],
+    ['blocks publication when top-level SHA changes', { sha: 'new-head-sha' }, false],
+    ['allows publication when diff_refs head SHA matches', { diff_refs: { head_sha: 'head-sha' } }, true],
+    [
+      'blocks publication when diff_refs head SHA changes',
+      { diff_refs: { head_sha: 'new-head-sha' } },
+      false,
+    ],
+  ])('%s', async (_name, headSnapshot, expectedCanPublish) => {
+    const processor = new EventProcessor();
+    const postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        ...headSnapshot,
+      }),
+    };
+    (processor as any).gitlabReviewService = {
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+    };
+    (processor as any).postComment = postComment;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (processor as any).ensureReviewCanPublish(
+        createMergeRequestEvent(),
+        createReviewContext(),
+        createRuntimeConfig().review,
+        (processor as any).createRunContext()
+      )
+    ).resolves.toBe(expectedCanPublish);
+
+    if (expectedCanPublish) {
+      expect(postComment).not.toHaveBeenCalled();
+    } else {
+      expect(postComment).toHaveBeenCalledWith(
+        expect.any(Object),
+        'Skipped posting code review: merge request head changed while review was running.',
+        expect.any(Object)
+      );
+    }
   });
 
   it('blocks publication when another review records the same SHA during execution', async () => {

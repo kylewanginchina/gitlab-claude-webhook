@@ -132,6 +132,30 @@ describe('GitLabReviewService', () => {
 
       expect(passes[0]?.prompt).toBe('Pass CLAUDE.md compliance budget 13/10/2.');
     });
+
+    it('keeps the static-inspection policy when disabled pass and scoring templates use built-in fallbacks', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-template-fallback-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.updatePromptTemplate('review.pass.template', { enabled: false });
+      await customization.updatePromptTemplate('review.scoring.template', { enabled: false });
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const passPrompt = customService.buildReviewPasses(context)[0]?.prompt;
+      const scoringPrompt = customService.buildScoringPrompt(context, {
+        title: 'Potential regression',
+        body: 'The change may break retry handling.',
+        confidence: 80,
+        path: 'src/a.ts',
+        line: 10,
+        lineType: 'new',
+      });
+      const staticInspectionPolicy =
+        'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.';
+
+      expect(passPrompt).toContain(staticInspectionPolicy);
+      expect(scoringPrompt).toContain(staticInspectionPolicy);
+    });
   });
 
   describe('parseReviewOutput', () => {

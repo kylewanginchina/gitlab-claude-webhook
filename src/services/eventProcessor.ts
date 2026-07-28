@@ -38,6 +38,16 @@ interface EventRunContext {
   progressMessages: ProgressEntry[];
 }
 
+interface MergeRequestPublicationSnapshot {
+  state?: string;
+  draft?: boolean;
+  work_in_progress?: boolean;
+  sha?: string | null;
+  diff_refs?: {
+    head_sha?: string | null;
+  } | null;
+}
+
 interface ThreadContextResult {
   threadContext: string;
   noteBody: string;
@@ -881,10 +891,11 @@ export class EventProcessor {
     reviewSettings: RuntimeConfig['review'],
     runContext: EventRunContext
   ): Promise<boolean> {
-    const latest = await this.gitlabService.getMergeRequest(
+    const latest = (await this.gitlabService.getMergeRequest(
       reviewContext.projectId,
       reviewContext.mergeRequestIid
-    );
+    )) as MergeRequestPublicationSnapshot;
+    const latestHeadSha = this.getMergeRequestHeadSha(latest);
 
     let message = '';
     if (
@@ -892,7 +903,10 @@ export class EventProcessor {
       (reviewSettings.skipDraft && (latest.draft || latest.work_in_progress))
     ) {
       message = 'Skipped posting code review: merge request is no longer eligible.';
-    } else if (latest.sha && latest.sha !== reviewContext.headSha) {
+    } else if (!latestHeadSha) {
+      message =
+        'Skipped posting code review: unable to verify the latest merge request head SHA.';
+    } else if (latestHeadSha !== reviewContext.headSha) {
       message = 'Skipped posting code review: merge request head changed while review was running.';
     } else if (
       reviewSettings.skipExistingSha &&
@@ -912,6 +926,18 @@ export class EventProcessor {
     await this.postComment(event, message, runContext);
     await this.updateProgressComment(event, runContext, message, true);
     return false;
+  }
+
+  private getMergeRequestHeadSha(
+    mergeRequest: MergeRequestPublicationSnapshot
+  ): string | undefined {
+    const sha = typeof mergeRequest.sha === 'string' ? mergeRequest.sha : undefined;
+    const diffRefsHeadSha =
+      typeof mergeRequest.diff_refs?.head_sha === 'string'
+        ? mergeRequest.diff_refs.head_sha
+        : undefined;
+
+    return sha || diffRefsHeadSha;
   }
 
   private async executeReviewPass(

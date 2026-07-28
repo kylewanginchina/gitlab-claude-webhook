@@ -49,6 +49,39 @@ describe('ReviewCustomizationService', () => {
     });
   });
 
+  it('falls back to the draft when an enabled published prompt has no versions', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-customization-empty-versions-'));
+    await fs.writeFile(
+      path.join(dataDir, 'review-prompts.json'),
+      JSON.stringify([
+        {
+          id: 'bug-scan',
+          label: 'Shallow bug scan',
+          description: 'Read changed files and scan for obvious correctness issues.',
+          enabled: true,
+          provider: 'any',
+          currentVersion: 7,
+          draft: {
+            focus: ['Use the recoverable draft focus.'],
+            systemInstructions: 'Use the recoverable draft instructions.',
+          },
+          versions: [],
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-01T00:00:00.000Z',
+        },
+      ])
+    );
+
+    const service = new ReviewCustomizationService({ dataDir });
+    await service.initialize();
+
+    expect(service.getPublishedReviewPasses().find(item => item.id === 'bug-scan')).toMatchObject({
+      version: 7,
+      focus: ['Use the recoverable draft focus.'],
+      systemInstructions: 'Use the recoverable draft instructions.',
+    });
+  });
+
   it('updates a prompt draft, publishes a new version, and rolls back through version history', async () => {
     const { service } = await buildService();
 
@@ -361,6 +394,42 @@ describe('ReviewCustomizationService', () => {
     await expect(service.applyProposal(proposal!.id)).rejects.toThrow('proposal is not open');
     await expect(service.dismissProposal(proposal!.id)).rejects.toThrow('proposal is not open');
     expect(service.getPrompt('bug-scan').draft).not.toEqual(proposal!.suggestedDraft);
+  });
+
+  it('keeps a proposal open and retryable when dismissal persistence fails', async () => {
+    const { dataDir, service } = await buildService();
+
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Keep this proposal open when persistence fails.',
+      source: 'admin',
+    });
+    const [proposal] = await service.analyzeFeedback();
+    const proposalStore = (service as any).proposalStore;
+    jest.spyOn(proposalStore, 'write').mockRejectedValueOnce(new Error('proposal store write failed'));
+
+    await expect(service.dismissProposal(proposal!.id)).rejects.toThrow('proposal store write failed');
+
+    expect(service.listProposals().find(item => item.id === proposal!.id)).toMatchObject({
+      status: 'open',
+    });
+
+    const restartedAfterFailure = new ReviewCustomizationService({ dataDir });
+    await restartedAfterFailure.initialize();
+    expect(
+      restartedAfterFailure.listProposals().find(item => item.id === proposal!.id)
+    ).toMatchObject({ status: 'open' });
+
+    await expect(service.dismissProposal(proposal!.id)).resolves.toMatchObject({
+      status: 'dismissed',
+    });
+
+    const restartedAfterRetry = new ReviewCustomizationService({ dataDir });
+    await restartedAfterRetry.initialize();
+    expect(
+      restartedAfterRetry.listProposals().find(item => item.id === proposal!.id)
+    ).toMatchObject({ status: 'dismissed' });
   });
 
   it('persists a dismissed proposal across service restarts', async () => {

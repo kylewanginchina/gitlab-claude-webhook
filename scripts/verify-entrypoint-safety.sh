@@ -233,6 +233,9 @@ verify_preexisting_symlink_rejected() {
 }
 
 verify_accepted normal /app/data /app/logs /tmp/gitlab-claude-work
+verify_rejected empty-data-dir '' /app/logs /tmp/gitlab-claude-work ''
+verify_rejected empty-log-dir /app/data '' /tmp/gitlab-claude-work ''
+verify_rejected empty-work-dir /app/data /app/logs '' ''
 verify_rejected traversal /app/../etc /app/logs /tmp/gitlab-claude-work /app/../etc
 verify_rejected tmp-traversal /app/data /app/logs /tmp/../../etc /tmp/../../etc
 verify_rejected symlink /app/entrypoint-safety-link /app/logs /tmp/gitlab-claude-work /app/entrypoint-safety-link

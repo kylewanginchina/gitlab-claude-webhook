@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-DATA_DIR="${DATA_DIR:-/app/data}"
-LOG_DIR="${LOG_DIR:-/app/logs}"
-WORK_DIR="${WORK_DIR:-/tmp/gitlab-claude-work}"
+DATA_DIR="${DATA_DIR-/app/data}"
+LOG_DIR="${LOG_DIR-/app/logs}"
+WORK_DIR="${WORK_DIR-/tmp/gitlab-claude-work}"
 
 canonicalize_runtime_path() {
   node - "$1" "$2" <<'NODE'

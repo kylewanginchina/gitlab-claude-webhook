@@ -889,10 +889,19 @@ export class ReviewCustomizationService {
     if (proposal.status !== 'open') {
       throw new Error('proposal is not open');
     }
-    proposal.status = 'dismissed';
-    proposal.dismissedAt = now();
-    await this.proposalStore.write(this.proposals);
-    return clone(proposal);
+
+    const dismissedProposal: PromptOptimizationProposal = {
+      ...proposal,
+      status: 'dismissed',
+      dismissedAt: now(),
+    };
+    const nextProposals = this.proposals.map(item =>
+      item.id === id ? dismissedProposal : item
+    );
+
+    await this.proposalStore.write(nextProposals);
+    this.proposals = nextProposals;
+    return clone(dismissedProposal);
   }
 
   private ensureDefaultPrompts(prompts: ReviewPrompt[]): ReviewPrompt[] {

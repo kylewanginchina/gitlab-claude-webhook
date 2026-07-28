@@ -42,6 +42,7 @@ const ALIASES: Record<string, string> = {
   python: 'python',
   'c++': 'cpp',
   cpp: 'cpp',
+  'c#': 'csharp',
   proto: 'protobuf',
   protobuf: 'protobuf',
 };

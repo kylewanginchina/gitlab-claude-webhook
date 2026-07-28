@@ -19,6 +19,7 @@ describe('review language detection', () => {
     ['javascript', 'javascript'],
     ['Py', 'python'],
     ['c++', 'cpp'],
+    ['C#', 'csharp'],
     ['proto', 'protobuf'],
     ['unknown-language', null],
   ])('normalizes %s to %s', (input, expected) => {
