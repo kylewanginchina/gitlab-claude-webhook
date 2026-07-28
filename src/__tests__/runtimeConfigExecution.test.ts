@@ -1965,7 +1965,8 @@ describe('runtime config execution paths', () => {
         timeoutMinutes: 11,
         softDeadlineMinutes: 8,
         wrapUpMinutes: 2,
-      })
+      }),
+      'claude'
     );
   });
 
@@ -2083,7 +2084,8 @@ describe('runtime config execution paths', () => {
         timeoutMinutes: 30,
         softDeadlineMinutes: 24,
         wrapUpMinutes: 3,
-      })
+      }),
+      'claude'
     );
   });
 
@@ -2334,6 +2336,12 @@ describe('runtime config execution paths', () => {
 
     expect((executeReviewPassSpy.mock.calls[0]?.[0] as AIInstruction).provider).toBe('codex');
     expect((executeReviewScoreSpy.mock.calls[0]?.[0] as AIInstruction).provider).toBe('codex');
+    expect(mockReviewService.buildReviewPasses).toHaveBeenCalledWith(
+      reviewContext,
+      undefined,
+      expect.any(Object),
+      'codex'
+    );
   });
 
   it('limits review pass and scoring concurrency from runtime settings', async () => {

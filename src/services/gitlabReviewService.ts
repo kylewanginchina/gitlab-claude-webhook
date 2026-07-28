@@ -194,7 +194,8 @@ export class GitLabReviewService {
   public buildReviewPasses(
     context: PreparedReviewContext,
     userFocus?: string,
-    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget()
+    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget(),
+    provider: 'claude' | 'codex' = 'claude'
   ): ReviewPassDefinition[] {
     return this.getReviewPassTemplates().map(template => ({
       id: template.id,
@@ -203,7 +204,7 @@ export class GitLabReviewService {
         context,
         template,
         userFocus,
-        this.getMatchingSkills(context, template.id),
+        this.getMatchingSkills(context, template.id, provider),
         timeBudget
       ),
     }));
@@ -698,12 +699,16 @@ export class GitLabReviewService {
     }));
   }
 
-  private getMatchingSkills(context: PreparedReviewContext, passId: string): ReviewSkill[] {
+  private getMatchingSkills(
+    context: PreparedReviewContext,
+    passId: string,
+    provider: 'claude' | 'codex'
+  ): ReviewSkill[] {
     if (!this.reviewCustomizationService.isLoaded()) {
       return [];
     }
 
-    return this.reviewCustomizationService.getMatchingSkills(context, passId, 'claude');
+    return this.reviewCustomizationService.getMatchingSkills(context, passId, provider);
   }
 
   private async fetchTargetBranch(projectPath: string, targetBranch: string): Promise<void> {

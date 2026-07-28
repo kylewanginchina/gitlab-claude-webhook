@@ -628,7 +628,8 @@ export class EventProcessor {
     const reviewPasses = this.gitlabReviewService.buildReviewPasses(
       reviewContext,
       userFocus,
-      reviewTimeBudget
+      reviewTimeBudget,
+      reviewInstruction.provider
     );
     await this.updateProgressComment(
       event,

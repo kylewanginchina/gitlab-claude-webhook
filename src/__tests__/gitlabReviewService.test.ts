@@ -84,6 +84,33 @@ describe('GitLabReviewService', () => {
       expect(guidelinePass?.prompt).not.toContain('Prioritize auth bypasses');
     });
 
+    it('uses the actual review provider when matching skills', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-provider-skills-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.createSkill({
+        name: 'Codex TypeScript review',
+        description: '',
+        provider: 'codex',
+        fileGlobs: ['src/**'],
+        languageHints: ['typescript'],
+        promptIds: ['bug-scan'],
+        systemInstructions: 'Inspect TypeScript state transitions.',
+        priority: 20,
+      });
+      const customService = new GitLabReviewService({} as any, customization);
+
+      const codexPasses = customService.buildReviewPasses(context, undefined, undefined, 'codex');
+      const claudePasses = customService.buildReviewPasses(context, undefined, undefined, 'claude');
+
+      expect(codexPasses.find(pass => pass.id === 'bug-scan')?.prompt).toContain(
+        'Inspect TypeScript state transitions.'
+      );
+      expect(claudePasses.find(pass => pass.id === 'bug-scan')?.prompt).not.toContain(
+        'Inspect TypeScript state transitions.'
+      );
+    });
+
     it('renders timeout budget variables in review pass prompt templates', async () => {
       const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-pass-time-budget-'));
       const customization = new ReviewCustomizationService({ dataDir });

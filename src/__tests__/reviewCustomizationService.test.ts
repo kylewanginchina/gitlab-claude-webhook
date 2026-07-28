@@ -227,6 +227,32 @@ describe('ReviewCustomizationService', () => {
     expect(service.listSkills().find(item => item.id === skill.id)?.enabled).toBe(true);
   });
 
+  it('matches skills by provider, prompt, file glob, and language together', async () => {
+    const { service } = await buildService();
+    const skill = await service.createSkill({
+      name: 'TypeScript Codex review',
+      description: '',
+      provider: 'codex',
+      fileGlobs: ['src/**'],
+      languageHints: ['TS'],
+      promptIds: ['bug-scan'],
+      systemInstructions: 'Inspect TypeScript state transitions.',
+      priority: 10,
+    });
+
+    expect(
+      service
+        .getMatchingSkills({ diffs: [{ new_path: 'src/app.ts' }] }, 'bug-scan', 'codex')
+        .map(item => item.id)
+    ).toContain(skill.id);
+    expect(
+      service.getMatchingSkills({ diffs: [{ new_path: 'src/app.rs' }] }, 'bug-scan', 'codex')
+    ).toEqual([]);
+    expect(
+      service.getMatchingSkills({ diffs: [{ new_path: 'src/app.ts' }] }, 'bug-scan', 'claude')
+    ).toEqual([]);
+  });
+
   it('records feedback and creates reviewable prompt optimization proposals', async () => {
     const { service } = await buildService();
 

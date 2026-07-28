@@ -1,6 +1,7 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { JsonStore } from '../storage/jsonStore';
+import { detectReviewLanguages, normalizeReviewLanguageHint } from './reviewLanguages';
 import {
   CreateReviewPromptInput,
   PromptTemplate,
@@ -768,6 +769,7 @@ export class ReviewCustomizationService {
     const changedFiles = context.diffs
       .flatMap(diff => [diff.new_path, diff.old_path])
       .filter((file): file is string => Boolean(file));
+    const languages = detectReviewLanguages(changedFiles);
 
     return clone(
       this.skills
@@ -775,6 +777,13 @@ export class ReviewCustomizationService {
         .filter(skill => skill.provider === 'any' || skill.provider === provider)
         .filter(skill => skill.promptIds.length === 0 || skill.promptIds.includes(promptId))
         .filter(skill => this.matchesFiles(skill.fileGlobs, changedFiles))
+        .filter(skill => {
+          if (skill.languageHints.length === 0) return true;
+          return skill.languageHints
+            .map(normalizeReviewLanguageHint)
+            .filter((language): language is string => Boolean(language))
+            .some(language => languages.has(language));
+        })
         .sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name))
     );
   }
