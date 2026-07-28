@@ -1664,6 +1664,14 @@ describe('runtime config execution paths', () => {
 
     const processor = new EventProcessor();
     (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
@@ -1704,6 +1712,197 @@ describe('runtime config execution paths', () => {
     expect(mockReviewService.postReview).not.toHaveBeenCalled();
   });
 
+  it('does not publish a no-candidate review after the MR head changes', async () => {
+    const processor = new EventProcessor();
+    const reviewContext = createReviewContext();
+    const postComment = jest.fn().mockResolvedValue(undefined);
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([]),
+      buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn(),
+      postReview: jest.fn(),
+    };
+
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'new-head-sha',
+      }),
+    };
+    (processor as any).postComment = postComment;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeReviewPass = jest.fn().mockResolvedValue({
+      passId: 'pass-1',
+      label: 'Pass 1',
+      summary: 'No issues',
+      findings: [],
+    });
+
+    await (processor as any).executeCodeReview(
+      createMergeRequestEvent(),
+      {
+        command: '/code-review',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      'main',
+      '/tmp/project',
+      createCallback(),
+      (processor as any).createRunContext()
+    );
+
+    expect(mockReviewService.buildNoIssuesMessage).not.toHaveBeenCalled();
+    expect(postComment).toHaveBeenCalledWith(
+      expect.any(Object),
+      'Skipped posting code review: merge request head changed while review was running.',
+      expect.any(Object)
+    );
+  });
+
+  it('does not publish a below-threshold review after the MR head changes', async () => {
+    const processor = new EventProcessor();
+    const reviewContext = createReviewContext();
+    const finding: ReviewFinding = {
+      title: 'Candidate',
+      body: 'Candidate body',
+      confidence: 40,
+      path: 'src/a.ts',
+      line: 10,
+      lineType: 'new',
+    };
+    const postComment = jest.fn().mockResolvedValue(undefined);
+    const mockReviewService = {
+      prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+      buildReviewPasses: jest
+        .fn()
+        .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
+      mergeCandidateFindings: jest.fn().mockReturnValue([finding]),
+      buildNoIssuesMessage: jest.fn().mockReturnValue('NO_ISSUES'),
+      buildIncompleteReviewMessage: jest.fn(),
+      buildFinalReview: jest.fn(),
+      postReview: jest.fn(),
+    };
+
+    (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'new-head-sha',
+      }),
+    };
+    (processor as any).postComment = postComment;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).executeReviewPass = jest.fn().mockResolvedValue({
+      passId: 'pass-1',
+      label: 'Pass 1',
+      summary: 'Candidate',
+      findings: [finding],
+    });
+    (processor as any).executeReviewScore = jest.fn().mockResolvedValue({
+      ...finding,
+      confidence: 10,
+    });
+
+    await (processor as any).executeCodeReview(
+      createMergeRequestEvent(),
+      {
+        command: '/code-review',
+        context: 'MR #2',
+        branch: 'feature/runtime-config',
+        provider: 'claude',
+      },
+      'main',
+      '/tmp/project',
+      createCallback(),
+      (processor as any).createRunContext()
+    );
+
+    expect(mockReviewService.buildNoIssuesMessage).not.toHaveBeenCalled();
+    expect(mockReviewService.postReview).not.toHaveBeenCalled();
+    expect(postComment).toHaveBeenCalledWith(
+      expect.any(Object),
+      'Skipped posting code review: merge request head changed while review was running.',
+      expect.any(Object)
+    );
+  });
+
+  it.each([
+    [
+      { state: 'closed', draft: false, work_in_progress: false, sha: 'head-sha' },
+      'Skipped posting code review: merge request is no longer eligible.',
+    ],
+    [
+      { state: 'opened', draft: true, work_in_progress: false, sha: 'head-sha' },
+      'Skipped posting code review: merge request is no longer eligible.',
+    ],
+  ])('blocks terminal review publication for an ineligible MR', async (latest, expected) => {
+    const processor = new EventProcessor();
+    const postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue(latest),
+    };
+    (processor as any).gitlabReviewService = {
+      hasExistingReview: jest.fn().mockResolvedValue(false),
+    };
+    (processor as any).postComment = postComment;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (processor as any).ensureReviewCanPublish(
+        createMergeRequestEvent(),
+        createReviewContext(),
+        createRuntimeConfig().review,
+        (processor as any).createRunContext()
+      )
+    ).resolves.toBe(false);
+    expect(postComment).toHaveBeenCalledWith(expect.any(Object), expected, expect.any(Object));
+  });
+
+  it('blocks publication when another review records the same SHA during execution', async () => {
+    const processor = new EventProcessor();
+    const postComment = jest.fn().mockResolvedValue(undefined);
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
+    (processor as any).gitlabReviewService = {
+      hasExistingReview: jest.fn().mockResolvedValue(true),
+    };
+    (processor as any).postComment = postComment;
+    (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (processor as any).ensureReviewCanPublish(
+        createMergeRequestEvent(),
+        createReviewContext(),
+        createRuntimeConfig().review,
+        (processor as any).createRunContext()
+      )
+    ).resolves.toBe(false);
+    expect(postComment).toHaveBeenCalledWith(
+      expect.any(Object),
+      'Skipped posting code review: another review was already posted.',
+      expect.any(Object)
+    );
+  });
+
   it('passes timeout budget variables into code review prompt builders', async () => {
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
 
@@ -1723,6 +1922,14 @@ describe('runtime config execution paths', () => {
 
     const processor = new EventProcessor();
     (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
@@ -1835,6 +2042,14 @@ describe('runtime config execution paths', () => {
 
     const processor = new EventProcessor();
     (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
     (processor as any).createProgressComment = jest.fn().mockResolvedValue(101);
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
@@ -1940,6 +2155,14 @@ describe('runtime config execution paths', () => {
 
     const processor = new EventProcessor();
     (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: true,
+        work_in_progress: true,
+        sha: 'head-sha',
+      }),
+    };
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);
@@ -1996,6 +2219,14 @@ describe('runtime config execution paths', () => {
 
     const processor = new EventProcessor();
     (processor as any).gitlabReviewService = mockReviewService;
+    (processor as any).gitlabService = {
+      getMergeRequest: jest.fn().mockResolvedValue({
+        state: 'opened',
+        draft: false,
+        work_in_progress: false,
+        sha: 'head-sha',
+      }),
+    };
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).postComment = jest.fn().mockResolvedValue(undefined);
     (processor as any).handleFailure = jest.fn().mockResolvedValue(undefined);

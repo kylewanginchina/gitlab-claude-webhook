@@ -689,6 +689,17 @@ export class EventProcessor {
 
     if (candidateFindings.length === 0) {
       if (passErrors.length > 0) {
+        if (
+          !(await this.ensureReviewCanPublish(
+            event,
+            reviewContext,
+            reviewSettings,
+            runContext
+          ))
+        ) {
+          return;
+        }
+
         await this.postComment(
           event,
           this.gitlabReviewService.buildIncompleteReviewMessage(reviewContext.headSha, {
@@ -707,6 +718,12 @@ export class EventProcessor {
           'Code review completed with partial coverage; some review passes timed out or failed.',
           true
         );
+        return;
+      }
+
+      if (
+        !(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))
+      ) {
         return;
       }
 
@@ -771,6 +788,17 @@ export class EventProcessor {
 
     if (scoredFindings.length === 0) {
       if (passErrors.length > 0 || scoringErrors.length > 0) {
+        if (
+          !(await this.ensureReviewCanPublish(
+            event,
+            reviewContext,
+            reviewSettings,
+            runContext
+          ))
+        ) {
+          return;
+        }
+
         await this.postComment(
           event,
           this.gitlabReviewService.buildIncompleteReviewMessage(reviewContext.headSha, {
@@ -789,6 +817,12 @@ export class EventProcessor {
           'Code review completed with partial coverage; some review or scoring stages timed out or failed.',
           true
         );
+        return;
+      }
+
+      if (
+        !(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))
+      ) {
         return;
       }
 
@@ -811,39 +845,7 @@ export class EventProcessor {
       return;
     }
 
-    const latestMergeRequest = await this.gitlabService.getMergeRequest(
-      reviewContext.projectId,
-      reviewContext.mergeRequestIid
-    );
-
-    if (
-      latestMergeRequest.state !== 'opened' ||
-      (reviewSettings.skipDraft &&
-        (latestMergeRequest.draft || latestMergeRequest.work_in_progress))
-    ) {
-      const message = 'Skipped posting code review: merge request is no longer eligible.';
-      await this.postComment(event, message, runContext);
-      await this.updateProgressComment(event, runContext, message, true);
-      return;
-    }
-
-    if (latestMergeRequest.sha && latestMergeRequest.sha !== reviewContext.headSha) {
-      const message = 'Skipped posting code review: merge request head changed while review was running.';
-      await this.postComment(event, message, runContext);
-      await this.updateProgressComment(event, runContext, message, true);
-      return;
-    }
-
-    const alreadyReviewedLatest = await this.gitlabReviewService.hasExistingReview(
-      reviewContext.projectId,
-      reviewContext.mergeRequestIid,
-      reviewContext.headSha
-    );
-
-    if (reviewSettings.skipExistingSha && alreadyReviewedLatest) {
-      const message = 'Skipped posting code review: another review was already posted.';
-      await this.postComment(event, message, runContext);
-      await this.updateProgressComment(event, runContext, message, true);
+    if (!(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))) {
       return;
     }
 
@@ -870,6 +872,45 @@ export class EventProcessor {
       `Code review completed with ${finalReview.findings.length} high-confidence finding(s).`,
       true
     );
+  }
+
+  private async ensureReviewCanPublish(
+    event: GitLabWebhookEvent,
+    reviewContext: PreparedReviewContext,
+    reviewSettings: RuntimeConfig['review'],
+    runContext: EventRunContext
+  ): Promise<boolean> {
+    const latest = await this.gitlabService.getMergeRequest(
+      reviewContext.projectId,
+      reviewContext.mergeRequestIid
+    );
+
+    let message = '';
+    if (
+      latest.state !== 'opened' ||
+      (reviewSettings.skipDraft && (latest.draft || latest.work_in_progress))
+    ) {
+      message = 'Skipped posting code review: merge request is no longer eligible.';
+    } else if (latest.sha && latest.sha !== reviewContext.headSha) {
+      message = 'Skipped posting code review: merge request head changed while review was running.';
+    } else if (
+      reviewSettings.skipExistingSha &&
+      (await this.gitlabReviewService.hasExistingReview(
+        reviewContext.projectId,
+        reviewContext.mergeRequestIid,
+        reviewContext.headSha
+      ))
+    ) {
+      message = 'Skipped posting code review: another review was already posted.';
+    }
+
+    if (!message) {
+      return true;
+    }
+
+    await this.postComment(event, message, runContext);
+    await this.updateProgressComment(event, runContext, message, true);
+    return false;
   }
 
   private async executeReviewPass(
