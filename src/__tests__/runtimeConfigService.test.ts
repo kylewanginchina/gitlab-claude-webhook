@@ -25,6 +25,63 @@ async function buildRuntimeConfigService() {
 }
 
 describe('RuntimeConfigService', () => {
+  it('notifies subscribers after initialize persists the current config', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+        LOG_LEVEL: 'warn',
+      } as NodeJS.ProcessEnv,
+    });
+    const observed: Array<{ notified: string; current: string; persisted: boolean }> = [];
+    let persisted = false;
+    const originalWrite = (service as any).store.write.bind((service as any).store);
+    jest.spyOn((service as any).store, 'write').mockImplementation(async config => {
+      await originalWrite(config);
+      persisted = true;
+    });
+    service.subscribe(config => {
+      observed.push({
+        notified: config.logLevel,
+        current: service.getConfig().logLevel,
+        persisted,
+      });
+    });
+
+    expect(observed).toEqual([]);
+    await service.initialize();
+
+    expect(observed).toEqual([{ notified: 'warn', current: 'warn', persisted: true }]);
+  });
+
+  it('notifies subscribers with the reloaded config after reload completes', async () => {
+    const dir = await tempDir();
+    const service = new RuntimeConfigService({
+      dataDir: dir,
+      env: {
+        GITLAB_TOKEN: 'glpat-secret',
+        WEBHOOK_SECRET: 'webhook-secret',
+        ANTHROPIC_AUTH_TOKEN: 'anthropic-secret',
+      } as NodeJS.ProcessEnv,
+    });
+    await service.initialize();
+    const observed: Array<{ notified: string; current: string }> = [];
+    service.subscribe(config => {
+      observed.push({ notified: config.logLevel, current: service.getConfig().logLevel });
+    });
+    const reloaded = service.getConfig();
+    reloaded.logLevel = 'debug';
+    await fs.writeFile(path.join(dir, 'runtime-config.json'), JSON.stringify(reloaded));
+
+    expect(observed).toEqual([]);
+    await service.reload();
+
+    expect(observed).toEqual([{ notified: 'debug', current: 'debug' }]);
+  });
+
   it('notifies subscribers only after a runtime config update is persisted', async () => {
     const service = await buildRuntimeConfigService();
     const observed: string[] = [];
