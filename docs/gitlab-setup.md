@@ -70,16 +70,16 @@ Issue、MR 或其评论中的普通指令会在相应基线分支上执行。Iss
 
 只有执行结果包含有效的可发布文件变更时，服务才会固定创建时间戳分支（格式为 `claude-<时间戳>-<随机后缀>`）、提交并推送变更，然后创建一个指向原基线分支的 Merge Request。没有有效文件变更时，只会发布文本结果，不会创建分支或 MR。创建分支、推送或创建 MR 失败时，结果评论会保留失败原因。
 
-### 自然语言只读 Review
+### 自然语言 Review
 
-在 **MR 描述或 MR 评论** 中，包含 `review`、`code review`，或“代码审查”“代码审阅”“代码评审”“审阅”“审查”“评审”等意图的自然语言请求，会以只读 Review 模式运行。例如：
+在 **MR 描述或 MR 评论** 中，包含 `review`、`code review`，或“代码审查”“代码审阅”“代码评审”“审阅”“审查”“评审”等意图的自然语言请求，会以 Review 模式运行。例如：
 
 ```text
 @claude review this merge request
 @codex 请审查当前 MR 的代码修改
 ```
 
-该模式不收集或发布文件变更，也不会创建 commit、branch 或 MR。提示词要求执行器只读，但当前 Claude/Codex 执行器不是强制只读沙箱，不能将其视为 OS 级写保护保证。其文本输出中的反引号文件或行引用，例如 `` `src/server/webhookServer.ts:120` ``，会在文件存在时转换为当前 MR 源分支上对应 blob 与行号的 GitLab 源码链接。
+该模式不收集或发布文件变更，也不会创建 commit、branch 或 MR。默认只进行 diff、源码和历史检查；只有用户明确要求时才运行 build、test、lint、compile 或 format 验证。这是提示词和工作流行为，不是操作系统级只读沙箱保证。其文本输出中的反引号文件或行引用，例如 `` `src/server/webhookServer.ts:120` ``，会在文件存在时转换为当前 MR 源分支上对应 blob 与行号的 GitLab 源码链接。
 
 自然语言 Review 只在 MR 上识别。以 `/` 开头、但不属于 runtime config 中 `REVIEW_ALLOWED_COMMANDS` 的请求，不会被当作自然语言 Review 识别。
 
@@ -94,7 +94,7 @@ Issue、MR 或其评论中的普通指令会在相应基线分支上执行。Iss
 
 它只能在 MR 或 MR 评论上执行。服务会先读取当前 MR diff 和版本信息，再执行多个 Review pass，合并候选问题，使用独立评分阶段复核候选问题，并按配置的置信度阈值过滤结果。最终执行提供方由 runtime config 的 Review 默认提供方决定；提及中的 `model` 和 `timeout` 参数仍会随该请求传递。
 
-与自然语言只读 Review 不同，`/code-review` 会生成结构化汇总，并为可定位到 MR 改动行的高置信度 finding 尝试创建 GitLab 行内 discussion。Review workflow 不收集或发布文件变更，也不会创建 commit、branch 或 MR；单个行内 discussion 创建失败不会阻止汇总评论发布。
+与自然语言 Review 不同，`/code-review` 会生成结构化汇总，并为可定位到 MR 改动行的高置信度 finding 尝试创建 GitLab 行内 discussion。Review workflow 不收集或发布文件变更，也不会创建 commit、branch 或 MR；单个行内 discussion 创建失败不会阻止汇总评论发布。
 
 ## Webhook 队列与状态评论
 
@@ -108,9 +108,7 @@ Issue、MR 或其评论中的普通指令会在相应基线分支上执行。Iss
 
 `/code-review` 汇总带有隐藏的 head SHA 标记。开启 `REVIEW_SKIP_EXISTING_SHA` 时，服务会检查该标记并跳过已经对同一 MR head SHA 记录过的 Review，避免重复发布。
 
-含结构化 finding 的发布前，服务会读取最新 MR 并检查其状态与 head SHA；可定位的 finding 会链接到该 head SHA 对应的 GitLab blob 和具体代码行，并尝试作为 GitLab 行内 discussion 发布。若 Review pass 或评分阶段部分超时或失败，汇总会明确标注 **partial coverage**、已完成阶段和受影响阶段，不能把这种结果视为完整的无问题 Review。
-
-目前“无候选 finding”或“评分后无高置信 finding”的提前汇总发生在这项 head SHA 守卫之前；若 MR 在 Review 开始后更新，这两类汇总仍可能带着开始时的旧 SHA 发布。
+所有终态汇总在发布前都会读取最新 MR 并检查其状态与 head SHA；可定位的 finding 会链接到该 head SHA 对应的 GitLab blob 和具体代码行，并尝试作为 GitLab 行内 discussion 发布。若 Review pass 或评分阶段部分超时或失败，汇总会明确标注 **partial coverage**、已完成阶段和受影响阶段，不能把这种结果视为完整的无问题 Review。
 
 Review 还可能因以下当前条件被跳过：Review 在 runtime config 中被禁用、命令不在 MR 上、MR 未打开、Draft/WIP 被 `REVIEW_SKIP_DRAFT` 排除、MR 没有 diff 内容、执行期间 MR head SHA 改变，或同一 head SHA 已有记录的 Review。
 
@@ -120,7 +118,7 @@ Review 还可能因以下当前条件被跳过：Review 在 runtime config 中�
 2. 创建 Issue、MR 或评论并添加显式提及，例如 `@claude 解释这个 Issue`。
 3. 查看响应中的 `runId` 和队列字段；若任务在等待，查看对应资源中的 Queue Status 评论。
 4. 查看 Progress Report 与最终结果评论。普通编辑任务仅在有有效文件变更时才会出现新分支和 MR；自然语言 Review 不应创建它们。
-5. 在 MR 上运行 `/code-review`，确认汇总包含 head SHA 标记；若存在高置信度且可定位的 finding，检查其源码链接和行内 discussion。测试 MR 在 Review 期间更新 head SHA 时，结构化 finding 应跳过发布；无候选 finding 或评分后无高置信 finding 的提前汇总当前不具备这项保证。
+5. 在 MR 上运行 `/code-review`，确认汇总包含 head SHA 标记；若存在高置信度且可定位的 finding，检查其源码链接和行内 discussion。测试 MR 在 Review 期间更新 head SHA 时，所有终态汇总都应跳过发布。
 
 ## 故障排查
 
@@ -141,7 +139,7 @@ Review 还可能因以下当前条件被跳过：Review 在 runtime config 中�
 - 确认请求位于 MR 或 MR 评论中，MR 仍为 opened，并且具有可审查的 diff。
 - 检查 runtime config 的 Review 是否启用、`REVIEW_ALLOWED_COMMANDS` 是否包含所用命令，以及 `REVIEW_SKIP_DRAFT` 是否排除了 Draft/WIP MR。
 - 自然语言 Review 不识别以 `/` 开头的未知命令；使用已允许的 `/code-review`，或改为不以 `/` 开头的审查请求。
-- 对含结构化 finding 的发布，若执行过程后 MR head SHA 已变化，服务会跳过发布以避免把旧 diff 的结论写到新版本。无候选 finding 或评分后无高置信 finding 的提前汇总发生在该检查之前，可能仍按开始时的旧 SHA 发布。
+- 若执行过程后 MR head SHA 已变化，服务会跳过所有终态汇总，避免把旧 diff 的结论写到新版本。
 
 ### 提示同一 SHA 已 Review
 

@@ -71,8 +71,8 @@ Docker volume 和 network 变更属于部署配置，不是管理页面中的运
 - 热更新与重启配置
 - 内置 Prompt Template 目录及变量
 - Review Prompt 的草稿、发布和回滚流程
-- 当前执行路径使用所有已启用的 Review Prompt，Prompt provider 作为保存的元数据
-- Skill 按启用状态、当前 Review 匹配 provider、Prompt ID、文件 glob 和优先级匹配
+- 当前执行路径使用所有已启用的 Review Prompt 的已发布内容，Prompt provider 作为保存的元数据
+- Skill 按启用状态、实际 Review provider、Prompt ID、文件 glob、语言提示和优先级匹配
 - 反馈分析与优化建议应用流程
 - 所有已实现的 `/api/admin` 路由
 - Provider 测试接口只检查配置状态，不发起远程连通性请求
@@ -109,12 +109,14 @@ GitLab 配置指南将在 Webhook 安装说明之外补充：
 - 超时时间既由执行器强制执行，也作为时间预算注入 Prompt。
 - 运行时 Claude 和 Codex 凭据会覆盖新执行任务继承到的 provider 凭据。
 - 每次执行器调用只捕获一次运行时配置快照；后续管理页面修改不会改变正在运行的调用。
-- Prompt Template 草稿和 Review Prompt 的 focus 草稿只有发布后才影响执行；已发布
-  Review Prompt 的 `systemInstructions` 为空时会回退到 draft 值。应用优化建议只修改
-  Review Prompt 草稿，仍需人工检查并发布。
+- `LOG_LEVEL` 在管理页面成功保存后立即更新 Winston 日志级别。
+- Prompt Template 和 Review Prompt 草稿只有发布后才影响执行；已发布 Review Prompt 的空
+  `systemInstructions` 保持为空。应用优化建议只修改 Review Prompt 草稿，仍需人工检查并发布。
 - Skill 保存、启用或停用后，无需发布步骤即可影响后续 Review 匹配。
-- 当前多轮 Review 以 `claude` 作为 Skill 匹配 provider，因此实际命中
-  `any` 或 `claude` Skill。
+- Skill 的 provider 与实际 Review provider 共同参与匹配，`languageHints` 与 MR 改动路径
+  识别出的语言共同参与匹配。
+- Open Proposal 可以 Apply 或 Dismiss；Dismiss 后不能重新打开。
+- 所有 Review 终态汇总在发布前重新核对 MR 状态和 head SHA。
 
 ## 准确性约束
 
@@ -123,6 +125,8 @@ GitLab 配置指南将在 Webhook 安装说明之外补充：
 - 不声称每个请求都会创建分支或 Merge Request。
 - 不把启动时生成的 `config.toml` 描述成 Codex 运行时 provider 配置的唯一来源；
   任务执行时会传入独立的 SDK 配置。
+- 普通 Review 默认进行静态 diff、源码与历史检查；只有用户明确请求时才运行验证命令。
+- Review 的静态检查约束属于提示词和工作流行为，不是操作系统级只读沙箱保证。
 - 所有本次更新的用户文档统一使用中文；代码标识、环境变量、API 路径和界面实际
   标签保持原样。
 - Docker 命令统一使用 `docker compose`。

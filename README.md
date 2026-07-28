@@ -57,11 +57,11 @@ ADMIN_TOKEN=change-me-admin-token
 
 ```bash
 npm install
-npm run build:all
+npm run build
 npm start
 ```
 
-从干净 clone 启动时必须使用 `npm run build:all`，它同时生成后端和 `/admin` 前端。`npm run dev` 只启动后端开发进程；需要管理台时，先执行或另行执行 `npm run build:admin`。AI SDK 的权限绕过模式要求以非 root 用户运行。
+`npm run build` 会构建完整后端与 `/admin` 前端；`npm run build:server` 只构建后端。`npm run build:all` 保留为兼容别名。`npm run dev` 只启动后端开发进程；需要管理台时，先执行或另行执行 `npm run build:admin`。AI SDK 的权限绕过模式要求以非 root 用户运行。
 
 开发时可使用：
 
@@ -74,14 +74,13 @@ Docker 运行：
 
 ```bash
 mkdir -p data logs
-sudo chown -R 1001:1001 data logs
 docker compose up -d
 docker compose logs -f gitlab-claude-webhook
 ```
 
-镜像以 UID/GID `1001:1001` 运行；`./data` 和 `./logs` 的 bind mount 会覆盖镜像内目录的 ownership，因此宿主机目录必须可由 `1001:1001` 写入。当前运行日志应以 `docker compose logs` 为准；`./logs:/app/logs` 只是挂载，并不表示 Winston 文件日志已实际写入 `/app/logs`。
+入口脚本会在启动时自动修复 `./data` 和 `./logs` 的 ownership，Node 进程仍以 UID/GID `1001:1001` 运行。除 `docker compose logs` 外，Winston 还会把错误日志和综合日志分别写入 `./logs/error.log` 与 `./logs/combined.log`。
 
-基础 `docker-compose.yml` 只把其 `environment` 列出的变量传入容器。`.env` 中未列出的 `CLAUDE_DEFAULT_TIMEOUT_MINUTES`、`CODEX_DEFAULT_TIMEOUT_MINUTES`、`REVIEW_*` 等变量不会自动注入；`WORK_DIR` 与 `DATA_DIR` 也固定为容器路径。首次部署请通过 `/admin` 保存这些运行时字段到 `runtime-config.json`，或由运维使用 Compose override 显式传入所需变量。
+基础 `docker-compose.yml` 会将 Claude/Codex 默认超时和全部 `REVIEW_*` 设置注入容器；`WORK_DIR`、`DATA_DIR` 与 `LOG_DIR` 使用固定的容器路径。
 
 默认镜像只包含常规 Webhook 和 review 所需工具。需要在容器内执行 DeepFlow 编译或验证时，使用仓库提供的可选 DeepFlow 工具链镜像；该镜像增加 Rust/Cargo、Go、protobuf、Clang/LLVM、`libpcap`、`libelf`、`libbpf`、`make` 与 `pkg-config`，并为常用依赖提供缓存。该镜像用于自动化 Review/验证，不替代 DeepFlow 官方发布构建镜像和脚本。
 
@@ -118,11 +117,11 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 @claude review this merge request
 ```
 
-这类请求仅在 MR 上识别为只读 review，使用 mention 指定的 provider。Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR，结果作为评论发布到 MR。提示词要求执行器只读，但当前 Claude/Codex 执行器不是强制只读沙箱，不能将其视为 OS 级写保护保证。
+这类请求仅在 MR 上识别为 Review，使用 mention 指定的 provider。Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR，结果作为评论发布到 MR。普通 Review 默认只检查 diff、源码和历史；只有用户明确要求时才运行 build、test、lint、compile 或 format 验证。这是提示词和工作流约束，不是操作系统级只读沙箱保证。
 
 ### 多轮 `/code-review`
 
-`/code-review` 只支持 MR 或 MR 评论，不支持 Issue。它会按配置执行多轮审查、合并候选问题、评分并发布结果；Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR。可在命令后附加专项关注点：
+`/code-review` 只支持 MR 或 MR 评论，不支持 Issue。它会按配置执行多轮审查、合并候选问题、评分并发布结果；Review workflow 不收集或发布文件变更，也不创建 commit、branch 或 MR。所有终态汇总在发布前都会重新检查 MR 状态与 head SHA。可在命令后附加专项关注点：
 
 ```text
 @claude /code-review
@@ -183,9 +182,9 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 - Prompt Template：edit、review、上下文和评分提示词模板。
 - Review Prompt：多轮 review 的审查阶段与专项提示。
-- Skill：按 `enabled`、provider（当前实际匹配 `any`/`claude`）、`promptIds`、`fileGlobs` 和 `priority` 匹配的审查规则；`languageHints` 仅为元数据。
+- Skill：按 `enabled`、当前 Review provider、`promptIds`、`fileGlobs`、`languageHints` 和 `priority` 匹配的审查规则。
 - Feedback：记录有效、误报、遗漏或不清晰的审查反馈。
-- Proposal：基于反馈生成的提示词优化建议；只支持 Analyze 和 Apply 到草稿，Apply 后仍需 Publish，不提供 reject/dismiss 操作。
+- Proposal：基于反馈生成的提示词优化建议；Open Proposal 可 Apply 到草稿或 Dismiss，Apply 后仍需 Publish。
 
 详细操作见 [docs/admin-console.md](docs/admin-console.md)。
 
@@ -208,7 +207,7 @@ src/utils/timeBudget.ts           任务超时与收尾时间预算
 ## 开发
 
 ```bash
-npm run build:all
+npm run build
 npm run lint
 npm test
 ```
