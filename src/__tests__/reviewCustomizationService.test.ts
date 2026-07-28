@@ -31,6 +31,24 @@ describe('ReviewCustomizationService', () => {
     });
   });
 
+  it('does not fall back to draft instructions when the published value is empty', async () => {
+    const { service } = await buildService();
+
+    await service.updatePrompt('bug-scan', {
+      draft: { focus: ['Published focus'], systemInstructions: '' },
+    });
+    await service.publishPrompt('bug-scan', 'Publish empty instructions');
+    await service.updatePrompt('bug-scan', {
+      draft: { focus: ['Draft focus'], systemInstructions: 'UNPUBLISHED_DRAFT' },
+    });
+
+    const pass = service.getPublishedReviewPasses().find(item => item.id === 'bug-scan');
+    expect(pass).toMatchObject({
+      focus: ['Published focus'],
+      systemInstructions: '',
+    });
+  });
+
   it('updates a prompt draft, publishes a new version, and rolls back through version history', async () => {
     const { service } = await buildService();
 

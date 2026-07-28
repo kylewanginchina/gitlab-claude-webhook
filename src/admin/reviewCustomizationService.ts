@@ -684,8 +684,10 @@ export class ReviewCustomizationService {
           id: prompt.id,
           label: prompt.label,
           version: version?.version || prompt.currentVersion,
-          focus: [...(version?.focus || prompt.draft.focus)],
-          systemInstructions: version?.systemInstructions || prompt.draft.systemInstructions,
+          focus: [...(version ? version.focus : prompt.draft.focus)],
+          systemInstructions: version
+            ? version.systemInstructions
+            : prompt.draft.systemInstructions,
         };
       });
   }
