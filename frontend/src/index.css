@@ -492,6 +492,11 @@ button:focus-visible {
   cursor: pointer;
 }
 
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .inline-input {
   max-width: 240px;
 }

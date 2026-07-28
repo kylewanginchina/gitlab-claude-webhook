@@ -363,6 +363,30 @@ describe('ReviewCustomizationService', () => {
     expect(service.getPrompt('bug-scan').draft).not.toEqual(proposal!.suggestedDraft);
   });
 
+  it('persists a dismissed proposal across service restarts', async () => {
+    const { dataDir, service } = await buildService();
+
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'Keep this dismissed proposal after a restart.',
+      source: 'admin',
+    });
+
+    const [proposal] = await service.analyzeFeedback();
+    const dismissed = await service.dismissProposal(proposal!.id);
+    const restarted = new ReviewCustomizationService({ dataDir });
+    await restarted.initialize();
+
+    expect(restarted.listProposals()).toContainEqual(
+      expect.objectContaining({
+        id: proposal!.id,
+        status: 'dismissed',
+        dismissedAt: dismissed.dismissedAt,
+      })
+    );
+  });
+
   it('rejects invalid IDs and malformed payloads', async () => {
     const { service } = await buildService();
 
