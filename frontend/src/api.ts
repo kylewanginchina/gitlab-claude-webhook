@@ -136,4 +136,9 @@ export const api = {
       `/prompt-optimizer/proposals/${id}/apply`,
       { method: 'POST' }
     ),
+  dismissProposal: (id: string) =>
+    request<{ proposal: PromptOptimizationProposal }>(
+      `/prompt-optimizer/proposals/${id}/dismiss`,
+      { method: 'POST' }
+    ),
 };

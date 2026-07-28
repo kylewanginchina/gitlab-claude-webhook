@@ -8,6 +8,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Upload,
+  XCircle,
 } from 'lucide-react';
 import { api } from '../api';
 import type {
@@ -432,6 +433,19 @@ export default function ReviewTuning() {
       setProposals(current => replaceById(current, result.proposal));
       setPrompts(current => replaceById(current, prompt.prompt));
       setNotice('Proposal applied to draft.');
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function dismissProposal(proposal: PromptOptimizationProposal) {
+    setBusy(`dismiss-proposal-${proposal.id}`);
+    try {
+      const result = await api.dismissProposal(proposal.id);
+      setProposals(current => replaceById(current, result.proposal));
+      setNotice('Proposal dismissed.');
     } catch (err) {
       setFailure(err);
     } finally {
@@ -1050,15 +1064,27 @@ export default function ReviewTuning() {
                     {proposal.promptId} / base v{proposal.baseVersion} / {proposal.status}
                   </div>
                 </div>
-                <button
-                  className="button subtle"
-                  type="button"
-                  onClick={() => applyProposal(proposal)}
-                  disabled={Boolean(busy) || proposal.status !== 'open'}
-                >
-                  {busy === `proposal-${proposal.id}` ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-                  Apply
-                </button>
+                <div className="row-actions">
+                  <button
+                    className="button subtle"
+                    type="button"
+                    onClick={() => applyProposal(proposal)}
+                    disabled={Boolean(busy) || proposal.status !== 'open'}
+                  >
+                    {busy === `proposal-${proposal.id}` ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                    Apply
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="Dismiss proposal"
+                    aria-label="Dismiss proposal"
+                    onClick={() => dismissProposal(proposal)}
+                    disabled={Boolean(busy) || proposal.status !== 'open'}
+                  >
+                    <XCircle size={16} />
+                  </button>
+                </div>
               </div>
             ))}
             {feedback.slice(0, 5).map(item => (

@@ -322,6 +322,14 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
     }
   });
 
+  router.post('/prompt-optimizer/proposals/:id/dismiss', async (req, res, next) => {
+    try {
+      res.json({ proposal: await reviewCustomizationService.dismissProposal(req.params.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       void _next;

@@ -150,6 +150,7 @@ export interface PromptOptimizationProposal {
   status: 'open' | 'applied' | 'dismissed';
   createdAt: string;
   appliedAt?: string;
+  dismissedAt?: string;
 }
 
 export interface ReviewSkillMatchContext {

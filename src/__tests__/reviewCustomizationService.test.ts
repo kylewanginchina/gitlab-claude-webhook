@@ -343,6 +343,26 @@ describe('ReviewCustomizationService', () => {
     expect(prompt.currentVersion).toBe(1);
   });
 
+  it('dismisses an open proposal without applying its suggested draft', async () => {
+    const { service } = await buildService();
+
+    await service.createFeedback({
+      promptId: 'bug-scan',
+      label: 'missed_issue',
+      note: 'It missed a null state regression in request retry handling.',
+      source: 'admin',
+    });
+
+    const [proposal] = await service.analyzeFeedback();
+    const dismissed = await service.dismissProposal(proposal!.id);
+
+    expect(dismissed).toMatchObject({ status: 'dismissed' });
+    expect(dismissed.dismissedAt).toEqual(expect.any(String));
+    await expect(service.applyProposal(proposal!.id)).rejects.toThrow('proposal is not open');
+    await expect(service.dismissProposal(proposal!.id)).rejects.toThrow('proposal is not open');
+    expect(service.getPrompt('bug-scan').draft).not.toEqual(proposal!.suggestedDraft);
+  });
+
   it('rejects invalid IDs and malformed payloads', async () => {
     const { service } = await buildService();
 

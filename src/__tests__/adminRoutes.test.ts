@@ -694,6 +694,40 @@ describe('admin routes', () => {
     expect(prompt.body.prompt.currentVersion).toBe(1);
   });
 
+  it('dismisses an optimizer proposal', async () => {
+    const app = await buildApp();
+
+    await request(app)
+      .post('/api/admin/feedback')
+      .set('X-Admin-Key', 'admin-secret')
+      .send({
+        promptId: 'bug-scan',
+        label: 'missed_issue',
+        note: 'Dismiss this proposal without applying it.',
+        source: 'admin',
+      })
+      .expect(200);
+
+    const analyzed = await request(app)
+      .post('/api/admin/prompt-optimizer/analyze')
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+    const proposalId = analyzed.body.proposals[0].id;
+
+    const dismissed = await request(app)
+      .post(`/api/admin/prompt-optimizer/proposals/${proposalId}/dismiss`)
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(200);
+
+    expect(dismissed.body.proposal.status).toBe('dismissed');
+    expect(dismissed.body.proposal.dismissedAt).toEqual(expect.any(String));
+
+    await request(app)
+      .post(`/api/admin/prompt-optimizer/proposals/${proposalId}/apply`)
+      .set('X-Admin-Key', 'admin-secret')
+      .expect(400, { error: 'proposal is not open' });
+  });
+
   it('returns 404 for missing prompt IDs and 400 for malformed customization payloads', async () => {
     const app = await buildApp();
 

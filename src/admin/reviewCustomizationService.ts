@@ -884,6 +884,17 @@ export class ReviewCustomizationService {
     return clone(proposal);
   }
 
+  public async dismissProposal(id: string): Promise<PromptOptimizationProposal> {
+    const proposal = this.findProposal(id);
+    if (proposal.status !== 'open') {
+      throw new Error('proposal is not open');
+    }
+    proposal.status = 'dismissed';
+    proposal.dismissedAt = now();
+    await this.proposalStore.write(this.proposals);
+    return clone(proposal);
+  }
+
   private ensureDefaultPrompts(prompts: ReviewPrompt[]): ReviewPrompt[] {
     const next = [...prompts];
     for (const defaultPrompt of DEFAULT_REVIEW_PROMPTS.map(createDefaultPrompt)) {
