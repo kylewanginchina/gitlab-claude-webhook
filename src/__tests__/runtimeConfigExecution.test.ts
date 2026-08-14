@@ -349,6 +349,42 @@ describe('runtime config execution paths', () => {
     );
   });
 
+  it('stops consuming Claude messages after a successful terminal result', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+
+    mockQuery.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: 'Review conclusion produced before the transport closed.',
+          total_cost_usd: 1.18,
+          num_turns: 48,
+          duration_ms: 719380,
+        };
+        throw new Error(
+          'Claude Code returned an error result: API Error: The operation timed out.'
+        );
+      })()
+    );
+
+    const executor = new StreamingClaudeExecutor();
+    const callback = createCallback();
+    const result = await executor.executeWithStreaming(
+      'review一下当前MR中的代码修改',
+      '/tmp/project',
+      createExecutionContext({ mode: 'review' }),
+      callback
+    );
+
+    expect(result).toEqual({
+      success: true,
+      output: 'Review conclusion produced before the transport closed.',
+      changes: [],
+    });
+    expect(callback.onError).not.toHaveBeenCalled();
+  });
+
   it('uses published admin Claude edit system prompt templates for ordinary requests', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-prompt-template-'));
     const customization = new ReviewCustomizationService({ dataDir });
