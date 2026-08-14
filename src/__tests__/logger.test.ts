@@ -70,10 +70,7 @@ describe('logger runtime configuration', () => {
 
       expect((await fs.stat(logDir)).isDirectory()).toBe(true);
       expect(fileTransportPaths(isolatedLogger!)).toEqual(
-        expect.arrayContaining([
-          path.join(logDir, 'error.log'),
-          path.join(logDir, 'combined.log'),
-        ])
+        expect.arrayContaining([path.join(logDir, 'error.log'), path.join(logDir, 'combined.log')])
       );
     } finally {
       if (isolatedLogger) {

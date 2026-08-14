@@ -190,7 +190,10 @@ export function isCodeReviewCommand(command: string, allowedCommands?: string[])
   return Boolean(findCodeReviewCommandMatch(command, allowedCommands));
 }
 
-export function extractCodeReviewFocus(command: string, allowedCommands?: string[]): string | undefined {
+export function extractCodeReviewFocus(
+  command: string,
+  allowedCommands?: string[]
+): string | undefined {
   return findCodeReviewCommandMatch(command, allowedCommands)?.focus;
 }
 

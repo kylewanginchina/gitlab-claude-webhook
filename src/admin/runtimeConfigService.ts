@@ -72,11 +72,7 @@ function booleanEnvValue(env: NodeJS.ProcessEnv, key: string, defaultValue: bool
   return envValue(env, key, fallback) !== 'false';
 }
 
-function arrayEnvValue(
-  env: NodeJS.ProcessEnv,
-  key: string,
-  defaultValue: string[]
-): string[] {
+function arrayEnvValue(env: NodeJS.ProcessEnv, key: string, defaultValue: string[]): string[] {
   const raw = envValue(env, key);
   if (!raw.trim()) {
     return [...defaultValue];
@@ -214,7 +210,10 @@ export class RuntimeConfigService {
     };
   }
 
-  public async updateConfig(patch: RuntimeConfigPatch, _actor: string): Promise<ConfigUpdateResult> {
+  public async updateConfig(
+    patch: RuntimeConfigPatch,
+    _actor: string
+  ): Promise<ConfigUpdateResult> {
     void _actor;
     const sanitizedPatch = this.sanitizePatch(patch);
     const before = this.config;
@@ -288,18 +287,12 @@ export class RuntimeConfigService {
     this.assertReviewProvider(config.review.defaultProvider, 'review.defaultProvider');
     this.assertClaudeReasoningEffort(config.claude.reasoningEffort, 'claude.reasoningEffort');
     this.assertReasoningEffort(config.codex.reasoningEffort, 'codex.reasoningEffort');
-    this.assertPositiveInteger(
-      config.claude.defaultTimeoutMinutes,
-      'claude.defaultTimeoutMinutes'
-    );
+    this.assertPositiveInteger(config.claude.defaultTimeoutMinutes, 'claude.defaultTimeoutMinutes');
     this.assertPositiveInteger(config.codex.defaultTimeoutMinutes, 'codex.defaultTimeoutMinutes');
     this.assertPort(config.webhook.port);
     this.assertPositiveInteger(config.webhook.taskConcurrency, 'webhook.taskConcurrency');
     this.assertMinConfidence(config.review.minConfidence);
-    this.assertPositiveInteger(
-      config.review.maxCandidateFindings,
-      'review.maxCandidateFindings'
-    );
+    this.assertPositiveInteger(config.review.maxCandidateFindings, 'review.maxCandidateFindings');
     this.assertPositiveInteger(config.review.maxFinalFindings, 'review.maxFinalFindings');
     this.assertPositiveInteger(config.review.passConcurrency, 'review.passConcurrency');
     this.assertPositiveInteger(config.review.scoringConcurrency, 'review.scoringConcurrency');
@@ -482,10 +475,7 @@ export class RuntimeConfigService {
         next.skipDraft = this.assertBoolean(review.skipDraft, 'review.skipDraft');
       }
       if ('skipExistingSha' in review) {
-        next.skipExistingSha = this.assertBoolean(
-          review.skipExistingSha,
-          'review.skipExistingSha'
-        );
+        next.skipExistingSha = this.assertBoolean(review.skipExistingSha, 'review.skipExistingSha');
       }
       if ('allowedCommands' in review) {
         next.allowedCommands = this.assertAllowedCommands(review.allowedCommands);
@@ -603,9 +593,7 @@ export class RuntimeConfigService {
     fieldName: string
   ): RuntimeConfig['review']['defaultProvider'] {
     if (!VALID_REVIEW_PROVIDERS.includes(value as RuntimeConfig['review']['defaultProvider'])) {
-      throw new Error(
-        `${fieldName} must be one of: claude-multipass, codex-multipass`
-      );
+      throw new Error(`${fieldName} must be one of: claude-multipass, codex-multipass`);
     }
 
     return value as RuntimeConfig['review']['defaultProvider'];
@@ -613,18 +601,13 @@ export class RuntimeConfigService {
 
   private assertReasoningEffort(value: unknown, fieldName: string): ReasoningEffort {
     if (!VALID_REASONING_EFFORTS.includes(value as ReasoningEffort)) {
-      throw new Error(
-        `${fieldName} must be one of: minimal, low, medium, high, xhigh`
-      );
+      throw new Error(`${fieldName} must be one of: minimal, low, medium, high, xhigh`);
     }
 
     return value as ReasoningEffort;
   }
 
-  private assertClaudeReasoningEffort(
-    value: unknown,
-    fieldName: string
-  ): ClaudeReasoningEffort {
+  private assertClaudeReasoningEffort(value: unknown, fieldName: string): ClaudeReasoningEffort {
     if (!VALID_CLAUDE_REASONING_EFFORTS.includes(value as ClaudeReasoningEffort)) {
       throw new Error(`${fieldName} must be one of: low, medium, high, xhigh, max`);
     }

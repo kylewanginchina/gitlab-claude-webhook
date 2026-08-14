@@ -59,7 +59,11 @@ export class RunQueue {
   constructor(options: RunQueueOptions = {}) {
     const globalConcurrency = options.globalConcurrency;
 
-    if (typeof globalConcurrency !== 'number' || !Number.isFinite(globalConcurrency) || globalConcurrency <= 0) {
+    if (
+      typeof globalConcurrency !== 'number' ||
+      !Number.isFinite(globalConcurrency) ||
+      globalConcurrency <= 0
+    ) {
       this.globalConcurrency = 2;
       return;
     }

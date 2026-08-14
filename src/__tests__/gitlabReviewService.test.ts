@@ -117,8 +117,7 @@ describe('GitLabReviewService', () => {
       await customization.initialize();
       await customization.updatePromptTemplate('review.pass.template', {
         draft: {
-          body:
-            'Pass {{reviewPassLabel}} budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}.',
+          body: 'Pass {{reviewPassLabel}} budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}.',
         },
       });
       await customization.publishPromptTemplate('review.pass.template', 'Custom pass budget');
@@ -220,8 +219,7 @@ describe('GitLabReviewService', () => {
       await customization.initialize();
       await customization.updatePromptTemplate('review.scoring.template', {
         draft: {
-          body:
-            'Score {{candidateTitle}} with budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}.',
+          body: 'Score {{candidateTitle}} with budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}.',
         },
       });
       await customization.publishPromptTemplate('review.scoring.template', 'Custom scoring budget');

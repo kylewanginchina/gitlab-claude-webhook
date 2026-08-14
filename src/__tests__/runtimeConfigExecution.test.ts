@@ -18,10 +18,10 @@ jest.mock('../utils/config', () => ({
   expandEnvVars: (value: string) => value,
   config: {
     anthropic: {
-    baseUrl: 'https://claude.static.example',
-    authToken: 'anthropic-static-token',
-    defaultModel: 'claude-static-model',
-    reasoningEffort: 'high',
+      baseUrl: 'https://claude.static.example',
+      authToken: 'anthropic-static-token',
+      defaultModel: 'claude-static-model',
+      reasoningEffort: 'high',
     },
     openai: {
       baseUrl: 'https://codex.static.example/v1',
@@ -337,16 +337,13 @@ describe('runtime config execution paths', () => {
     const claudeEnvironment = claudeOptions.env;
     expect(claudeOptions.model).toBe('claude-runtime-model');
     expect(claudeOptions.effort).toBe('max');
-    expect(claudeEnvironment.ANTHROPIC_BASE_URL).toBe(
-      'https://claude.runtime.example'
-    );
-    expect(claudeEnvironment.ANTHROPIC_AUTH_TOKEN).toBe(
-      'anthropic-runtime-token'
-    );
+    expect(claudeEnvironment.ANTHROPIC_BASE_URL).toBe('https://claude.runtime.example');
+    expect(claudeEnvironment.ANTHROPIC_AUTH_TOKEN).toBe('anthropic-runtime-token');
     expect(claudeEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
     expect(claudeEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2460000);
-    const executedSystemPrompt = mockQuery.mock.calls[0]?.[0]?.options?.systemPrompt?.append as string;
+    const executedSystemPrompt = mockQuery.mock.calls[0]?.[0]?.options?.systemPrompt
+      ?.append as string;
     expect(executedSystemPrompt).toContain(
       'Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation.'
     );
@@ -406,8 +403,7 @@ describe('runtime config execution paths', () => {
     await customization.initialize();
     await customization.updatePromptTemplate('claude.review.system', {
       draft: {
-        body:
-          'Hard timeout {{timeoutMinutes}}m; finish analysis by {{softDeadlineMinutes}}m; reserve {{wrapUpMinutes}}m.',
+        body: 'Hard timeout {{timeoutMinutes}}m; finish analysis by {{softDeadlineMinutes}}m; reserve {{wrapUpMinutes}}m.',
       },
     });
     await customization.publishPromptTemplate('claude.review.system', 'Custom time budget');
@@ -1398,8 +1394,7 @@ describe('runtime config execution paths', () => {
     await customization.initialize();
     await customization.updatePromptTemplate('codex.context.wrapper', {
       draft: {
-        body:
-          'Budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}\n{{instructionsBlock}}\n**Request:** {{command}}',
+        body: 'Budget {{timeoutMinutes}}/{{softDeadlineMinutes}}/{{wrapUpMinutes}}\n{{instructionsBlock}}\n**Request:** {{command}}',
       },
     });
     await customization.publishPromptTemplate('codex.context.wrapper', 'Custom time budget');
@@ -1911,7 +1906,11 @@ describe('runtime config execution paths', () => {
   it.each([
     ['allows publication when top-level SHA matches', { sha: 'head-sha' }, true],
     ['blocks publication when top-level SHA changes', { sha: 'new-head-sha' }, false],
-    ['allows publication when diff_refs head SHA matches', { diff_refs: { head_sha: 'head-sha' } }, true],
+    [
+      'allows publication when diff_refs head SHA matches',
+      { diff_refs: { head_sha: 'head-sha' } },
+      true,
+    ],
     [
       'blocks publication when diff_refs head SHA changes',
       { diff_refs: { head_sha: 'new-head-sha' } },

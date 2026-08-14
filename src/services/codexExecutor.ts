@@ -111,8 +111,7 @@ export class CodexExecutor {
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
     const model = context.model || runtimeConfig.codex.defaultModel;
-    const timeoutMs =
-      context.timeoutMs || runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000;
+    const timeoutMs = context.timeoutMs || runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000;
     const timeBudget = createTimeBudget(timeoutMs);
     const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
     const reasoningEffort = runtimeConfig.codex.reasoningEffort;

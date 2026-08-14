@@ -133,10 +133,7 @@ export function inferProgressStatus(
 export function formatProgressComment(options: ProgressCommentOptions): string {
   const updatedAt = options.updatedAt || new Date();
   const entries = options.entries.slice(-10);
-  const lines = [
-    '### AI Agent Progress Report',
-    '',
-  ];
+  const lines = ['### AI Agent Progress Report', ''];
 
   if (options.startedAt) {
     lines.push(
@@ -146,10 +143,7 @@ export function formatProgressComment(options: ProgressCommentOptions): string {
     );
   }
 
-  lines.push(
-    '| Time (UTC+08) | Status | Activity |',
-    '| --- | --- | --- |',
-  );
+  lines.push('| Time (UTC+08) | Status | Activity |', '| --- | --- | --- |');
 
   for (const entry of entries) {
     lines.push(

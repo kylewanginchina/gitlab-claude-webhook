@@ -183,11 +183,17 @@ export class GitLabReviewService {
     headSha: string
   ): Promise<boolean> {
     const marker = this.buildReviewMarker(headSha);
-    const discussions = await this.gitlabService.getMergeRequestDiscussions(projectId, mergeRequestIid);
+    const discussions = await this.gitlabService.getMergeRequestDiscussions(
+      projectId,
+      mergeRequestIid
+    );
 
-    return discussions.some(discussion =>
-      Array.isArray(discussion.notes) &&
-      discussion.notes.some((note: any) => typeof note.body === 'string' && note.body.includes(marker))
+    return discussions.some(
+      discussion =>
+        Array.isArray(discussion.notes) &&
+        discussion.notes.some(
+          (note: any) => typeof note.body === 'string' && note.body.includes(marker)
+        )
     );
   }
 
@@ -248,11 +254,21 @@ export class GitLabReviewService {
     lines.push(finding.body);
     lines.push('');
     lines.push('Use this rubric verbatim:');
-    lines.push('0: Not confident at all. This is a false positive that does not stand up to light scrutiny, or is a pre-existing issue.');
-    lines.push('25: Somewhat confident. This might be a real issue, but may also be a false positive. The issue was not verified.');
-    lines.push('50: Moderately confident. This is a real issue, but it may be minor, infrequent, or not very important.');
-    lines.push('75: Highly confident. This is very likely a real and important issue, or is directly required by the relevant CLAUDE.md.');
-    lines.push('100: Absolutely certain. The evidence directly confirms the issue and it is definitely real.');
+    lines.push(
+      '0: Not confident at all. This is a false positive that does not stand up to light scrutiny, or is a pre-existing issue.'
+    );
+    lines.push(
+      '25: Somewhat confident. This might be a real issue, but may also be a false positive. The issue was not verified.'
+    );
+    lines.push(
+      '50: Moderately confident. This is a real issue, but it may be minor, infrequent, or not very important.'
+    );
+    lines.push(
+      '75: Highly confident. This is very likely a real and important issue, or is directly required by the relevant CLAUDE.md.'
+    );
+    lines.push(
+      '100: Absolutely certain. The evidence directly confirms the issue and it is definitely real.'
+    );
     lines.push('');
     lines.push('Return ONLY a JSON code block in this exact shape:');
     lines.push('```json');
@@ -497,7 +513,13 @@ export class GitLabReviewService {
       note: string;
     }
   ): string {
-    const lines = [this.buildReviewMarker(headSha), '### Code review', '', 'Review completed with partial coverage.', ''];
+    const lines = [
+      this.buildReviewMarker(headSha),
+      '### Code review',
+      '',
+      'Review completed with partial coverage.',
+      '',
+    ];
 
     if (options.context) {
       lines.push(...this.buildCoverageDetails(options.context, options.completedPasses));
@@ -609,7 +631,7 @@ export class GitLabReviewService {
       this.formatChangedFiles(context.diffs),
       '',
       'Relevant CLAUDE.md files:',
-      this.formatGuidelineFiles(context.claudeGuidelineFiles),
+      this.formatGuidelineFiles(context.claudeGuidelineFiles)
     );
 
     if (userFocus) {
@@ -813,7 +835,13 @@ export class GitLabReviewService {
   }
 
   private buildInlineDiscussionBody(finding: ReviewFinding): string {
-    const lines = [`Code review: ${finding.title}`, '', finding.body, '', `Confidence: ${finding.confidence}`];
+    const lines = [
+      `Code review: ${finding.title}`,
+      '',
+      finding.body,
+      '',
+      `Confidence: ${finding.confidence}`,
+    ];
 
     if (finding.category) {
       lines.push(`Category: ${finding.category}`);
@@ -865,18 +893,16 @@ export class GitLabReviewService {
   private buildDiscussionPosition(
     context: PreparedReviewContext,
     finding: ReviewFinding
-  ):
-    | {
-        base_sha: string;
-        start_sha: string;
-        head_sha: string;
-        position_type: 'text';
-        old_path: string;
-        new_path: string;
-        old_line?: string;
-        new_line?: string;
-      }
-    | null {
+  ): {
+    base_sha: string;
+    start_sha: string;
+    head_sha: string;
+    position_type: 'text';
+    old_path: string;
+    new_path: string;
+    old_line?: string;
+    new_line?: string;
+  } | null {
     if (!finding.line) {
       return null;
     }
@@ -899,7 +925,10 @@ export class GitLabReviewService {
     };
   }
 
-  private findMatchingDiff(diffs: MergeRequestDiff[], finding: ReviewFinding): MergeRequestDiff | null {
+  private findMatchingDiff(
+    diffs: MergeRequestDiff[],
+    finding: ReviewFinding
+  ): MergeRequestDiff | null {
     const normalizedPath = this.normalizePath(finding.path);
     const normalizedOldPath = this.normalizePath(finding.oldPath);
     const normalizedNewPath = this.normalizePath(finding.newPath);
@@ -918,7 +947,8 @@ export class GitLabReviewService {
   }
 
   private buildFindingKey(finding: ReviewFinding): string {
-    const path = this.normalizePath(finding.newPath || finding.oldPath || finding.path) || 'unknown';
+    const path =
+      this.normalizePath(finding.newPath || finding.oldPath || finding.path) || 'unknown';
     const line = finding.line ?? 0;
     const lineType = finding.lineType;
     const title = (this.normalizeText(finding.title) || 'untitled').toLowerCase();

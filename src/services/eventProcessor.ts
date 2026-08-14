@@ -430,13 +430,12 @@ export class EventProcessor {
       this.isNaturalLanguageMergeRequestReviewRequest(event, instruction.command);
 
     // Determine provider name for messages
-    const providerName = (
-      isReviewCommand
+    const providerName =
+      (isReviewCommand
         ? this.resolveReviewExecutionProvider(reviewSettings.defaultProvider)
-        : instruction.provider
-    ) === 'codex'
-      ? 'Codex'
-      : 'Claude';
+        : instruction.provider) === 'codex'
+        ? 'Codex'
+        : 'Claude';
 
     // Create initial progress comment
     const initialMessage = this.buildInitialProgressComment(
@@ -445,7 +444,11 @@ export class EventProcessor {
       runContext.startedAt
     );
 
-    runContext.currentCommentId = await this.createProgressComment(event, initialMessage, runContext);
+    runContext.currentCommentId = await this.createProgressComment(
+      event,
+      initialMessage,
+      runContext
+    );
 
     const baseBranch = instruction.branch || event.project.default_branch;
 
@@ -614,8 +617,7 @@ export class EventProcessor {
     );
 
     if (reviewSettings.skipExistingSha && alreadyReviewed) {
-      const message =
-        'Skipped code review: this merge request SHA already has a recorded review.';
+      const message = 'Skipped code review: this merge request SHA already has a recorded review.';
       await this.postComment(event, message, runContext);
       await this.updateProgressComment(event, runContext, message, true);
       return;
@@ -631,9 +633,7 @@ export class EventProcessor {
       timeoutMs: instruction.timeoutMs,
       mode: 'review' as const,
     };
-    const reviewTimeBudget = createTimeBudget(
-      this.resolveInstructionTimeoutMs(reviewInstruction)
-    );
+    const reviewTimeBudget = createTimeBudget(this.resolveInstructionTimeoutMs(reviewInstruction));
 
     const reviewPasses = this.gitlabReviewService.buildReviewPasses(
       reviewContext,
@@ -680,12 +680,17 @@ export class EventProcessor {
     }
 
     if (successfulPasses.length === 0) {
-      await this.handleFailure(event, reviewInstruction, {
-        error:
-          passErrors.length > 0
-            ? `All code review passes failed: ${passErrors.join('; ')}`
-            : 'All code review passes failed.',
-      }, runContext);
+      await this.handleFailure(
+        event,
+        reviewInstruction,
+        {
+          error:
+            passErrors.length > 0
+              ? `All code review passes failed: ${passErrors.join('; ')}`
+              : 'All code review passes failed.',
+        },
+        runContext
+      );
       return;
     }
 
@@ -701,12 +706,7 @@ export class EventProcessor {
     if (candidateFindings.length === 0) {
       if (passErrors.length > 0) {
         if (
-          !(await this.ensureReviewCanPublish(
-            event,
-            reviewContext,
-            reviewSettings,
-            runContext
-          ))
+          !(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))
         ) {
           return;
         }
@@ -718,8 +718,7 @@ export class EventProcessor {
             completedPasses: successfulPasses,
             completedStages: successfulPasses.map(pass => pass.label),
             failedStages: passErrorLabels,
-            note:
-              'No candidate issues were found in the completed review passes. This should not be interpreted as a full clean review because some review passes did not finish.',
+            note: 'No candidate issues were found in the completed review passes. This should not be interpreted as a full clean review because some review passes did not finish.',
           }),
           runContext
         );
@@ -732,9 +731,7 @@ export class EventProcessor {
         return;
       }
 
-      if (
-        !(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))
-      ) {
+      if (!(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))) {
         return;
       }
 
@@ -800,12 +797,7 @@ export class EventProcessor {
     if (scoredFindings.length === 0) {
       if (passErrors.length > 0 || scoringErrors.length > 0) {
         if (
-          !(await this.ensureReviewCanPublish(
-            event,
-            reviewContext,
-            reviewSettings,
-            runContext
-          ))
+          !(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))
         ) {
           return;
         }
@@ -817,8 +809,7 @@ export class EventProcessor {
             completedPasses: successfulPasses,
             completedStages: successfulPasses.map(pass => pass.label),
             failedStages: [...passErrorLabels, ...scoringErrorLabels],
-            note:
-              'No high-confidence issues were confirmed from the completed stages. This should not be interpreted as a full clean review because part of the review timed out or failed.',
+            note: 'No high-confidence issues were confirmed from the completed stages. This should not be interpreted as a full clean review because part of the review timed out or failed.',
           }),
           runContext
         );
@@ -831,9 +822,7 @@ export class EventProcessor {
         return;
       }
 
-      if (
-        !(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))
-      ) {
+      if (!(await this.ensureReviewCanPublish(event, reviewContext, reviewSettings, runContext))) {
         return;
       }
 
@@ -842,8 +831,7 @@ export class EventProcessor {
         this.gitlabReviewService.buildNoIssuesMessage(reviewContext.headSha, {
           context: reviewContext,
           completedPasses: successfulPasses,
-          note:
-            'No high-confidence issues remained after rescoring the candidate findings from the completed review stages.',
+          note: 'No high-confidence issues remained after rescoring the candidate findings from the completed review stages.',
         }),
         runContext
       );
@@ -904,8 +892,7 @@ export class EventProcessor {
     ) {
       message = 'Skipped posting code review: merge request is no longer eligible.';
     } else if (!latestHeadSha) {
-      message =
-        'Skipped posting code review: unable to verify the latest merge request head SHA.';
+      message = 'Skipped posting code review: unable to verify the latest merge request head SHA.';
     } else if (latestHeadSha !== reviewContext.headSha) {
       message = 'Skipped posting code review: merge request head changed while review was running.';
     } else if (

@@ -47,7 +47,9 @@ describe('WebhookServer admin integration', () => {
     const app = server.getApp() as express.Application & {
       listen: (port: number, callback?: () => void) => unknown;
     };
-    const listenSpy = jest.spyOn(app, 'listen').mockImplementation((_port: number, callback?: () => void) => {
+    const listenSpy = jest
+      .spyOn(app, 'listen')
+      .mockImplementation((_port: number, callback?: () => void) => {
         callback?.();
         return {} as unknown;
       });
@@ -82,9 +84,18 @@ describe('WebhookServer admin integration', () => {
       adminStaticPath: adminDir,
     });
 
-    await request(server.getApp()).get('/admin').expect(200).expect(/admin-app/);
-    await request(server.getApp()).get('/admin/app.js').expect(200).expect('console.log("admin-js");');
-    await request(server.getApp()).get('/admin/settings').expect(200).expect(/admin-app/);
+    await request(server.getApp())
+      .get('/admin')
+      .expect(200)
+      .expect(/admin-app/);
+    await request(server.getApp())
+      .get('/admin/app.js')
+      .expect(200)
+      .expect('console.log("admin-js");');
+    await request(server.getApp())
+      .get('/admin/settings')
+      .expect(200)
+      .expect(/admin-app/);
   });
 
   it('keeps the webhook endpoint mounted and rejects unauthenticated requests', async () => {
@@ -103,18 +114,18 @@ describe('WebhookServer admin integration', () => {
   it('uses env-backed config debug values before runtime config initialization', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     const isLoadedSpy = jest.spyOn(runtimeConfigService, 'isLoaded').mockReturnValue(false);
-    const getConfigSpy = jest
-      .spyOn(runtimeConfigService, 'getConfig')
-      .mockImplementation(() => {
-        throw new Error('getConfig should not be called before initialization');
-      });
+    const getConfigSpy = jest.spyOn(runtimeConfigService, 'getConfig').mockImplementation(() => {
+      throw new Error('getConfig should not be called before initialization');
+    });
 
     expect(() => debugConfig()).not.toThrow();
 
     expect(isLoadedSpy).toHaveBeenCalled();
     expect(getConfigSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(`Port: ${config.webhook.port}`);
-    expect(logSpy).toHaveBeenCalledWith(`GitLab Token: ${config.gitlab.token ? '********' : 'NOT SET'}`);
+    expect(logSpy).toHaveBeenCalledWith(
+      `GitLab Token: ${config.gitlab.token ? '********' : 'NOT SET'}`
+    );
   });
 
   it('uses runtime config debug values after runtime config initialization', async () => {
@@ -129,7 +140,9 @@ describe('WebhookServer admin integration', () => {
 
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     jest.spyOn(runtimeConfigService, 'isLoaded').mockReturnValue(true);
-    const getConfigSpy = jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(runtimeConfig.getConfig());
+    const getConfigSpy = jest
+      .spyOn(runtimeConfigService, 'getConfig')
+      .mockReturnValue(runtimeConfig.getConfig());
 
     debugConfig();
 

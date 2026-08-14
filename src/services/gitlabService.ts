@@ -32,7 +32,11 @@ export class GitLabService {
 
   private ensureGitLabClient(): InstanceType<typeof Gitlab> {
     const config = this.getGitLabConfig();
-    if (!this.gitlabClient || config.host !== this.gitlabHost || config.token !== this.gitlabToken) {
+    if (
+      !this.gitlabClient ||
+      config.host !== this.gitlabHost ||
+      config.token !== this.gitlabToken
+    ) {
       return this.refreshGitLabClient(config);
     }
 
@@ -227,7 +231,11 @@ export class GitLabService {
     versionId: number
   ): Promise<any> {
     try {
-      const version = await this.gitlab.MergeRequests.version(projectId, mergeRequestIid, versionId);
+      const version = await this.gitlab.MergeRequests.version(
+        projectId,
+        mergeRequestIid,
+        versionId
+      );
       return version;
     } catch (error) {
       logger.error('Failed to get merge request diff version:', error);

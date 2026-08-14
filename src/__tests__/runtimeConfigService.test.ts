@@ -1,10 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import {
-  RuntimeConfigService,
-  createConfigFromEnv,
-} from '../admin/runtimeConfigService';
+import { RuntimeConfigService, createConfigFromEnv } from '../admin/runtimeConfigService';
 
 async function tempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'runtime-config-'));
@@ -389,7 +386,11 @@ describe('RuntimeConfigService', () => {
     ['webhook', 'webhook section must be an object', { webhook: 'bad' }],
     ['ai', 'ai section must be an object', { ai: 'bad' }],
     ['review', 'review section must be an object', { review: 'bad' }],
-    ['ai.defaultProvider', 'ai.defaultProvider must be one of: claude, codex', { ai: { defaultProvider: 'other' } }],
+    [
+      'ai.defaultProvider',
+      'ai.defaultProvider must be one of: claude, codex',
+      { ai: { defaultProvider: 'other' } },
+    ],
     [
       'review.defaultProvider',
       'review.defaultProvider must be one of: claude-multipass, codex-multipass',
@@ -495,7 +496,10 @@ describe('RuntimeConfigService', () => {
 
     const before = service.getConfig();
     const writeSpy = jest
-      .spyOn((service as unknown as { store: { write: (config: unknown) => Promise<void> } }).store, 'write')
+      .spyOn(
+        (service as unknown as { store: { write: (config: unknown) => Promise<void> } }).store,
+        'write'
+      )
       .mockRejectedValueOnce(new Error('disk full'));
 
     await expect(

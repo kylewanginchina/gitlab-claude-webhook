@@ -24,7 +24,9 @@ export class ProjectManager {
   private workDir: string;
 
   constructor() {
-    this.workDir = runtimeConfigService.isLoaded() ? runtimeConfigService.getConfig().workDir : config.workDir;
+    this.workDir = runtimeConfigService.isLoaded()
+      ? runtimeConfigService.getConfig().workDir
+      : config.workDir;
   }
 
   public async prepareProject(project: GitLabProject, branch: string): Promise<string> {
@@ -141,9 +143,7 @@ export class ProjectManager {
 
       // Check if there are changes to commit
       const status = await git.status();
-      const changedFiles = status.files
-        .map(file => file.path)
-        .filter(isPublishableChangePath);
+      const changedFiles = status.files.map(file => file.path).filter(isPublishableChangePath);
 
       if (changedFiles.length === 0) {
         logger.info('No changes to commit');
@@ -190,9 +190,7 @@ export class ProjectManager {
     try {
       // Check if there are changes to commit
       const status = await git.status();
-      const changedFiles = status.files
-        .map(file => file.path)
-        .filter(isPublishableChangePath);
+      const changedFiles = status.files.map(file => file.path).filter(isPublishableChangePath);
 
       if (changedFiles.length === 0) {
         logger.info('No changes to commit');
@@ -239,7 +237,11 @@ export class ProjectManager {
         .map(file => ({
           path: file.path,
           type:
-            file.working_dir === '?' ? 'created' : file.working_dir === 'D' ? 'deleted' : 'modified',
+            file.working_dir === '?'
+              ? 'created'
+              : file.working_dir === 'D'
+                ? 'deleted'
+                : 'modified',
         }));
     } catch (error) {
       logger.error('Error getting changed files:', error);

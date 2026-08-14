@@ -68,7 +68,10 @@ function isNotFoundError(message: string): boolean {
 }
 
 function renderPromptPreview(prompt: ReturnType<ReviewCustomizationService['getPrompt']>): string {
-  const lines = [`Review pass: ${prompt.label}`, ...prompt.draft.focus.map((line, index) => `${index + 1}. ${line}`)];
+  const lines = [
+    `Review pass: ${prompt.label}`,
+    ...prompt.draft.focus.map((line, index) => `${index + 1}. ${line}`),
+  ];
   if (prompt.draft.systemInstructions) {
     lines.push('', 'Admin system instructions:', prompt.draft.systemInstructions);
   }
@@ -127,7 +130,9 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
 
   router.post('/test/claude', (_req, res) => {
     const config = runtimeConfigService.getPublicConfig();
-    res.json(providerTestResult('claude', config.claude.authToken.configured, config.claude.baseUrl));
+    res.json(
+      providerTestResult('claude', config.claude.authToken.configured, config.claude.baseUrl)
+    );
   });
 
   router.post('/test/codex', (_req, res) => {
@@ -165,10 +170,7 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
     try {
       const changelog = typeof req.body?.changelog === 'string' ? req.body.changelog : undefined;
       res.json({
-        template: await reviewCustomizationService.publishPromptTemplate(
-          req.params.id,
-          changelog
-        ),
+        template: await reviewCustomizationService.publishPromptTemplate(req.params.id, changelog),
       });
     } catch (error) {
       next(error);
@@ -336,8 +338,7 @@ export function createAdminRouter(options: CreateAdminRouterOptions): express.Ro
       const message = error instanceof Error ? error.message : String(error);
       const status = isNotFoundError(message)
         ? 404
-        : isRuntimeConfigValidationError(message) ||
-            isReviewCustomizationValidationError(message)
+        : isRuntimeConfigValidationError(message) || isReviewCustomizationValidationError(message)
           ? 400
           : 500;
       res.status(status).json({ error: message });
