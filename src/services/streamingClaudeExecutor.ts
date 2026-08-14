@@ -292,6 +292,7 @@ export class StreamingClaudeExecutor {
               turns: resultMsg.num_turns,
               durationMs: resultMsg.duration_ms,
             });
+            break;
           } else {
             const errors = 'errors' in resultMsg ? resultMsg.errors : [];
             const errorStr =
