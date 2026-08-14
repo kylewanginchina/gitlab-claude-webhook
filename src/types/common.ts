@@ -11,6 +11,7 @@ export interface AIExecutionContext {
   event: GitLabWebhookEvent;
   instruction: string;
   model?: string;
+  mode?: 'edit' | 'review';
 }
 
 export interface StreamingProgressCallback {
@@ -19,12 +20,14 @@ export interface StreamingProgressCallback {
 }
 
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ClaudeReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface Config {
   anthropic: {
     baseUrl: string;
     authToken: string;
     defaultModel: string;
+    reasoningEffort: ClaudeReasoningEffort;
   };
   openai: {
     baseUrl: string;
@@ -39,6 +42,7 @@ export interface Config {
   webhook: {
     secret: string;
     port: number;
+    taskConcurrency: number;
   };
   ai: {
     defaultProvider: AIProvider;

@@ -4,13 +4,29 @@ import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../utils/config';
 import logger from '../utils/logger';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 import { GitLabProject } from '../types/gitlab';
+
+const INTERNAL_CHANGE_PATHS = ['.claude', '.codex'];
+
+export function isPublishableChangePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return !INTERNAL_CHANGE_PATHS.some(
+    internalPath => normalized === internalPath || normalized.startsWith(`${internalPath}/`)
+  );
+}
 
 export class ProjectManager {
   private workDir: string;
 
   constructor() {
-    this.workDir = config.workDir;
+    this.workDir = runtimeConfigService.isLoaded()
+      ? runtimeConfigService.getConfig().workDir
+      : config.workDir;
   }
 
   public async prepareProject(project: GitLabProject, branch: string): Promise<string> {
@@ -108,7 +124,9 @@ export class ProjectManager {
 
     const url = new URL(httpUrl);
     url.username = 'oauth2';
-    url.password = config.gitlab.token;
+    url.password = runtimeConfigService.isLoaded()
+      ? runtimeConfigService.getConfig().gitlab.token
+      : config.gitlab.token;
     return url.toString();
   }
 
@@ -123,15 +141,16 @@ export class ProjectManager {
       // Switch to the new branch
       await git.checkout(['-b', branchName]);
 
-      // Add all changes
-      await git.add('.');
-
       // Check if there are changes to commit
       const status = await git.status();
-      if (status.files.length === 0) {
+      const changedFiles = status.files.map(file => file.path).filter(isPublishableChangePath);
+
+      if (changedFiles.length === 0) {
         logger.info('No changes to commit');
         return;
       }
+
+      await git.add(['--', ...changedFiles]);
 
       // Commit changes
       await git.commit(commitMessage);
@@ -141,7 +160,7 @@ export class ProjectManager {
 
       logger.info('Changes committed and pushed to new branch', {
         branch: branchName,
-        filesChanged: status.files.length,
+        filesChanged: changedFiles.length,
       });
     } catch (error) {
       logger.error('Error switching to branch and pushing changes:', error);
@@ -154,7 +173,7 @@ export class ProjectManager {
 
     try {
       const status = await git.status();
-      return status.files.length > 0;
+      return status.files.some(file => isPublishableChangePath(file.path));
     } catch (error) {
       logger.error('Error checking git status:', error);
       return false;
@@ -169,15 +188,16 @@ export class ProjectManager {
     const git = simpleGit(projectPath);
 
     try {
-      // Add all changes
-      await git.add('.');
-
       // Check if there are changes to commit
       const status = await git.status();
-      if (status.files.length === 0) {
+      const changedFiles = status.files.map(file => file.path).filter(isPublishableChangePath);
+
+      if (changedFiles.length === 0) {
         logger.info('No changes to commit');
         return;
       }
+
+      await git.add(['--', ...changedFiles]);
 
       // Commit changes
       await git.commit(commitMessage);
@@ -187,7 +207,7 @@ export class ProjectManager {
 
       logger.info('Changes committed and pushed successfully', {
         branch,
-        filesChanged: status.files.length,
+        filesChanged: changedFiles.length,
       });
     } catch (error) {
       logger.error('Error committing and pushing changes:', error);
@@ -212,11 +232,17 @@ export class ProjectManager {
     try {
       const status = await git.status();
 
-      return status.files.map(file => ({
-        path: file.path,
-        type:
-          file.working_dir === '?' ? 'created' : file.working_dir === 'D' ? 'deleted' : 'modified',
-      }));
+      return status.files
+        .filter(file => isPublishableChangePath(file.path))
+        .map(file => ({
+          path: file.path,
+          type:
+            file.working_dir === '?'
+              ? 'created'
+              : file.working_dir === 'D'
+                ? 'deleted'
+                : 'modified',
+        }));
     } catch (error) {
       logger.error('Error getting changed files:', error);
       return [];

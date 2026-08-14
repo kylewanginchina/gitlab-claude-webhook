@@ -1,0 +1,154 @@
+FROM node:20-bookworm
+
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CARGO_HOME=/home/claude/.cargo
+ENV RUSTUP_HOME=/home/claude/.rustup
+ENV GOPATH=/home/claude/go
+ENV GOCACHE=/home/claude/.cache/go-build
+ENV PATH=/home/claude/.cargo/bin:/home/claude/go/bin:/app/node_modules/.bin:$PATH
+
+# Install shell, repository, and DeepFlow build tooling. This Debian-based image
+# is intended for automated review validation, not as a replacement for
+# DeepFlow's official release build images.
+RUN sed -i \
+      -e "0,/URIs: .*/s#URIs: .*#URIs: ${DEBIAN_MIRROR}#" \
+      -e "0,/URIs: .*/! s#URIs: .*#URIs: ${DEBIAN_SECURITY_MIRROR}#" \
+      /etc/apt/sources.list.d/debian.sources && \
+    apt-get -o Acquire::Retries=5 \
+      -o Acquire::http::Timeout=60 \
+      -o Acquire::https::Timeout=60 \
+      update && \
+    apt-get -o Acquire::Retries=5 \
+      -o Acquire::http::Timeout=60 \
+      -o Acquire::https::Timeout=60 \
+      install -y --no-install-recommends \
+      bash \
+      build-essential \
+      ca-certificates \
+      clang \
+      cmake \
+      curl \
+      file \
+      gcc \
+      git \
+      golang-go \
+      jq \
+      libbpf-dev \
+      libelf-dev \
+      libpcap-dev \
+      libssl-dev \
+      llvm \
+      make \
+      openssh-client \
+      pkg-config \
+      protobuf-compiler \
+      python3 \
+      ripgrep \
+      xz-utils \
+      zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG RUSTUP_INIT_URL=https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+ARG RUSTUP_DIST_SERVER=https://rsproxy.cn
+ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+
+RUN groupadd --system --gid 1001 claude && \
+    useradd --system --uid 1001 --gid claude --create-home --shell /bin/bash claude
+
+RUN curl -fL --retry 5 --connect-timeout 20 --max-time 300 "$RUSTUP_INIT_URL" -o /tmp/rustup-init && \
+    chmod +x /tmp/rustup-init && \
+    HOME=/home/claude \
+      RUSTUP_DIST_SERVER="$RUSTUP_DIST_SERVER" \
+      RUSTUP_UPDATE_ROOT="$RUSTUP_UPDATE_ROOT" \
+      /tmp/rustup-init -y --profile minimal --default-toolchain stable && \
+    rm -f /tmp/rustup-init && \
+    RUSTUP_DIST_SERVER="$RUSTUP_DIST_SERVER" \
+      RUSTUP_UPDATE_ROOT="$RUSTUP_UPDATE_ROOT" \
+      rustup component add rustfmt clippy && \
+    chown -R claude:claude /home/claude/.cargo /home/claude/.rustup
+
+# Verify the DeepFlow toolchain commands are available at image build time.
+RUN command -v node && \
+    command -v npm && \
+    command -v rustup && \
+    command -v cargo && \
+    command -v rustc && \
+    command -v go && \
+    command -v protoc && \
+    command -v clang && \
+    command -v make && \
+    command -v pkg-config && \
+    command -v rg && \
+    node --version && \
+    npm --version && \
+    cargo --version && \
+    rustc --version && \
+    go version && \
+    protoc --version && \
+    clang --version | head -n 1
+
+RUN temp_dir="$(mktemp -d)" && \
+    cargo new --bin "$temp_dir/lockv4-smoke" && \
+    cd "$temp_dir/lockv4-smoke" && \
+    cargo generate-lockfile && \
+    sed -i 's/^version = [0-9][0-9]*/version = 4/' Cargo.lock && \
+    cargo metadata --locked --format-version=1 >/dev/null && \
+    rm -rf "$temp_dir"
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY tsconfig.json ./
+COPY frontend/package*.json ./frontend/
+COPY frontend/tsconfig.json ./frontend/
+COPY frontend/vite.config.ts ./frontend/
+COPY frontend/index.html ./frontend/
+
+RUN npm ci --ignore-scripts
+RUN npm --prefix frontend ci --ignore-scripts
+
+COPY src/ ./src/
+COPY frontend/src/ ./frontend/src/
+COPY .env.example ./
+
+RUN npm run build:server
+RUN npm --prefix frontend run build
+
+RUN npm prune --omit=dev
+RUN npm --prefix frontend prune --omit=dev
+
+RUN mkdir -p \
+      /app/data \
+      /app/logs \
+      /home/claude/.cache/go-build \
+      /home/claude/.cargo/git \
+      /home/claude/.cargo/registry \
+      /home/claude/.codex \
+      /home/claude/.npm \
+      /home/claude/.rustup \
+      /home/claude/go/pkg/mod \
+      /tmp/deepflow-work \
+      /tmp/gitlab-claude-work && \
+    chown -R claude:claude \
+      /app/data \
+      /app/logs \
+      /home/claude \
+      /tmp/deepflow-work \
+      /tmp/gitlab-claude-work
+
+USER claude
+
+ENV HOME=/home/claude
+ENV DATA_DIR=/app/data
+ENV LOG_DIR=/app/logs
+ENV npm_config_cache=/home/claude/.npm
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "const port = process.env.PORT || 3000; require('http').get(`http://localhost:${port}/health`, (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+
+CMD ["node", "dist/index.js"]

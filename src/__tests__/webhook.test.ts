@@ -1,8 +1,12 @@
+import crypto from 'crypto';
 import {
   verifyGitLabSignature,
   extractClaudeInstructions,
   extractAIInstructions,
+  isCodeReviewCommand,
+  extractCodeReviewFocus,
 } from '../utils/webhook';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 // Mock the config
 jest.mock('../utils/config', () => ({
@@ -13,7 +17,24 @@ jest.mock('../utils/config', () => ({
   },
 }));
 
+jest.mock('../utils/runtimeConfig', () => ({
+  runtimeConfigService: {
+    isLoaded: jest.fn(),
+    getConfig: jest.fn(),
+  },
+}));
+
 describe('Webhook Utils', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (runtimeConfigService.isLoaded as jest.Mock).mockReturnValue(false);
+    (runtimeConfigService.getConfig as jest.Mock).mockReturnValue({
+      webhook: {
+        secret: 'runtime-secret',
+      },
+    });
+  });
+
   describe('verifyGitLabSignature', () => {
     it('should verify direct token signature', () => {
       const body = 'test body';
@@ -34,6 +55,41 @@ describe('Webhook Utils', () => {
       const signature = '';
 
       expect(verifyGitLabSignature(body, signature)).toBe(false);
+    });
+
+    it('should accept an updated runtime webhook secret without restart', () => {
+      const body = 'test body';
+      const runtimeSecret = 'updated-runtime-secret';
+      const signature = `sha256=${crypto
+        .createHmac('sha256', runtimeSecret)
+        .update(body, 'utf8')
+        .digest('hex')}`;
+
+      (runtimeConfigService.isLoaded as jest.Mock).mockReturnValue(true);
+      (runtimeConfigService.getConfig as jest.Mock).mockReturnValue({
+        webhook: {
+          secret: runtimeSecret,
+        },
+      });
+
+      expect(verifyGitLabSignature(body, signature)).toBe(true);
+    });
+
+    it('should preserve static config fallback before runtime config initialization', () => {
+      const body = 'test body';
+      const signature = `sha256=${crypto
+        .createHmac('sha256', 'test-secret')
+        .update(body, 'utf8')
+        .digest('hex')}`;
+
+      (runtimeConfigService.isLoaded as jest.Mock).mockReturnValue(false);
+      (runtimeConfigService.getConfig as jest.Mock).mockReturnValue({
+        webhook: {
+          secret: 'updated-runtime-secret',
+        },
+      });
+
+      expect(verifyGitLabSignature(body, signature)).toBe(true);
     });
   });
 
@@ -122,6 +178,43 @@ describe('Webhook Utils', () => {
       expect(result?.provider).toBe('claude');
       expect(result?.command).toContain('fix the bug');
       expect(result?.command).toContain('add tests');
+    });
+  });
+
+  describe('isCodeReviewCommand', () => {
+    it('should detect the official code review slash command', () => {
+      expect(isCodeReviewCommand('/code-review')).toBe(true);
+      expect(isCodeReviewCommand('/code-review focus on bugs')).toBe(true);
+    });
+
+    it('should use configured review commands with exact-or-whitespace matching', () => {
+      expect(isCodeReviewCommand('/review-me', ['/review-me'])).toBe(true);
+      expect(isCodeReviewCommand('/review-me auth edge cases', ['/review-me'])).toBe(true);
+      expect(isCodeReviewCommand('/review-me-now', ['/review-me'])).toBe(false);
+    });
+
+    it('should reject non-review commands', () => {
+      expect(isCodeReviewCommand('review this merge request')).toBe(false);
+      expect(isCodeReviewCommand('fix the bug')).toBe(false);
+    });
+  });
+
+  describe('extractCodeReviewFocus', () => {
+    it('should extract trailing review focus text', () => {
+      expect(extractCodeReviewFocus('/code-review focus on auth edge cases')).toBe(
+        'focus on auth edge cases'
+      );
+    });
+
+    it('should extract focus from the matched configured review command', () => {
+      expect(extractCodeReviewFocus('/review-me auth edge cases', ['/review-me'])).toBe(
+        'auth edge cases'
+      );
+    });
+
+    it('should return undefined when no extra focus is provided', () => {
+      expect(extractCodeReviewFocus('/code-review')).toBeUndefined();
+      expect(extractCodeReviewFocus('fix the bug')).toBeUndefined();
     });
   });
 });

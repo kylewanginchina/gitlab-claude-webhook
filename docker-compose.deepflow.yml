@@ -1,0 +1,36 @@
+services:
+  gitlab-claude-webhook:
+    image: gitlab-claude-webhook-deepflow:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.deepflow
+      args:
+        DEBIAN_MIRROR: ${DEEPFLOW_DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEEPFLOW_DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}
+        RUSTUP_INIT_URL: ${DEEPFLOW_RUSTUP_INIT_URL:-https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init}
+        RUSTUP_DIST_SERVER: ${DEEPFLOW_RUSTUP_DIST_SERVER:-https://rsproxy.cn}
+        RUSTUP_UPDATE_ROOT: ${DEEPFLOW_RUSTUP_UPDATE_ROOT:-https://rsproxy.cn/rustup}
+    environment:
+      - DEEPFLOW_BUILD_TOOLS_ENABLED=true
+      - GOPATH=/home/claude/go
+      - GOCACHE=/home/claude/.cache/go-build
+      - CARGO_HOME=/home/claude/.cargo
+      - RUSTUP_HOME=/home/claude/.rustup
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - webhook-work:/tmp/gitlab-claude-work
+      - deepflow-work:/tmp/deepflow-work
+      - deepflow-cargo-registry:/home/claude/.cargo/registry
+      - deepflow-cargo-git:/home/claude/.cargo/git
+      - deepflow-go-cache:/home/claude/.cache/go-build
+      - deepflow-go-mod-cache:/home/claude/go/pkg/mod
+      - deepflow-npm-cache:/home/claude/.npm
+
+volumes:
+  deepflow-cargo-registry:
+  deepflow-cargo-git:
+  deepflow-go-cache:
+  deepflow-go-mod-cache:
+  deepflow-npm-cache:
+  deepflow-work:

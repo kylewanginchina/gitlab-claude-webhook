@@ -1,24 +1,28 @@
-import { Config, AIProvider, ReasoningEffort } from '../types/common';
+import { Config, AIProvider, ClaudeReasoningEffort, ReasoningEffort } from '../types/common';
 
 /**
  * Expand environment variables in a string
  * Supports ${VAR} and $VAR syntax
  */
-function expandEnvVars(str: string): string {
+export function expandEnvVars(str: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!str) return str;
 
   return str.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/gi, (match, braced, unbraced) => {
     const varName = braced || unbraced;
-    return process.env[varName] || match;
+    return env[varName] || match;
   });
 }
 
 /**
  * Get environment variable with expansion support
  */
-function getEnvVar(key: string, defaultValue: string = ''): string {
-  const value = process.env[key] || defaultValue;
-  return expandEnvVars(value);
+function getEnvVar(
+  key: string,
+  defaultValue: string = '',
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const value = env[key] || defaultValue;
+  return expandEnvVars(value, env);
 }
 
 /**
@@ -44,11 +48,24 @@ function getReasoningEffort(key: string, defaultValue: ReasoningEffort): Reasoni
   return defaultValue;
 }
 
+function getClaudeReasoningEffort(
+  key: string,
+  defaultValue: ClaudeReasoningEffort
+): ClaudeReasoningEffort {
+  const value = getEnvVar(key, defaultValue) as ClaudeReasoningEffort;
+  const validEfforts: ClaudeReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+  if (validEfforts.includes(value)) {
+    return value;
+  }
+  return defaultValue;
+}
+
 export const config: Config = {
   anthropic: {
     baseUrl: getEnvVar('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
     authToken: getEnvVar('ANTHROPIC_AUTH_TOKEN'),
     defaultModel: getEnvVar('CLAUDE_DEFAULT_MODEL', 'claude-sonnet-4-20250514'),
+    reasoningEffort: getClaudeReasoningEffort('CLAUDE_REASONING_EFFORT', 'high'),
   },
   openai: {
     baseUrl: getEnvVar('OPENAI_BASE_URL', 'https://api.openai.com'),
@@ -63,6 +80,7 @@ export const config: Config = {
   webhook: {
     secret: getEnvVar('WEBHOOK_SECRET'),
     port: parseInt(getEnvVar('PORT', '3000')),
+    taskConcurrency: parseInt(getEnvVar('WEBHOOK_TASK_CONCURRENCY', '2')),
   },
   ai: {
     defaultProvider: getAIProvider('AI_DEFAULT_PROVIDER', 'claude'),

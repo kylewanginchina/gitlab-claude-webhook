@@ -9,7 +9,6 @@ const loadCodexSDK = async () => {
   return CodexSDK;
 };
 
-import { config } from '../utils/config';
 import logger from '../utils/logger';
 import {
   ProcessResult,
@@ -18,12 +17,28 @@ import {
   StreamingProgressCallback,
 } from '../types/common';
 import { ProjectManager } from './projectManager';
+import { runtimeConfigService } from '../utils/runtimeConfig';
+import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import type { RuntimeConfig } from '../admin/adminTypes';
+import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
+import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
+import { createCodexExecutionEnvironment } from '../utils/providerEnvironment';
+
+const CODEX_EDIT_INSTRUCTIONS =
+  'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.';
+
+const CODEX_REVIEW_INSTRUCTIONS =
+  'You are working in an automated webhook environment in read-only review mode. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive analysis within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and produce the best supported review result. Do not modify files or git state. Prefer diff-first review, avoid broad repository exploration, focus on identifying real issues in the merge request, and return a structured review result. Do not run build, compile, test, lint, or format commands unless the user explicitly requests that validation. If explicitly requested validation fails, record the result and continue with static inspection.';
+
+const CODEX_CONTEXT_WRAPPER =
+  '{{contextBlock}}{{mrAnalysisBlock}}{{instructionsBlock}}\n**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}';
 
 export class CodexExecutor {
   private projectManager: ProjectManager;
-  private defaultTimeoutMs = 1800000; // 30 minutes
 
-  constructor() {
+  constructor(
+    private readonly reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService
+  ) {
     this.projectManager = new ProjectManager();
   }
 
@@ -34,6 +49,8 @@ export class CodexExecutor {
     callback: StreamingProgressCallback
   ): Promise<ProcessResult> {
     try {
+      const runtimeConfig = runtimeConfigService.getConfig();
+
       logger.info('Starting streaming Codex execution via SDK', {
         command: command.substring(0, 100),
         projectPath,
@@ -45,10 +62,16 @@ export class CodexExecutor {
       await callback.onProgress('🚀 Codex is analyzing your request...', false);
 
       // Execute codex command with streaming via SDK
-      const result = await this.runCodexWithSDK(command, projectPath, context, callback);
+      const result = await this.runCodexWithSDK(
+        command,
+        projectPath,
+        context,
+        runtimeConfig,
+        callback
+      );
 
       // Check for file changes
-      const changes = await this.getFileChanges(projectPath);
+      const changes = context.mode === 'review' ? [] : await this.getFileChanges(projectPath);
 
       if (changes.length > 0) {
         await callback.onProgress(`📝 Codex made changes to ${changes.length} file(s)`, false);
@@ -84,12 +107,14 @@ export class CodexExecutor {
     command: string,
     projectPath: string,
     context: AIExecutionContext,
+    runtimeConfig: RuntimeConfig,
     callback: StreamingProgressCallback
   ): Promise<{ output: string; error?: string }> {
-    const fullPrompt = this.buildPromptWithContext(command, context);
-    const model = context.model || config.openai.defaultModel;
-    const timeoutMs = context.timeoutMs || this.defaultTimeoutMs;
-    const reasoningEffort = config.openai.reasoningEffort;
+    const model = context.model || runtimeConfig.codex.defaultModel;
+    const timeoutMs = context.timeoutMs || runtimeConfig.codex.defaultTimeoutMinutes * 60 * 1000;
+    const timeBudget = createTimeBudget(timeoutMs);
+    const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
+    const reasoningEffort = runtimeConfig.codex.reasoningEffort;
 
     logger.info('Executing Codex via SDK', {
       model,
@@ -101,8 +126,20 @@ export class CodexExecutor {
     // Create Codex SDK instance
     const sdk = await loadCodexSDK();
     const codex = new (sdk.Codex || sdk.default?.Codex || sdk.default || sdk)({
-      apiKey: config.openai.apiKey,
-      baseUrl: config.openai.baseUrl,
+      apiKey: runtimeConfig.codex.apiKey,
+      baseUrl: runtimeConfig.codex.baseUrl,
+      env: createCodexExecutionEnvironment(runtimeConfig.codex.apiKey),
+      config: {
+        model_provider: 'gitlab_webhook_runtime',
+        model_providers: {
+          gitlab_webhook_runtime: {
+            name: 'gitlab_webhook_runtime',
+            base_url: runtimeConfig.codex.baseUrl,
+            wire_api: 'responses',
+            env_key: 'OPENAI_API_KEY',
+          },
+        },
+      },
     });
 
     // Start a thread with full-auto equivalent settings
@@ -164,26 +201,46 @@ export class CodexExecutor {
     }
   }
 
-  private buildPromptWithContext(command: string, context: AIExecutionContext): string {
-    let fullPrompt = '';
-
-    // Add context information if available
-    if (context.context && context.context.trim()) {
-      fullPrompt += `**Context:** ${context.context}\n\n`;
-    }
+  private buildPromptWithContext(
+    command: string,
+    context: AIExecutionContext,
+    timeBudget: TimeBudget
+  ): string {
+    const contextBlock =
+      context.context && context.context.trim() ? `**Context:** ${context.context}\n\n` : '';
 
     // Special handling for MR contexts
     const isMRContext = context.context && context.context.includes('MR #');
-
-    if (isMRContext) {
-      fullPrompt += `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`;
-    }
+    const mrAnalysisBlock = isMRContext
+      ? `**MR Analysis:** This is a merge request context. You can use git commands to examine the changes if needed. Use 'git log', 'git diff', and 'git show' to understand what files have been modified.\n\n`
+      : '';
 
     // Add automation context
-    fullPrompt += `You are working in an automated webhook environment. Make code changes directly and provide a clear summary of what was modified. Focus on implementing requested changes efficiently. Do not perform broad searches or extensive exploration unless absolutely necessary.\n\n`;
+    const instructionTemplateId =
+      context.mode === 'review' ? 'codex.review.instructions' : 'codex.edit.instructions';
+    const instructions = this.renderPromptTemplate(
+      instructionTemplateId,
+      { ...timeBudget },
+      context.mode === 'review' ? CODEX_REVIEW_INSTRUCTIONS : CODEX_EDIT_INSTRUCTIONS
+    );
+    const instructionsBlock = `${instructions}\n\n`;
 
-    // Add the main command/instruction
-    fullPrompt += `**Request:** ${command}`;
+    const fullPrompt = this.renderPromptTemplate(
+      'codex.context.wrapper',
+      {
+        context: context.context || '',
+        contextBlock,
+        mrAnalysisBlock,
+        mode: context.mode || 'edit',
+        instructions,
+        instructionsBlock,
+        command,
+        projectUrl: context.projectUrl,
+        branch: context.branch,
+        ...timeBudget,
+      },
+      CODEX_CONTEXT_WRAPPER
+    );
 
     logger.debug('Built Codex prompt with context', {
       hasContext: !!context.context,
@@ -193,6 +250,22 @@ export class CodexExecutor {
     });
 
     return fullPrompt;
+  }
+
+  private renderPromptTemplate(
+    id: string,
+    variables: Record<string, unknown>,
+    fallback: string
+  ): string {
+    try {
+      return this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+    } catch (error) {
+      logger.warn('Falling back to built-in Codex prompt template', {
+        templateId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return fallback;
+    }
   }
 
   private extractProgressFromEvent(event: ThreadEvent): string {
