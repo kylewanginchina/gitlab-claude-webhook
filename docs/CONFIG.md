@@ -104,7 +104,7 @@ cp .env.example .env
 
 ## Docker 配置
 
-默认镜像的 Node 进程以 UID/GID `1001:1001` 运行。基础 Compose 将 `./data` 和 `./logs` 分别 bind mount 到 `/app/data` 和 `/app/logs`；入口脚本会在启动时创建目录并自动修复其 ownership：
+默认镜像直接以 UID/GID `1001:1001` 运行。基础 Compose 将 `./data` 和 `./logs` 分别 bind mount 到 `/app/data` 和 `/app/logs`。容器从启动起即为非 root，也不会在启动时修改挂载目录的 ownership；部署前需确保这两个目录对 UID/GID `1001:1001` 可写：
 
 ```bash
 mkdir -p data logs

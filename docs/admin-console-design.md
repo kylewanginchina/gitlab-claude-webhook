@@ -97,9 +97,10 @@ Feedback 可关联 Review Prompt，并保存标签、备注和来源。Analyze f
 - `prompt-proposals.json`：优化 Proposal。
 - `prompt-proposal-transaction.json`：Apply Proposal 的自动恢复事务日志，由服务内部维护。
 
-基础 Compose 将宿主机 `./data` 挂载为 `/app/data`，入口脚本会自动修复 `./data` 和
-`./logs` 的 ownership；Node 进程以 UID/GID `1001:1001` 运行。Winston 将错误日志与综合
-日志分别写入 `./logs/error.log` 和 `./logs/combined.log`。
+基础 Compose 将宿主机 `./data` 和 `./logs` 分别挂载为 `/app/data` 和 `/app/logs`。
+Node 进程直接以 UID/GID `1001:1001` 运行，容器不会修改挂载目录的 ownership；部署方
+必须确保两个目录对该 UID/GID 可写。Winston 将错误日志与综合日志分别写入
+`./logs/error.log` 和 `./logs/combined.log`。
 
 ## 管理接口
 

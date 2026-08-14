@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENTRYPOINT="$ROOT_DIR/docker-entrypoint.sh"
 
 require_text() {
   local file="$1"
@@ -22,66 +21,36 @@ require_line() {
   }
 }
 
-require_regex() {
+reject_text() {
   local file="$1"
-  local regex="$2"
-  grep -Eq "$regex" "$file" || {
-    echo "Missing pattern '$regex' in ${file#$ROOT_DIR/}" >&2
+  local text="$2"
+  if grep -Fq "$text" "$file"; then
+    echo "Unexpected '$text' in ${file#$ROOT_DIR/}" >&2
     exit 1
-  }
+  fi
 }
 
-require_executable() {
-  local file="$1"
-  [[ -x "$file" ]] || {
-    echo "Expected executable file: ${file#$ROOT_DIR/}" >&2
+require_no_runtime_entrypoint() {
+  if [[ -e "$ROOT_DIR/docker-entrypoint.sh" ]]; then
+    echo "Unexpected runtime entrypoint: docker-entrypoint.sh" >&2
     exit 1
-  }
-}
-
-require_entrypoint_contract() {
-  require_executable "$ENTRYPOINT"
-  sh -n "$ENTRYPOINT"
-  require_regex "$ENTRYPOINT" '^[[:space:]]*canonicalize_runtime_path\(\)'
-  require_text "$ENTRYPOINT" 'fs.realpathSync.native'
-  require_text "$ENTRYPOINT" 'allowedPaths.includes(canonicalPath)'
-  require_text "$ENTRYPOINT" '/app/data'
-  require_text "$ENTRYPOINT" '/app/logs'
-  require_text "$ENTRYPOINT" '/tmp/gitlab-claude-work'
-  require_line "$ENTRYPOINT" 'DATA_DIR="${DATA_DIR-/app/data}"'
-  require_line "$ENTRYPOINT" 'LOG_DIR="${LOG_DIR-/app/logs}"'
-  require_line "$ENTRYPOINT" 'WORK_DIR="${WORK_DIR-/tmp/gitlab-claude-work}"'
-  require_text "$ENTRYPOINT" 'DEEPFLOW_BUILD_TOOLS_ENABLED'
-  require_text "$ENTRYPOINT" '/home/claude/.cargo'
-  require_text "$ENTRYPOINT" '/home/claude/.cache'
-  require_text "$ENTRYPOINT" '/home/claude/go'
-  require_text "$ENTRYPOINT" '/home/claude/.npm'
-  require_text "$ENTRYPOINT" '/tmp/deepflow-work'
-  require_text "$ENTRYPOINT" 'chown -R -h 1001:1001 "$canonical_dir"'
-  require_text "$ENTRYPOINT" 'exec su-exec 1001:1001 "$@"'
-  require_text "$ENTRYPOINT" 'exec gosu 1001:1001 "$@"'
+  fi
 }
 
 require_dockerfile_contract() {
   local dockerfile="$1"
-  local privilege_tool="$2"
 
-  require_regex "$dockerfile" "^[[:space:]]*COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh$"
-  require_line "$dockerfile" 'ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]'
-  if [[ "$privilege_tool" == "su-exec" ]]; then
-    require_regex "$dockerfile" '^[[:space:]]*RUN apk add --no-cache .*su-exec$'
-  else
-    require_regex "$dockerfile" '^[[:space:]]*gosu[[:space:]]*\\$'
-  fi
-  if grep -Eq '^[[:space:]]*USER[[:space:]]+' "$dockerfile"; then
-    echo "Unexpected USER instruction in ${dockerfile#$ROOT_DIR/}; entrypoint must start as root." >&2
-    exit 1
-  fi
+  require_line "$dockerfile" 'USER claude'
+  reject_text "$dockerfile" 'ENTRYPOINT'
+  reject_text "$dockerfile" 'docker-entrypoint.sh'
+  reject_text "$dockerfile" 'su-exec'
+  reject_text "$dockerfile" 'gosu'
 }
 
-require_entrypoint_contract
-require_dockerfile_contract "$ROOT_DIR/Dockerfile" su-exec
-require_dockerfile_contract "$ROOT_DIR/Dockerfile.deepflow" gosu
+require_no_runtime_entrypoint
+require_dockerfile_contract "$ROOT_DIR/Dockerfile"
+require_dockerfile_contract "$ROOT_DIR/Dockerfile.deepflow"
+require_text "$ROOT_DIR/Dockerfile" 'adduser -S claude -u 1001 -G claude'
 
 require_line "$ROOT_DIR/docker-compose.yml" '      - ./logs:/app/logs'
 require_line "$ROOT_DIR/docker-compose.yml" '      - ./data:/app/data'

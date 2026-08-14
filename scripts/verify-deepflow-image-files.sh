@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKERFILE="$ROOT_DIR/Dockerfile.deepflow"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.deepflow.yml"
-ENTRYPOINT="$ROOT_DIR/docker-entrypoint.sh"
 
 require_file() {
   local file_path="$1"
@@ -19,6 +18,15 @@ require_text() {
   local text="$2"
   if ! grep -Fq "$text" "$file_path"; then
     echo "Missing '${text}' in ${file_path#$ROOT_DIR/}" >&2
+    exit 1
+  fi
+}
+
+reject_text() {
+  local file_path="$1"
+  local text="$2"
+  if grep -Fq "$text" "$file_path"; then
+    echo "Unexpected '${text}' in ${file_path#$ROOT_DIR/}" >&2
     exit 1
   fi
 }
@@ -43,18 +51,10 @@ require_regex() {
 
 require_file "$DOCKERFILE"
 require_file "$COMPOSE_FILE"
-require_file "$ENTRYPOINT"
-[[ -x "$ENTRYPOINT" ]] || { echo "Entrypoint is not executable" >&2; exit 1; }
-sh -n "$ENTRYPOINT"
-require_regex "$ENTRYPOINT" '^[[:space:]]*canonicalize_runtime_path\(\)'
-require_text "$ENTRYPOINT" 'fs.realpathSync.native'
-require_text "$ENTRYPOINT" 'allowedPaths.includes(canonicalPath)'
-require_line "$ENTRYPOINT" 'DATA_DIR="${DATA_DIR-/app/data}"'
-require_line "$ENTRYPOINT" 'LOG_DIR="${LOG_DIR-/app/logs}"'
-require_line "$ENTRYPOINT" 'WORK_DIR="${WORK_DIR-/tmp/gitlab-claude-work}"'
-require_text "$ENTRYPOINT" 'DEEPFLOW_BUILD_TOOLS_ENABLED'
-require_text "$ENTRYPOINT" 'chown -R -h 1001:1001 "$canonical_dir"'
-require_text "$ENTRYPOINT" 'exec gosu 1001:1001 "$@"'
+if [[ -e "$ROOT_DIR/docker-entrypoint.sh" ]]; then
+  echo "Unexpected runtime entrypoint: docker-entrypoint.sh" >&2
+  exit 1
+fi
 
 require_text "$DOCKERFILE" "ARG DEBIAN_MIRROR"
 require_text "$DOCKERFILE" "ARG DEBIAN_SECURITY_MIRROR"
@@ -82,13 +82,11 @@ done
 require_text "$DOCKERFILE" "https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"
 require_text "$DOCKERFILE" "rustup component add rustfmt clippy"
 require_text "$DOCKERFILE" "cargo metadata --locked --format-version=1"
-require_regex "$DOCKERFILE" '^[[:space:]]*gosu[[:space:]]*\\$'
-require_line "$DOCKERFILE" 'COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh'
-require_line "$DOCKERFILE" 'ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]'
-if grep -Eq '^[[:space:]]*USER[[:space:]]+' "$DOCKERFILE"; then
-  echo "Unexpected USER instruction in Dockerfile.deepflow; entrypoint must start as root." >&2
-  exit 1
-fi
+require_line "$DOCKERFILE" 'USER claude'
+reject_text "$DOCKERFILE" 'ENTRYPOINT'
+reject_text "$DOCKERFILE" 'docker-entrypoint.sh'
+reject_text "$DOCKERFILE" 'su-exec'
+reject_text "$DOCKERFILE" 'gosu'
 
 for volume in \
   webhook-work \

@@ -78,7 +78,7 @@ docker compose up -d
 docker compose logs -f gitlab-claude-webhook
 ```
 
-入口脚本会在启动时自动修复 `./data` 和 `./logs` 的 ownership，Node 进程仍以 UID/GID `1001:1001` 运行。除 `docker compose logs` 外，Winston 还会把错误日志和综合日志分别写入 `./logs/error.log` 与 `./logs/combined.log`。
+镜像直接以 UID/GID `1001:1001` 启动，容器从启动起即为非 root，也不会修改挂载目录的 ownership。部署前需确保 `./data` 和 `./logs` 对 UID/GID `1001:1001` 可写。除 `docker compose logs` 外，Winston 还会把错误日志和综合日志分别写入 `./logs/error.log` 与 `./logs/combined.log`。
 
 基础 `docker-compose.yml` 会将 Claude/Codex 默认超时和全部 `REVIEW_*` 设置注入容器；`WORK_DIR`、`DATA_DIR` 与 `LOG_DIR` 使用固定的容器路径。
 
