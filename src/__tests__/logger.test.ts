@@ -63,6 +63,8 @@ describe('logger runtime configuration', () => {
       await expect(fs.access(logDir)).rejects.toThrow();
       process.env.LOG_DIR = logDir;
       jest.isolateModules(() => {
+        // Jest's synchronous module isolation requires a synchronous load here.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
         isolatedLogger = require('../utils/logger').default as typeof logger;
       });
 
