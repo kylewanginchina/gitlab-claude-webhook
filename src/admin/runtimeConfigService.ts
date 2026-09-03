@@ -129,6 +129,10 @@ export function createConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Runti
       skipDraft: booleanEnvValue(env, 'REVIEW_SKIP_DRAFT', true),
       skipExistingSha: booleanEnvValue(env, 'REVIEW_SKIP_EXISTING_SHA', true),
       allowedCommands: arrayEnvValue(env, 'REVIEW_ALLOWED_COMMANDS', ['/code-review']),
+      useBuiltinSkills: booleanEnvValue(env, 'REVIEW_USE_BUILTIN_SKILLS', true),
+      structuredOutput: booleanEnvValue(env, 'REVIEW_STRUCTURED_OUTPUT', true),
+      passMaxTurns: intValue(envValue(env, 'REVIEW_PASS_MAX_TURNS', '40'), 40),
+      scoringMaxTurns: intValue(envValue(env, 'REVIEW_SCORING_MAX_TURNS', '20'), 20),
     },
     workDir: envValue(env, 'WORK_DIR', '/tmp/gitlab-claude-work'),
     logLevel: envValue(env, 'LOG_LEVEL', 'info'),
@@ -299,6 +303,10 @@ export class RuntimeConfigService {
     this.assertBoolean(config.review.enabled, 'review.enabled');
     this.assertBoolean(config.review.skipDraft, 'review.skipDraft');
     this.assertBoolean(config.review.skipExistingSha, 'review.skipExistingSha');
+    this.assertBoolean(config.review.useBuiltinSkills, 'review.useBuiltinSkills');
+    this.assertBoolean(config.review.structuredOutput, 'review.structuredOutput');
+    this.assertPositiveInteger(config.review.passMaxTurns, 'review.passMaxTurns');
+    this.assertPositiveInteger(config.review.scoringMaxTurns, 'review.scoringMaxTurns');
     this.assertAllowedCommands(config.review.allowedCommands);
     this.assertLogLevel(config.logLevel, 'logLevel');
   }

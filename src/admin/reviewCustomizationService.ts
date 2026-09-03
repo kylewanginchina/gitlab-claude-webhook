@@ -209,7 +209,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
       '',
       'Review pass: {{reviewPassLabel}}',
       '{{reviewPassFocus}}',
-      '{{adminPromptInstructionsBlock}}{{adminSkillInstructionsBlock}}Do not modify files, commit, or change git state.',
+      '{{adminPromptInstructionsBlock}}{{adminSkillInstructionsBlock}}{{inlineSkillsBlock}}Do not modify files, commit, or change git state.',
       'Do not use Task, Agent, WebFetch, or WebSearch.',
       'Use only local repository inspection tools and keep exploration narrow.',
       'Review only issues introduced or made worse by this merge request.',
@@ -271,6 +271,8 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
       '',
       'You are performing the confidence-scoring stage of a multi-pass code review.',
       'Verify the finding against the merge request diff, relevant CLAUDE.md files, and git history as needed.',
+      'Verification is adversarial: try to disprove the finding first. Confirm the exact line is inside a hunk this merge request changed, identify a concrete input or state that triggers the problem, and check whether the code, a comment, or the merge request description already accounts for it.',
+      'If you cannot name a concrete trigger after inspection, score 25 or lower.',
       'Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools.',
       'Only score issues introduced or made worse by this merge request.',
       'If this is a CLAUDE.md-related issue, confirm that an applicable CLAUDE.md explicitly calls it out.',
@@ -290,6 +292,7 @@ const DEFAULT_PROMPT_TEMPLATES: Array<{
       'Candidate rationale:',
       '{{candidateBody}}',
       '',
+      '{{inlineSkillsBlock}}',
       'Use this rubric verbatim:',
       '0: Not confident at all. This is a false positive that does not stand up to light scrutiny, or is a pre-existing issue.',
       '25: Somewhat confident. This might be a real issue, but may also be a false positive. The issue was not verified.',
@@ -487,7 +490,10 @@ export class ReviewCustomizationService {
       await this.promptTemplateStore.read(defaultPromptTemplates)
     );
     this.prompts = this.ensureDefaultPrompts(await this.promptStore.read(defaultPrompts));
-    this.skills = await this.skillStore.read([]);
+    this.skills = (await this.skillStore.read([])).map(skill => ({
+      ...skill,
+      skillNames: Array.isArray(skill.skillNames) ? skill.skillNames : [],
+    }));
     this.feedback = await this.feedbackStore.read([]);
     this.proposals = await this.proposalStore.read([]);
     await this.persistAll();
@@ -728,6 +734,7 @@ export class ReviewCustomizationService {
       languageHints: uniqueStrings(input.languageHints || [], 'skill.languageHints'),
       promptIds: uniqueStrings(input.promptIds || [], 'skill.promptIds'),
       systemInstructions: requiredString(input.systemInstructions, 'skill.systemInstructions'),
+      skillNames: uniqueStrings(input.skillNames || [], 'skill.skillNames'),
       priority: this.integerValue(input.priority ?? 0, 'skill.priority'),
       createdAt,
       updatedAt: createdAt,
@@ -766,6 +773,9 @@ export class ReviewCustomizationService {
         patch.systemInstructions,
         'skill.systemInstructions'
       );
+    }
+    if ('skillNames' in patch) {
+      skill.skillNames = uniqueStrings(patch.skillNames || [], 'skill.skillNames');
     }
     if ('priority' in patch) {
       skill.priority = this.integerValue(patch.priority ?? 0, 'skill.priority');

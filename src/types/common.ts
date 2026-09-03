@@ -12,6 +12,12 @@ export interface AIExecutionContext {
   instruction: string;
   model?: string;
   mode?: 'edit' | 'review';
+  /** Agent SDK skill names to enable for this execution (review mode only). */
+  skills?: string[];
+  /** JSON schema the provider must return as structured output (review mode only). */
+  outputSchema?: Record<string, unknown>;
+  /** Upper bound on agentic turns before the SDK stops the run. */
+  maxTurns?: number;
 }
 
 export interface StreamingProgressCallback {

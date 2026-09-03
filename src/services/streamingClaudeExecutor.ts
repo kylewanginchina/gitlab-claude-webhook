@@ -20,6 +20,10 @@ import type { RuntimeConfig } from '../admin/adminTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 import { createClaudeExecutionEnvironment } from '../utils/providerEnvironment';
+import {
+  ReviewSkillCatalog,
+  reviewSkillCatalog as defaultReviewSkillCatalog,
+} from './reviewSkillCatalog';
 
 const CLAUDE_EDIT_SYSTEM_PROMPT =
   'You are working in an automated webhook environment. This request has a hard timeout of {{timeoutMinutes}} minutes. Plan to finish substantive work within {{softDeadlineMinutes}} minutes and reserve the final {{wrapUpMinutes}} minutes to stop exploration and summarize the best supported result. Make code changes directly without asking for permissions. For merge request contexts, use git commands to examine code changes when needed. If an optional build, test, lint, compile, or validation command fails for any reason, record that verification result and continue with repository inspection instead of stopping solely because of that command failure. Focus on implementing requested changes efficiently and provide a clear summary of what was modified.';
@@ -29,6 +33,14 @@ const CLAUDE_REVIEW_SYSTEM_PROMPT =
 
 const CLAUDE_CONTEXT_WRAPPER =
   '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}';
+
+interface ReviewModeOptions {
+  settingSources: Array<'project'>;
+  plugins?: Array<{ type: 'local'; path: string }>;
+  skills?: string[];
+  maxTurns?: number;
+  outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
+}
 
 const CLAUDE_STATIC_REVIEW_FALLBACK = [
   'Continue the merge request review after a build, test, lint, compile, or validation command failed before the review produced findings.',
@@ -52,7 +64,8 @@ export class StreamingClaudeExecutor {
   private projectManager: ProjectManager;
 
   constructor(
-    private readonly reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService
+    private readonly reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService,
+    private readonly reviewSkillCatalog: ReviewSkillCatalog = defaultReviewSkillCatalog
   ) {
     this.projectManager = new ProjectManager();
   }
@@ -176,6 +189,9 @@ export class StreamingClaudeExecutor {
     const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
     const isReviewMode = context.mode === 'review';
     const sessionId = randomUUID();
+    const reviewOptions: Partial<ReviewModeOptions> = isReviewMode
+      ? this.buildReviewModeOptions(context, runtimeConfig)
+      : {};
 
     const env = createClaudeExecutionEnvironment(
       runtimeConfig.claude.authToken,
@@ -188,6 +204,13 @@ export class StreamingClaudeExecutor {
       effort,
       cwd: projectPath,
       promptLength: fullPrompt.length,
+      ...(isReviewMode
+        ? {
+            skills: reviewOptions.skills,
+            maxTurns: reviewOptions.maxTurns,
+            structuredOutput: Boolean(reviewOptions.outputFormat),
+          }
+        : {}),
     });
 
     const abortController = new AbortController();
@@ -230,7 +253,7 @@ export class StreamingClaudeExecutor {
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
           tools: isReviewMode
-            ? ['Bash', 'Read', 'Glob', 'Grep']
+            ? ['Bash', 'Read', 'Glob', 'Grep', ...(reviewOptions.skills?.length ? ['Skill'] : [])]
             : { type: 'preset', preset: 'claude_code' },
           ...(isReviewMode
             ? {
@@ -245,6 +268,7 @@ export class StreamingClaudeExecutor {
                   'NotebookEdit',
                   'TodoWrite',
                 ],
+                ...reviewOptions,
               }
             : {}),
           systemPrompt: {
@@ -288,19 +312,31 @@ export class StreamingClaudeExecutor {
         if (message.type === 'result') {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === 'success') {
-            if ('result' in resultMsg && resultMsg.result && String(resultMsg.result).trim()) {
+            if (
+              'structured_output' in resultMsg &&
+              resultMsg.structured_output !== undefined &&
+              resultMsg.structured_output !== null
+            ) {
+              // Structured output is authoritative; serialise it so downstream JSON parsing is exact.
+              output = JSON.stringify(resultMsg.structured_output);
+            } else if (
+              'result' in resultMsg &&
+              resultMsg.result &&
+              String(resultMsg.result).trim()
+            ) {
               output = String(resultMsg.result);
             }
             logger.info('Claude SDK execution completed successfully', {
               cost: resultMsg.total_cost_usd,
               turns: resultMsg.num_turns,
               durationMs: resultMsg.duration_ms,
+              structured: 'structured_output' in resultMsg && resultMsg.structured_output != null,
             });
             break;
           } else {
             const errors = 'errors' in resultMsg ? resultMsg.errors : [];
             const errorStr =
-              errors?.join('; ') || `Execution ended with status: ${resultMsg.subtype}`;
+              errors?.join('; ') || this.describeNonSuccessSubtype(resultMsg.subtype);
             logger.warn('Claude SDK execution ended with non-success', {
               subtype: resultMsg.subtype,
               errors,
@@ -321,6 +357,61 @@ export class StreamingClaudeExecutor {
           // Query may already be closed
         }
       }
+    }
+  }
+
+  private buildReviewModeOptions(
+    context: AIExecutionContext,
+    runtimeConfig: RuntimeConfig
+  ): ReviewModeOptions {
+    const options: ReviewModeOptions = {
+      // Only project-level settings: keeps user-level ~/.claude skills/hooks out of automated runs.
+      settingSources: ['project'],
+    };
+
+    const useBuiltinSkills =
+      runtimeConfig.review.useBuiltinSkills !== false && this.reviewSkillCatalog.isAvailable();
+    if (useBuiltinSkills) {
+      const requested =
+        context.skills && context.skills.length > 0
+          ? context.skills
+          : this.reviewSkillCatalog.getAlwaysSkills().map(skill => skill.name);
+      const known = new Set(this.reviewSkillCatalog.listSkills().map(skill => skill.name));
+      const skills = Array.from(new Set(requested)).filter(name => {
+        if (known.has(name)) {
+          return true;
+        }
+        logger.warn('Ignoring unknown review skill', { skill: name });
+        return false;
+      });
+
+      if (skills.length > 0) {
+        options.plugins = [{ type: 'local', path: this.reviewSkillCatalog.getPluginDir() }];
+        options.skills = skills;
+      }
+    }
+
+    if (context.maxTurns && context.maxTurns > 0) {
+      options.maxTurns = context.maxTurns;
+    }
+
+    if (runtimeConfig.review.structuredOutput !== false && context.outputSchema) {
+      options.outputFormat = { type: 'json_schema', schema: context.outputSchema };
+    }
+
+    return options;
+  }
+
+  private describeNonSuccessSubtype(subtype: string): string {
+    switch (subtype) {
+      case 'error_max_turns':
+        return 'Execution stopped after reaching the maximum number of turns before producing a result';
+      case 'error_max_budget_usd':
+        return 'Execution stopped after reaching the cost budget';
+      case 'error_max_structured_output_retries':
+        return 'Execution could not produce output matching the required JSON schema';
+      default:
+        return `Execution ended with status: ${subtype}`;
     }
   }
 

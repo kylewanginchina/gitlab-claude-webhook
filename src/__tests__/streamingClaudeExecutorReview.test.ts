@@ -1,0 +1,287 @@
+import type { RuntimeConfig } from '../admin/adminTypes';
+import type { AIExecutionContext, StreamingProgressCallback } from '../types/common';
+import type { GitLabWebhookEvent } from '../types/gitlab';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+const mockQuery = jest.fn();
+
+jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: (...args: unknown[]) => mockQuery(...args),
+}));
+
+jest.mock('../utils/config', () => ({
+  expandEnvVars: (value: string) => value,
+  config: {
+    anthropic: {
+      baseUrl: 'https://claude.static.example',
+      authToken: 'anthropic-static-token',
+      defaultModel: 'claude-static-model',
+      reasoningEffort: 'high',
+    },
+    openai: {
+      baseUrl: 'https://codex.static.example/v1',
+      apiKey: 'openai-static-key',
+      defaultModel: 'codex-static-model',
+      reasoningEffort: 'high',
+    },
+    gitlab: { baseUrl: 'https://gitlab.static.example', token: 'glpat-static-token' },
+    webhook: { secret: 'webhook-static-secret', port: 3000, taskConcurrency: 2 },
+    ai: { defaultProvider: 'claude' },
+    workDir: '/tmp/static-workdir',
+    logLevel: 'info',
+  },
+}));
+
+import { runtimeConfigService } from '../utils/runtimeConfig';
+import { StreamingClaudeExecutor } from '../services/streamingClaudeExecutor';
+import { ReviewSkillCatalog } from '../services/reviewSkillCatalog';
+import { reviewCustomizationService } from '../utils/reviewCustomization';
+import { REVIEW_PASS_OUTPUT_SCHEMA } from '../services/gitlabReviewService';
+
+const REPO_SKILLS_DIR = path.resolve(__dirname, '..', '..', 'review-skills');
+
+function createRuntimeConfig(review: Partial<RuntimeConfig['review']> = {}): RuntimeConfig {
+  return {
+    claude: {
+      baseUrl: 'https://claude.runtime.example',
+      authToken: 'anthropic-runtime-token',
+      defaultModel: 'claude-runtime-model',
+      reasoningEffort: 'high',
+      defaultTimeoutMinutes: 30,
+    },
+    codex: {
+      baseUrl: 'https://codex.runtime.example/v1',
+      apiKey: 'openai-runtime-key',
+      defaultModel: 'codex-runtime-model',
+      reasoningEffort: 'high',
+      defaultTimeoutMinutes: 30,
+    },
+    gitlab: { baseUrl: 'https://gitlab.runtime.example', token: 'glpat-runtime-token' },
+    webhook: { secret: 'webhook-runtime-secret', port: 3000, taskConcurrency: 2 },
+    ai: { defaultProvider: 'claude' },
+    review: {
+      enabled: true,
+      defaultProvider: 'claude-multipass',
+      minConfidence: 80,
+      maxCandidateFindings: 12,
+      maxFinalFindings: 8,
+      passConcurrency: 4,
+      scoringConcurrency: 4,
+      skipDraft: true,
+      skipExistingSha: true,
+      allowedCommands: ['/code-review'],
+      useBuiltinSkills: true,
+      structuredOutput: true,
+      passMaxTurns: 40,
+      scoringMaxTurns: 20,
+      ...review,
+    },
+    workDir: '/tmp/gitlab-claude-work',
+    logLevel: 'info',
+  };
+}
+
+function createCallback(): StreamingProgressCallback {
+  return {
+    onProgress: jest.fn().mockResolvedValue(undefined),
+    onError: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createAsyncGenerator<T>(items: T[]): AsyncGenerator<T, void, void> {
+  return (async function* () {
+    for (const item of items) {
+      yield item;
+    }
+  })();
+}
+
+function createReviewContext(overrides: Partial<AIExecutionContext> = {}): AIExecutionContext {
+  return {
+    context: 'MR #7: Review',
+    projectUrl: 'https://gitlab.example.com/group/project',
+    branch: 'feature/test',
+    event: { object_kind: 'note' } as GitLabWebhookEvent,
+    instruction: 'Review the merge request',
+    mode: 'review',
+    ...overrides,
+  };
+}
+
+function successResult(extra: Record<string, unknown> = {}) {
+  return {
+    type: 'result',
+    subtype: 'success',
+    result: 'Prose summary that should be ignored when structured output exists',
+    total_cost_usd: 0,
+    num_turns: 3,
+    duration_ms: 10,
+    ...extra,
+  };
+}
+
+describe('StreamingClaudeExecutor review mode SDK options', () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+    jest.restoreAllMocks();
+  });
+
+  it('loads the skill plugin, enables requested skills, and requests structured output', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const structured = { summary: 'ok', findings: [] };
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([successResult({ structured_output: structured })])
+    );
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    const result = await executor.executeWithStreaming(
+      'Review pass prompt',
+      '/tmp/project',
+      createReviewContext({
+        skills: ['mr-review-core', 'typescript-review', 'not-a-real-skill'],
+        outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
+        maxTurns: 17,
+      }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe(JSON.stringify(structured));
+
+    const options = mockQuery.mock.calls[0][0].options;
+    expect(options.settingSources).toEqual(['project']);
+    expect(options.plugins).toEqual([{ type: 'local', path: REPO_SKILLS_DIR }]);
+    expect(options.skills).toEqual(['mr-review-core', 'typescript-review']);
+    expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep', 'Skill']);
+    expect(options.maxTurns).toBe(17);
+    expect(options.outputFormat).toEqual({
+      type: 'json_schema',
+      schema: REVIEW_PASS_OUTPUT_SCHEMA,
+    });
+  });
+
+  it('defaults to the always-on skills when the context does not name any', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    const result = await executor.executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext(),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Prose summary');
+    const options = mockQuery.mock.calls[0][0].options;
+    expect(options.skills).toEqual(['mr-review-core']);
+    expect(options.outputFormat).toBeUndefined();
+    expect(options.maxTurns).toBeUndefined();
+  });
+
+  it('omits plugins and the Skill tool when built-in skills are disabled or unavailable', async () => {
+    jest
+      .spyOn(runtimeConfigService, 'getConfig')
+      .mockReturnValue(createRuntimeConfig({ useBuiltinSkills: false, structuredOutput: false }));
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    await executor.executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ skills: ['mr-review-core'], outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createCallback()
+    );
+
+    let options = mockQuery.mock.calls[0][0].options;
+    expect(options.plugins).toBeUndefined();
+    expect(options.skills).toBeUndefined();
+    expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
+    expect(options.outputFormat).toBeUndefined();
+    expect(options.settingSources).toEqual(['project']);
+
+    mockQuery.mockClear();
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-skills-'));
+    const noSkills = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(emptyDir)
+    );
+    await noSkills.executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ skills: ['mr-review-core'] }),
+      createCallback()
+    );
+    options = mockQuery.mock.calls[0][0].options;
+    expect(options.plugins).toBeUndefined();
+    expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  });
+
+  it('does not apply review-only options in edit mode', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
+    jest.spyOn(StreamingClaudeExecutor.prototype as any, 'getFileChanges').mockResolvedValue([]);
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    await executor.executeWithStreaming(
+      'Edit',
+      '/tmp/project',
+      createReviewContext({ mode: 'edit', skills: ['mr-review-core'], maxTurns: 5 }),
+      createCallback()
+    );
+
+    const options = mockQuery.mock.calls[0][0].options;
+    expect(options.plugins).toBeUndefined();
+    expect(options.skills).toBeUndefined();
+    expect(options.settingSources).toBeUndefined();
+    expect(options.maxTurns).toBeUndefined();
+    expect(options.tools).toEqual({ type: 'preset', preset: 'claude_code' });
+  });
+
+  it('reports a readable error when the run hits the max-turn limit', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([
+        {
+          type: 'result',
+          subtype: 'error_max_turns',
+          errors: [],
+          total_cost_usd: 0,
+          num_turns: 40,
+          duration_ms: 10,
+        },
+      ])
+    );
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    const result = await executor.executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ maxTurns: 40 }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('maximum number of turns');
+  });
+});

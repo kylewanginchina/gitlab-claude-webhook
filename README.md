@@ -130,6 +130,10 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 此模式的执行 provider 由运行时配置 `REVIEW_DEFAULT_PROVIDER` 决定，而不是由 mention 决定。可选值为 `claude-multipass` 与 `codex-multipass`。
 
+#### 内置审查 Skill
+
+`review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` + `skills` 选项原生加载；Codex 没有 skill 机制，同一份 SKILL.md 正文会内联到提示词中。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。
+
 ## 处理流程
 
 1. 验证 GitLab Webhook 签名。
@@ -168,7 +172,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 | Codex      | `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODEX_DEFAULT_MODEL`、`CODEX_DEFAULT_TIMEOUT_MINUTES`            | Codex provider；默认超时 30 分钟  |
 | GitLab     | `GITLAB_BASE_URL`、`GITLAB_TOKEN`                                                                      | GitLab 实例与 API Token           |
 | Webhook    | `WEBHOOK_SECRET`、`PORT`、`WEBHOOK_TASK_CONCURRENCY`                                                   | 默认端口 3000、全局并发 2         |
-| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`                                 | 默认命令为 `/code-review`         |
+| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`、`REVIEW_USE_BUILTIN_SKILLS`、`REVIEW_STRUCTURED_OUTPUT`、`REVIEW_PASS_MAX_TURNS`、`REVIEW_SCORING_MAX_TURNS` | 默认命令为 `/code-review`；默认启用内置 skill 与结构化输出 |
 | 管理与存储 | `ADMIN_TOKEN`、`DATA_DIR`                                                                              | 管理认证与运行时数据目录          |
 | 工作与日志 | `WORK_DIR`、`LOG_LEVEL`                                                                                | 临时工作目录与日志级别            |
 
@@ -184,7 +188,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 - Prompt Template：edit、review、上下文和评分提示词模板。
 - Review Prompt：多轮 review 的审查阶段与专项提示。
-- Skill：按 `enabled`、当前 Review provider、`promptIds`、`fileGlobs`、`languageHints` 和 `priority` 匹配的审查规则。
+- Skill：按 `enabled`、当前 Review provider、`promptIds`、`fileGlobs`、`languageHints` 和 `priority` 匹配的审查规则；可通过 `skillNames` 额外固定启用 `review-skills/` 中的内置 SKILL.md 技能。
 - Feedback：记录有效、误报、遗漏或不清晰的审查反馈。
 - Proposal：基于反馈生成的提示词优化建议；Open Proposal 可 Apply 到草稿或 Dismiss，Apply 后仍需 Publish。
 

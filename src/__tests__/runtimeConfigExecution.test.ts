@@ -114,6 +114,10 @@ const baseRuntimeConfig: RuntimeConfig = {
     skipDraft: true,
     skipExistingSha: true,
     allowedCommands: ['/code-review'],
+    useBuiltinSkills: true,
+    structuredOutput: true,
+    passMaxTurns: 40,
+    scoringMaxTurns: 20,
   },
   workDir: '/tmp/gitlab-claude-work',
   logLevel: 'info',
@@ -596,7 +600,7 @@ describe('runtime config execution paths', () => {
       expect.objectContaining({
         prompt: expect.stringContaining('Continue the merge request review'),
         options: expect.objectContaining({
-          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          tools: ['Bash', 'Read', 'Glob', 'Grep', 'Skill'],
           disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
         }),
       })
@@ -660,7 +664,7 @@ describe('runtime config execution paths', () => {
       expect.objectContaining({
         prompt: expect.stringContaining('Continue the merge request review'),
         options: expect.objectContaining({
-          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          tools: ['Bash', 'Read', 'Glob', 'Grep', 'Skill'],
           disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
         }),
       })
@@ -725,7 +729,7 @@ describe('runtime config execution paths', () => {
       expect.objectContaining({
         prompt: expect.stringContaining('Continue the merge request review'),
         options: expect.objectContaining({
-          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          tools: ['Bash', 'Read', 'Glob', 'Grep', 'Skill'],
           disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
         }),
       })
@@ -791,7 +795,7 @@ describe('runtime config execution paths', () => {
       2,
       expect.objectContaining({
         options: expect.objectContaining({
-          tools: ['Bash', 'Read', 'Glob', 'Grep'],
+          tools: ['Bash', 'Read', 'Glob', 'Grep', 'Skill'],
           disallowedTools: expect.arrayContaining(['Task', 'TodoWrite', 'Edit', 'Write']),
         }),
       })
@@ -1727,6 +1731,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -1794,6 +1800,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -1859,6 +1867,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -1931,6 +1941,8 @@ describe('runtime config execution paths', () => {
     };
     (processor as any).gitlabReviewService = {
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
     };
     (processor as any).postComment = postComment;
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
@@ -1959,6 +1971,8 @@ describe('runtime config execution paths', () => {
     };
     (processor as any).gitlabReviewService = {
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
     };
     (processor as any).postComment = postComment;
     (processor as any).updateProgressComment = updateProgressComment;
@@ -2009,6 +2023,8 @@ describe('runtime config execution paths', () => {
     };
     (processor as any).gitlabReviewService = {
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
     };
     (processor as any).postComment = postComment;
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
@@ -2072,6 +2088,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2193,6 +2211,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2307,6 +2327,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2440,6 +2462,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2528,6 +2552,8 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillNames: jest.fn().mockReturnValue([]),
+      getScoringSkillDefinitions: jest.fn().mockReturnValue([]),
       buildReviewPasses: jest.fn().mockReturnValue([
         { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt 1' },
         { id: 'pass-2', label: 'Pass 2', prompt: 'Prompt 2' },

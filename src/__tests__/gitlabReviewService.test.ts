@@ -37,6 +37,69 @@ describe('GitLabReviewService', () => {
       expect(passes[0]?.prompt).toContain('focus on auth');
     });
 
+    it('attaches built-in skill names per pass for Claude and inlines skill bodies for Codex', () => {
+      const claudePasses = service.buildReviewPasses(context, undefined, undefined, 'claude');
+      const bugScan = claudePasses.find(pass => pass.id === 'bug-scan');
+      const history = claudePasses.find(pass => pass.id === 'history-context');
+
+      // Core methodology is always first; TypeScript notes match the .ts diff on bug-scan.
+      expect(bugScan?.skillNames[0]).toBe('mr-review-core');
+      expect(bugScan?.skillNames).toContain('typescript-review');
+      expect(bugScan?.skillNames).toContain('security-review');
+      expect(bugScan?.skillNames).not.toContain('go-review');
+      expect(history?.skillNames).toContain('typescript-review');
+      expect(history?.skillNames).not.toContain('security-review');
+      // Claude receives skills natively, not as prompt text.
+      expect(bugScan?.prompt).not.toContain('<skill name="mr-review-core">');
+
+      const codexPasses = service.buildReviewPasses(context, undefined, undefined, 'codex');
+      const codexBugScan = codexPasses.find(pass => pass.id === 'bug-scan');
+      expect(codexBugScan?.prompt).toContain('<skill name="mr-review-core">');
+      expect(codexBugScan?.prompt).toContain('<skill name="typescript-review">');
+      expect(codexBugScan?.prompt).toContain('# Merge request review methodology');
+    });
+
+    it('exposes the always-on skills for the scoring stage', () => {
+      expect(service.getScoringSkillNames()).toEqual(['mr-review-core']);
+      const scoringPrompt = service.buildScoringPrompt(
+        context,
+        {
+          title: 'Bug',
+          body: 'Body',
+          confidence: 70,
+          path: 'src/a.ts',
+          line: 3,
+          lineType: 'new',
+        },
+        undefined,
+        undefined,
+        service.getScoringSkillDefinitions()
+      );
+      expect(scoringPrompt).toContain('<skill name="mr-review-core">');
+      expect(scoringPrompt).toContain('Verification is adversarial');
+    });
+
+    it('lets admin skills pin extra on-disk skills by name', async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-service-pin-'));
+      const customization = new ReviewCustomizationService({ dataDir });
+      await customization.initialize();
+      await customization.createSkill({
+        name: 'Go everywhere',
+        provider: 'claude',
+        promptIds: ['bug-scan'],
+        systemInstructions: 'Also apply Go notes.',
+        skillNames: ['go-review', 'does-not-exist'],
+      });
+
+      const customService = new GitLabReviewService({} as any, customization);
+      const bugScan = customService
+        .buildReviewPasses(context, undefined, undefined, 'claude')
+        .find(pass => pass.id === 'bug-scan');
+
+      expect(bugScan?.skillNames).toContain('go-review');
+      expect(bugScan?.skillNames).not.toContain('does-not-exist');
+    });
+
     it('uses published admin prompt versions for review passes', async () => {
       const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-service-prompts-'));
       const customization = new ReviewCustomizationService({ dataDir });

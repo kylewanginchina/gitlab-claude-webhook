@@ -44,6 +44,10 @@ export interface PublicRuntimeConfig {
     skipDraft: boolean;
     skipExistingSha: boolean;
     allowedCommands: string[];
+    useBuiltinSkills: boolean;
+    structuredOutput: boolean;
+    passMaxTurns: number;
+    scoringMaxTurns: number;
   };
   workDir: string;
   logLevel: string;
@@ -182,6 +186,7 @@ export interface ReviewSkill {
   languageHints: string[];
   promptIds: string[];
   systemInstructions: string;
+  skillNames: string[];
   priority: number;
   createdAt: string;
   updatedAt: string;
@@ -193,6 +198,7 @@ export type ReviewSkillInput = Partial<{
   fileGlobs: string[];
   languageHints: string[];
   promptIds: string[];
+  skillNames: string[];
   priority: number;
   enabled: boolean;
 }> & {

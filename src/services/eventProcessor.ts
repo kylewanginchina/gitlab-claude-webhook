@@ -15,6 +15,8 @@ import { RuntimeConfig } from '../admin/adminTypes';
 import {
   GitLabReviewService,
   PreparedReviewContext,
+  REVIEW_PASS_OUTPUT_SCHEMA,
+  REVIEW_SCORE_OUTPUT_SCHEMA,
   ReviewFinding,
   ReviewPassResult,
 } from './gitlabReviewService';
@@ -657,7 +659,12 @@ export class EventProcessor {
           pass.label,
           pass.prompt,
           projectPath,
-          executionContext,
+          {
+            ...executionContext,
+            skills: pass.skillNames,
+            outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
+            maxTurns: reviewSettings.passMaxTurns,
+          },
           callback
         )
     );
@@ -767,7 +774,12 @@ export class EventProcessor {
           finding,
           index + 1,
           projectPath,
-          executionContext,
+          {
+            ...executionContext,
+            skills: this.gitlabReviewService.getScoringSkillNames(),
+            outputSchema: REVIEW_SCORE_OUTPUT_SCHEMA,
+            maxTurns: reviewSettings.scoringMaxTurns,
+          },
           reviewContext,
           userFocus,
           reviewTimeBudget,
@@ -973,7 +985,8 @@ export class EventProcessor {
       reviewContext,
       finding,
       userFocus,
-      timeBudget
+      timeBudget,
+      instruction.provider === 'codex' ? this.gitlabReviewService.getScoringSkillDefinitions() : []
     );
 
     const result = await this.executeWithProvider(

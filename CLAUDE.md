@@ -63,6 +63,14 @@ This is a GitLab webhook service that integrates with Claude Agent SDK to provid
 - Extracts progress from `assistant`, `tool_progress`, and `system` message types
 - Handles `SDKResultMessage` for success/error detection with cost and usage tracking
 - Supports abort via `AbortController` for timeout handling
+- In review mode: loads `review-skills/` as a local SDK plugin (`plugins` + `skills` options), restricts `settingSources` to `['project']`, applies `maxTurns`, and requests `outputFormat: json_schema` so pass/scoring results arrive as `structured_output`
+
+**Review skills** (`review-skills/skills/<name>/SKILL.md`, loaded by `src/services/reviewSkillCatalog.ts`):
+
+- `mr-review-core` is `review-always` and is active in every pass and the scoring stage
+- Other skills match per pass via frontmatter `metadata`: `review-passes`, `review-languages`, `review-globs`
+- Claude gets skills natively; Codex gets the same SKILL.md bodies inlined into the prompt
+- Admin-defined skills can pin extra on-disk skills via `skillNames`
 
 **CodexExecutor** - Uses `@openai/codex-sdk`:
 
