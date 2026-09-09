@@ -146,4 +146,41 @@ describe('bundled review skills', () => {
       expect(skill.body.length).toBeGreaterThan(200);
     }
   });
+
+  it('derives the slash command from the plugin manifest', () => {
+    const catalog = new ReviewSkillCatalog(path.resolve(__dirname, '..', '..', 'review-skills'));
+    expect(catalog.getPluginName()).toBe('gitlab-review');
+    expect(catalog.getInvocationCommand('mr-review-core')).toBe('/gitlab-review:mr-review-core');
+  });
+});
+
+describe('plugin naming', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-plugin-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('reads the plugin name from .claude-plugin/plugin.json', () => {
+    fs.mkdirSync(path.join(root, '.claude-plugin'));
+    fs.writeFileSync(
+      path.join(root, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'demo-review', version: '1.0.0' })
+    );
+    const catalog = new ReviewSkillCatalog(root);
+    expect(catalog.getPluginName()).toBe('demo-review');
+    expect(catalog.getInvocationCommand('core')).toBe('/demo-review:core');
+  });
+
+  it('falls back to the directory name when the manifest is missing or malformed', () => {
+    expect(new ReviewSkillCatalog(root).getPluginName()).toBe(path.basename(root));
+
+    fs.mkdirSync(path.join(root, '.claude-plugin'));
+    fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), '{not json');
+    expect(new ReviewSkillCatalog(root).getPluginName()).toBe(path.basename(root));
+  });
 });

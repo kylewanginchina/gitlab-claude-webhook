@@ -35,6 +35,7 @@ jest.mock('../utils/config', () => ({
 }));
 
 import { runtimeConfigService } from '../utils/runtimeConfig';
+import logger from '../utils/logger';
 import { StreamingClaudeExecutor } from '../services/streamingClaudeExecutor';
 import { ReviewSkillCatalog } from '../services/reviewSkillCatalog';
 import { reviewCustomizationService } from '../utils/reviewCustomization';
@@ -144,6 +145,7 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
       '/tmp/project',
       createReviewContext({
         skills: ['mr-review-core', 'typescript-review', 'not-a-real-skill'],
+        skillCommand: '/gitlab-review:mr-review-core',
         outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
         maxTurns: 17,
       }),
@@ -153,11 +155,14 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     expect(result.success).toBe(true);
     expect(result.output).toBe(JSON.stringify(structured));
 
-    const options = mockQuery.mock.calls[0][0].options;
+    const { prompt, options } = mockQuery.mock.calls[0][0];
+    // The slash command must be the very first thing the SDK sees, ahead of the context wrapper.
+    expect(prompt.startsWith('/gitlab-review:mr-review-core\n\n')).toBe(true);
+    expect(prompt).toContain('Review pass prompt');
     expect(options.settingSources).toEqual(['project']);
     expect(options.plugins).toEqual([{ type: 'local', path: REPO_SKILLS_DIR }]);
     expect(options.skills).toEqual(['mr-review-core', 'typescript-review']);
-    expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep', 'Skill']);
+    expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
     expect(options.maxTurns).toBe(17);
     expect(options.outputFormat).toEqual({
       type: 'json_schema',
@@ -188,7 +193,7 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     expect(options.maxTurns).toBeUndefined();
   });
 
-  it('omits plugins and the Skill tool when built-in skills are disabled or unavailable', async () => {
+  it('omits plugins and the skill command when built-in skills are disabled or unavailable', async () => {
     jest
       .spyOn(runtimeConfigService, 'getConfig')
       .mockReturnValue(createRuntimeConfig({ useBuiltinSkills: false, structuredOutput: false }));
@@ -201,11 +206,17 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     await executor.executeWithStreaming(
       'Review',
       '/tmp/project',
-      createReviewContext({ skills: ['mr-review-core'], outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createReviewContext({
+        skills: ['mr-review-core'],
+        skillCommand: '/gitlab-review:mr-review-core',
+        outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
+      }),
       createCallback()
     );
 
-    let options = mockQuery.mock.calls[0][0].options;
+    let { prompt, options } = mockQuery.mock.calls[0][0];
+    // Without the plugin the command would reach the model as literal text, so it is dropped.
+    expect(prompt.startsWith('/')).toBe(false);
     expect(options.plugins).toBeUndefined();
     expect(options.skills).toBeUndefined();
     expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
@@ -222,13 +233,41 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     await noSkills.executeWithStreaming(
       'Review',
       '/tmp/project',
-      createReviewContext({ skills: ['mr-review-core'] }),
+      createReviewContext({
+        skills: ['mr-review-core'],
+        skillCommand: '/gitlab-review:mr-review-core',
+      }),
       createCallback()
     );
-    options = mockQuery.mock.calls[0][0].options;
+    ({ prompt, options } = mockQuery.mock.calls[0][0]);
+    expect(prompt.startsWith('/')).toBe(false);
     expect(options.plugins).toBeUndefined();
     expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
     fs.rmSync(emptyDir, { recursive: true, force: true });
+  });
+
+  it('warns when structured output was requested but the run returned prose only', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    const result = await executor.executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Prose summary');
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Claude SDK run finished without structured output',
+      expect.objectContaining({ turns: 3 })
+    );
   });
 
   it('does not apply review-only options in edit mode', async () => {

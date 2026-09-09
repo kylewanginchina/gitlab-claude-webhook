@@ -192,6 +192,13 @@ export class StreamingClaudeExecutor {
     const reviewOptions: Partial<ReviewModeOptions> = isReviewMode
       ? this.buildReviewModeOptions(context, runtimeConfig)
       : {};
+    // The SDK expands a slash command only when it starts the prompt, so the skill command must
+    // go in front of the context wrapper. Only meaningful when the plugin is actually loaded.
+    const skillCommand =
+      isReviewMode && reviewOptions.plugins && context.skillCommand
+        ? context.skillCommand.trim()
+        : '';
+    const sdkPrompt = skillCommand ? `${skillCommand}\n\n${fullPrompt}` : fullPrompt;
 
     const env = createClaudeExecutionEnvironment(
       runtimeConfig.claude.authToken,
@@ -203,10 +210,11 @@ export class StreamingClaudeExecutor {
       model,
       effort,
       cwd: projectPath,
-      promptLength: fullPrompt.length,
+      promptLength: sdkPrompt.length,
       ...(isReviewMode
         ? {
             skills: reviewOptions.skills,
+            skillCommand: skillCommand || undefined,
             maxTurns: reviewOptions.maxTurns,
             structuredOutput: Boolean(reviewOptions.outputFormat),
           }
@@ -244,7 +252,7 @@ export class StreamingClaudeExecutor {
 
     try {
       queryHandle = query({
-        prompt: fullPrompt,
+        prompt: sdkPrompt,
         options: {
           cwd: projectPath,
           sessionId,
@@ -252,8 +260,10 @@ export class StreamingClaudeExecutor {
           effort,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
+          // Skills reach the model through the slash command and inlined text, so the Skill tool
+          // is not needed and would only invite redundant invocations.
           tools: isReviewMode
-            ? ['Bash', 'Read', 'Glob', 'Grep', ...(reviewOptions.skills?.length ? ['Skill'] : [])]
+            ? ['Bash', 'Read', 'Glob', 'Grep']
             : { type: 'preset', preset: 'claude_code' },
           ...(isReviewMode
             ? {
@@ -312,11 +322,11 @@ export class StreamingClaudeExecutor {
         if (message.type === 'result') {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === 'success') {
-            if (
+            const hasStructuredOutput =
               'structured_output' in resultMsg &&
               resultMsg.structured_output !== undefined &&
-              resultMsg.structured_output !== null
-            ) {
+              resultMsg.structured_output !== null;
+            if (hasStructuredOutput) {
               // Structured output is authoritative; serialise it so downstream JSON parsing is exact.
               output = JSON.stringify(resultMsg.structured_output);
             } else if (
@@ -326,11 +336,19 @@ export class StreamingClaudeExecutor {
             ) {
               output = String(resultMsg.result);
             }
+            if (reviewOptions.outputFormat && !hasStructuredOutput) {
+              // The model finished without calling StructuredOutput; downstream falls back to
+              // parsing the prose result, which may yield zero findings.
+              logger.warn('Claude SDK run finished without structured output', {
+                turns: resultMsg.num_turns,
+                resultLength: output.length,
+              });
+            }
             logger.info('Claude SDK execution completed successfully', {
               cost: resultMsg.total_cost_usd,
               turns: resultMsg.num_turns,
               durationMs: resultMsg.duration_ms,
-              structured: 'structured_output' in resultMsg && resultMsg.structured_output != null,
+              structured: hasStructuredOutput,
             });
             break;
           } else {

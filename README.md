@@ -132,7 +132,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 #### 内置审查 Skill
 
-`review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` + `skills` 选项原生加载；Codex 没有 skill 机制，同一份 SKILL.md 正文会内联到提示词中。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。
+`review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` 选项加载插件，并在提示词开头以 `/gitlab-review:mr-review-core` 斜杠命令显式展开核心技能（SDK 只展开提示词开头的第一个命令，因此其余匹配技能以内联文本注入）；Codex 没有 skill 机制，全部 SKILL.md 正文内联到提示词中。两种方式都不依赖模型自行调用 Skill 工具。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。
 
 ## 处理流程
 

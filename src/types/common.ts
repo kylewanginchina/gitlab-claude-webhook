@@ -14,6 +14,11 @@ export interface AIExecutionContext {
   mode?: 'edit' | 'review';
   /** Agent SDK skill names to enable for this execution (review mode only). */
   skills?: string[];
+  /**
+   * Slash command (e.g. `/gitlab-review:mr-review-core`) placed at the start of the prompt so the
+   * Agent SDK expands that skill's body deterministically (Claude review mode only).
+   */
+  skillCommand?: string;
   /** JSON schema the provider must return as structured output (review mode only). */
   outputSchema?: Record<string, unknown>;
   /** Upper bound on agentic turns before the SDK stops the run. */

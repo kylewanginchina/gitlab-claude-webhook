@@ -115,6 +115,22 @@ export interface ReviewPassDefinition {
   prompt: string;
   /** Agent SDK skill names enabled for this pass (Claude provider). */
   skillNames: string[];
+  /** Slash command that expands the primary skill at the start of the prompt (Claude provider). */
+  skillCommand?: string;
+}
+
+/**
+ * How the built-in SKILL.md skills reach the model for one stage.
+ *
+ * Claude: the primary (always-on) skill is expanded by the Agent SDK from a slash command placed
+ * at the very start of the prompt, which is deterministic and needs no tool call. The SDK expands
+ * only that first command, so every other matched skill is inlined as text.
+ * Codex: no skill mechanism exists, so every skill is inlined.
+ */
+export interface ReviewSkillDelivery {
+  skillNames: string[];
+  skillCommand?: string;
+  inlineSkills: ReviewSkillDefinition[];
 }
 
 export interface ReviewPassResult extends ParsedReviewResult {
@@ -267,38 +283,48 @@ export class GitLabReviewService {
       const builtinSkills = useBuiltinSkills
         ? this.resolveBuiltinSkills(context, template.id, adminSkills)
         : [];
+      const delivery = this.planSkillDelivery(builtinSkills, provider);
 
       return {
         id: template.id,
         label: template.label,
-        skillNames: builtinSkills.map(skill => skill.name),
+        skillNames: delivery.skillNames,
+        skillCommand: delivery.skillCommand,
         prompt: this.buildReviewPassPrompt(
           context,
           template,
           userFocus,
           adminSkills,
           timeBudget,
-          // Codex has no native skill mechanism, so skill bodies are inlined into its prompt.
-          provider === 'codex' ? builtinSkills : []
+          delivery.inlineSkills
         ),
       };
     });
   }
 
-  /** Skills active during the scoring stage: the always-on methodology skills only. */
-  public getScoringSkillNames(): string[] {
+  /** Skill delivery for the scoring stage: the always-on methodology skills only. */
+  public getScoringSkillDelivery(provider: 'claude' | 'codex' = 'claude'): ReviewSkillDelivery {
     if (this.getReviewConfig().useBuiltinSkills === false) {
-      return [];
+      return { skillNames: [], inlineSkills: [] };
     }
-    return this.reviewSkillCatalog.getAlwaysSkills().map(skill => skill.name);
+    return this.planSkillDelivery(this.reviewSkillCatalog.getAlwaysSkills(), provider);
   }
 
-  /** Inline skill text for providers without native skills (Codex scoring stage). */
-  public getScoringSkillDefinitions(): ReviewSkillDefinition[] {
-    if (this.getReviewConfig().useBuiltinSkills === false) {
-      return [];
+  private planSkillDelivery(
+    skills: ReviewSkillDefinition[],
+    provider: 'claude' | 'codex'
+  ): ReviewSkillDelivery {
+    const skillNames = skills.map(skill => skill.name);
+    if (provider !== 'claude' || skills.length === 0) {
+      return { skillNames, inlineSkills: skills };
     }
-    return this.reviewSkillCatalog.getAlwaysSkills();
+
+    const [primary, ...inlineSkills] = skills;
+    return {
+      skillNames,
+      skillCommand: this.reviewSkillCatalog.getInvocationCommand(primary.name),
+      inlineSkills,
+    };
   }
 
   private resolveBuiltinSkills(

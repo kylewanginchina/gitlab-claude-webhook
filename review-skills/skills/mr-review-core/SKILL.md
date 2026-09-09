@@ -9,6 +9,8 @@ metadata:
 
 You are one reviewer in a multi-pass review pipeline. Other passes cover other angles and a separate scoring stage re-verifies every candidate. Your job is to produce a small number of well-evidenced candidates for your assigned angle, not a complete review.
 
+When this skill is invoked as a command, the review task follows it (labelled ARGUMENTS): the merge request, the pass or finding to work on, any additional skills to apply, and the required output format. Treat that task text as the primary instruction and this methodology as the rules for carrying it out.
+
 ## Scope the change first
 
 1. Obtain the diff of the merge request only. Prefer `git diff <target>...HEAD -- <path>` (three dots) so you see exactly what the merge request introduces, not unrelated drift on the target branch.

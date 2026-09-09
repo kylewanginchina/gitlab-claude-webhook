@@ -662,6 +662,7 @@ export class EventProcessor {
           {
             ...executionContext,
             skills: pass.skillNames,
+            skillCommand: pass.skillCommand,
             outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
             maxTurns: reviewSettings.passMaxTurns,
           },
@@ -765,6 +766,9 @@ export class EventProcessor {
       `Scoring ${candidateFindings.length} candidate finding(s)...`
     );
 
+    const scoringSkills = this.gitlabReviewService.getScoringSkillDelivery(
+      reviewInstruction.provider
+    );
     const scoredResults = await this.runWithConcurrency(
       candidateFindings,
       reviewSettings.scoringConcurrency,
@@ -776,7 +780,8 @@ export class EventProcessor {
           projectPath,
           {
             ...executionContext,
-            skills: this.gitlabReviewService.getScoringSkillNames(),
+            skills: scoringSkills.skillNames,
+            skillCommand: scoringSkills.skillCommand,
             outputSchema: REVIEW_SCORE_OUTPUT_SCHEMA,
             maxTurns: reviewSettings.scoringMaxTurns,
           },
@@ -986,7 +991,7 @@ export class EventProcessor {
       finding,
       userFocus,
       timeBudget,
-      instruction.provider === 'codex' ? this.gitlabReviewService.getScoringSkillDefinitions() : []
+      this.gitlabReviewService.getScoringSkillDelivery(instruction.provider).inlineSkills
     );
 
     const result = await this.executeWithProvider(

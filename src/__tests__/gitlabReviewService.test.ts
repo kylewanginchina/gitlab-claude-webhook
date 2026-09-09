@@ -37,7 +37,7 @@ describe('GitLabReviewService', () => {
       expect(passes[0]?.prompt).toContain('focus on auth');
     });
 
-    it('attaches built-in skill names per pass for Claude and inlines skill bodies for Codex', () => {
+    it('expands the core skill via slash command for Claude and inlines the rest', () => {
       const claudePasses = service.buildReviewPasses(context, undefined, undefined, 'claude');
       const bugScan = claudePasses.find(pass => pass.id === 'bug-scan');
       const history = claudePasses.find(pass => pass.id === 'history-context');
@@ -49,18 +49,33 @@ describe('GitLabReviewService', () => {
       expect(bugScan?.skillNames).not.toContain('go-review');
       expect(history?.skillNames).toContain('typescript-review');
       expect(history?.skillNames).not.toContain('security-review');
-      // Claude receives skills natively, not as prompt text.
+
+      // The SDK expands only the first slash command of a prompt, so the core skill takes that
+      // slot and the other matched skills travel as inline text.
+      expect(bugScan?.skillCommand).toBe('/gitlab-review:mr-review-core');
       expect(bugScan?.prompt).not.toContain('<skill name="mr-review-core">');
+      expect(bugScan?.prompt).toContain('<skill name="typescript-review">');
+      expect(bugScan?.prompt).toContain('<skill name="security-review">');
+      expect(bugScan?.prompt).not.toMatch(/^\//);
 
       const codexPasses = service.buildReviewPasses(context, undefined, undefined, 'codex');
       const codexBugScan = codexPasses.find(pass => pass.id === 'bug-scan');
+      expect(codexBugScan?.skillCommand).toBeUndefined();
       expect(codexBugScan?.prompt).toContain('<skill name="mr-review-core">');
       expect(codexBugScan?.prompt).toContain('<skill name="typescript-review">');
       expect(codexBugScan?.prompt).toContain('# Merge request review methodology');
     });
 
     it('exposes the always-on skills for the scoring stage', () => {
-      expect(service.getScoringSkillNames()).toEqual(['mr-review-core']);
+      const claudeDelivery = service.getScoringSkillDelivery('claude');
+      expect(claudeDelivery.skillNames).toEqual(['mr-review-core']);
+      expect(claudeDelivery.skillCommand).toBe('/gitlab-review:mr-review-core');
+      expect(claudeDelivery.inlineSkills).toEqual([]);
+
+      const codexDelivery = service.getScoringSkillDelivery('codex');
+      expect(codexDelivery.skillCommand).toBeUndefined();
+      expect(codexDelivery.inlineSkills.map(skill => skill.name)).toEqual(['mr-review-core']);
+
       const scoringPrompt = service.buildScoringPrompt(
         context,
         {
@@ -73,7 +88,7 @@ describe('GitLabReviewService', () => {
         },
         undefined,
         undefined,
-        service.getScoringSkillDefinitions()
+        codexDelivery.inlineSkills
       );
       expect(scoringPrompt).toContain('<skill name="mr-review-core">');
       expect(scoringPrompt).toContain('Verification is adversarial');
@@ -98,6 +113,9 @@ describe('GitLabReviewService', () => {
 
       expect(bugScan?.skillNames).toContain('go-review');
       expect(bugScan?.skillNames).not.toContain('does-not-exist');
+      // Pinned skills are not the primary skill, so they are delivered inline.
+      expect(bugScan?.skillCommand).toBe('/gitlab-review:mr-review-core');
+      expect(bugScan?.prompt).toContain('<skill name="go-review">');
     });
 
     it('uses published admin prompt versions for review passes', async () => {
