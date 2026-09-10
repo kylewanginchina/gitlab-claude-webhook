@@ -172,7 +172,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 | Codex      | `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODEX_DEFAULT_MODEL`、`CODEX_DEFAULT_TIMEOUT_MINUTES`            | Codex provider；默认超时 30 分钟  |
 | GitLab     | `GITLAB_BASE_URL`、`GITLAB_TOKEN`                                                                      | GitLab 实例与 API Token           |
 | Webhook    | `WEBHOOK_SECRET`、`PORT`、`WEBHOOK_TASK_CONCURRENCY`                                                   | 默认端口 3000、全局并发 2         |
-| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`、`REVIEW_USE_BUILTIN_SKILLS`、`REVIEW_STRUCTURED_OUTPUT`、`REVIEW_PASS_MAX_TURNS`、`REVIEW_SCORING_MAX_TURNS` | 默认命令为 `/code-review`；默认启用内置 skill 与结构化输出 |
+| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`、`REVIEW_USE_BUILTIN_SKILLS`、`REVIEW_STRUCTURED_OUTPUT`、`REVIEW_PASS_MAX_TURNS`、`REVIEW_SCORING_MAX_TURNS` | 默认命令为 `/code-review`；默认启用内置 skill 与结构化输出；轮次上限默认 `0`（不限制） |
 | 管理与存储 | `ADMIN_TOKEN`、`DATA_DIR`                                                                              | 管理认证与运行时数据目录          |
 | 工作与日志 | `WORK_DIR`、`LOG_LEVEL`                                                                                | 临时工作目录与日志级别            |
 

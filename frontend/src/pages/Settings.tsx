@@ -694,19 +694,21 @@ export default function Settings() {
               />
             </div>
             <div className="field">
-              <label htmlFor="pass-max-turns">Pass max turns</label>
+              <label htmlFor="pass-max-turns">Pass max turns (0 = no limit)</label>
               <input
                 id="pass-max-turns"
                 type="number"
+                min={0}
                 value={draft.review.passMaxTurns}
                 onChange={updateReviewNumber('passMaxTurns')}
               />
             </div>
             <div className="field">
-              <label htmlFor="scoring-max-turns">Scoring max turns</label>
+              <label htmlFor="scoring-max-turns">Scoring max turns (0 = no limit)</label>
               <input
                 id="scoring-max-turns"
                 type="number"
+                min={0}
                 value={draft.review.scoringMaxTurns}
                 onChange={updateReviewNumber('scoringMaxTurns')}
               />

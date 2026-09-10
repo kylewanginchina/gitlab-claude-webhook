@@ -63,7 +63,7 @@ This is a GitLab webhook service that integrates with Claude Agent SDK to provid
 - Extracts progress from `assistant`, `tool_progress`, and `system` message types
 - Handles `SDKResultMessage` for success/error detection with cost and usage tracking
 - Supports abort via `AbortController` for timeout handling
-- In review mode: loads `review-skills/` as a local SDK plugin (`plugins` + `skills` options), prefixes the prompt with the stage's `skillCommand` (e.g. `/gitlab-review:mr-review-core`) so the SDK expands the primary skill deterministically, restricts `settingSources` to `['project']`, applies `maxTurns`, and requests `outputFormat: json_schema` so pass/scoring results arrive as `structured_output`
+- In review mode: loads `review-skills/` as a local SDK plugin (`plugins` + `skills` options), prefixes the prompt with the stage's `skillCommand` (e.g. `/gitlab-review:mr-review-core`) so the SDK expands the primary skill deterministically, restricts `settingSources` to `['project']`, applies `maxTurns` only when the configured cap is above 0 (default 0 = unlimited, the timeout still applies), and requests `outputFormat: json_schema` so pass/scoring results arrive as `structured_output`
 
 **Review skills** (`review-skills/skills/<name>/SKILL.md`, loaded by `src/services/reviewSkillCatalog.ts`):
 

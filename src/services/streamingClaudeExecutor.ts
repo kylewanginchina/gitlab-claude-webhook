@@ -215,7 +215,7 @@ export class StreamingClaudeExecutor {
         ? {
             skills: reviewOptions.skills,
             skillCommand: skillCommand || undefined,
-            maxTurns: reviewOptions.maxTurns,
+            maxTurns: reviewOptions.maxTurns ?? 'unlimited',
             structuredOutput: Boolean(reviewOptions.outputFormat),
           }
         : {}),

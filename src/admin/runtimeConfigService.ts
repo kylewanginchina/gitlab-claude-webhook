@@ -131,8 +131,8 @@ export function createConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Runti
       allowedCommands: arrayEnvValue(env, 'REVIEW_ALLOWED_COMMANDS', ['/code-review']),
       useBuiltinSkills: booleanEnvValue(env, 'REVIEW_USE_BUILTIN_SKILLS', true),
       structuredOutput: booleanEnvValue(env, 'REVIEW_STRUCTURED_OUTPUT', true),
-      passMaxTurns: intValue(envValue(env, 'REVIEW_PASS_MAX_TURNS', '40'), 40),
-      scoringMaxTurns: intValue(envValue(env, 'REVIEW_SCORING_MAX_TURNS', '20'), 20),
+      passMaxTurns: intValue(envValue(env, 'REVIEW_PASS_MAX_TURNS', '0'), 0),
+      scoringMaxTurns: intValue(envValue(env, 'REVIEW_SCORING_MAX_TURNS', '0'), 0),
     },
     workDir: envValue(env, 'WORK_DIR', '/tmp/gitlab-claude-work'),
     logLevel: envValue(env, 'LOG_LEVEL', 'info'),
@@ -305,8 +305,8 @@ export class RuntimeConfigService {
     this.assertBoolean(config.review.skipExistingSha, 'review.skipExistingSha');
     this.assertBoolean(config.review.useBuiltinSkills, 'review.useBuiltinSkills');
     this.assertBoolean(config.review.structuredOutput, 'review.structuredOutput');
-    this.assertPositiveInteger(config.review.passMaxTurns, 'review.passMaxTurns');
-    this.assertPositiveInteger(config.review.scoringMaxTurns, 'review.scoringMaxTurns');
+    this.assertNonNegativeInteger(config.review.passMaxTurns, 'review.passMaxTurns');
+    this.assertNonNegativeInteger(config.review.scoringMaxTurns, 'review.scoringMaxTurns');
     this.assertAllowedCommands(config.review.allowedCommands);
     this.assertLogLevel(config.logLevel, 'logLevel');
   }
@@ -488,6 +488,30 @@ export class RuntimeConfigService {
       if ('allowedCommands' in review) {
         next.allowedCommands = this.assertAllowedCommands(review.allowedCommands);
       }
+      if ('useBuiltinSkills' in review) {
+        next.useBuiltinSkills = this.assertBoolean(
+          review.useBuiltinSkills,
+          'review.useBuiltinSkills'
+        );
+      }
+      if ('structuredOutput' in review) {
+        next.structuredOutput = this.assertBoolean(
+          review.structuredOutput,
+          'review.structuredOutput'
+        );
+      }
+      if ('passMaxTurns' in review) {
+        next.passMaxTurns = this.assertNonNegativeInteger(
+          review.passMaxTurns,
+          'review.passMaxTurns'
+        );
+      }
+      if ('scoringMaxTurns' in review) {
+        next.scoringMaxTurns = this.assertNonNegativeInteger(
+          review.scoringMaxTurns,
+          'review.scoringMaxTurns'
+        );
+      }
       sanitized.review = next;
     }
 
@@ -567,6 +591,15 @@ export class RuntimeConfigService {
   private assertPositiveInteger(value: unknown, fieldName: string): number {
     if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
       throw new Error(`${fieldName} must be at least 1`);
+    }
+
+    return value;
+  }
+
+  /** Used for caps where 0 means "no limit". */
+  private assertNonNegativeInteger(value: unknown, fieldName: string): number {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      throw new Error(`${fieldName} must be 0 or a positive integer`);
     }
 
     return value;

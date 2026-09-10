@@ -323,4 +323,28 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('maximum number of turns');
   });
+
+  it('sends no maxTurns to the SDK when the configured cap is 0', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
+    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
+
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+    );
+    const result = await executor.executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ maxTurns: 0 }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockQuery.mock.calls[0][0].options.maxTurns).toBeUndefined();
+    expect(infoSpy).toHaveBeenCalledWith(
+      'Executing Claude via Agent SDK',
+      expect.objectContaining({ maxTurns: 'unlimited' })
+    );
+  });
 });
