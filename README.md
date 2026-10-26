@@ -144,6 +144,8 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 队列以资源键保证同一 MR 或 Issue 的任务串行，并在全局并发限制内调度不同资源。服务会对未立即启动的 AI 任务发布队列状态评论；执行开始后创建并更新包含开始时间的进度评论。
 
+每次 Claude SDK 查询会生成独立的会话 UUID，同时用于 SDK 会话和 `Session-Id` 请求头。同一次查询的所有模型调用复用该 ID，便于 Codex2API 等网关稳定识别会话并复用上游提示词缓存；不同任务、多轮审查的各个 pass 及后续评分查询分别使用新的 ID。服务会保留 `ANTHROPIC_CUSTOM_HEADERS` 中的其他请求头，并替换其中已有的 `Session-Id`，无需额外配置。
+
 ## 接口摘要
 
 | 方法   | 路径           | 用途                    |

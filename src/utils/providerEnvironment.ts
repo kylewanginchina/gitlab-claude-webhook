@@ -26,12 +26,21 @@ const baseExecutionEnvironment: Readonly<Record<string, string>> = Object.freeze
 
 export function createClaudeExecutionEnvironment(
   authToken: string,
-  baseUrl: string
+  baseUrl: string,
+  sessionId: string
 ): Record<string, string> {
+  const customHeaders = (baseExecutionEnvironment.ANTHROPIC_CUSTOM_HEADERS || '')
+    .split(/\r?\n/)
+    .filter(
+      header =>
+        header.trim() !== '' && header.split(':', 1)[0].trim().toLowerCase() !== 'session-id'
+    );
+
   return {
     ...baseExecutionEnvironment,
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_AUTH_TOKEN: authToken,
+    ANTHROPIC_CUSTOM_HEADERS: [...customHeaders, `Session-Id: ${sessionId}`].join('\n'),
   };
 }
 
