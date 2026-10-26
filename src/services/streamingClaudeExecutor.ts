@@ -5,6 +5,7 @@ import {
   type SDKAssistantMessage,
   type Query,
 } from '@anthropic-ai/claude-agent-sdk';
+import { randomUUID } from 'crypto';
 import logger from '../utils/logger';
 import {
   ProcessResult,
@@ -174,10 +175,12 @@ export class StreamingClaudeExecutor {
     const timeBudget = createTimeBudget(timeoutMs);
     const fullPrompt = this.buildPromptWithContext(command, context, timeBudget);
     const isReviewMode = context.mode === 'review';
+    const sessionId = randomUUID();
 
     const env = createClaudeExecutionEnvironment(
       runtimeConfig.claude.authToken,
-      runtimeConfig.claude.baseUrl
+      runtimeConfig.claude.baseUrl,
+      sessionId
     );
 
     logger.info('Executing Claude via Agent SDK', {
@@ -221,6 +224,7 @@ export class StreamingClaudeExecutor {
         prompt: fullPrompt,
         options: {
           cwd: projectPath,
+          sessionId,
           model,
           effort,
           permissionMode: 'bypassPermissions',

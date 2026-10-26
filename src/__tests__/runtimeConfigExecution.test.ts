@@ -349,6 +349,50 @@ describe('runtime config execution paths', () => {
     );
   });
 
+  it('binds concurrent Claude queries to distinct SDK session IDs and gateway headers', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([
+        {
+          type: 'result',
+          subtype: 'success',
+          result: 'Review completed.',
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+        },
+      ])
+    );
+
+    const executor = new StreamingClaudeExecutor();
+    const results = await Promise.all([
+      executor.executeWithStreaming(
+        'Review the first pass',
+        '/tmp/project',
+        createExecutionContext(),
+        createCallback()
+      ),
+      executor.executeWithStreaming(
+        'Review the second pass',
+        '/tmp/project',
+        createExecutionContext(),
+        createCallback()
+      ),
+    ]);
+
+    expect(results.every(result => result.success)).toBe(true);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    const sessionIds = mockQuery.mock.calls.map(([request]) => {
+      const { sessionId, env } = request.options;
+      expect(sessionId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      );
+      expect(env.ANTHROPIC_CUSTOM_HEADERS.split('\n')).toContain(`Session-Id: ${sessionId}`);
+      return sessionId;
+    });
+    expect(new Set(sessionIds).size).toBe(2);
+  });
+
   it('stops consuming Claude messages after a successful terminal result', async () => {
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
 
