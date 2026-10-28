@@ -1069,14 +1069,14 @@ export class GitLabReviewService {
       lines.push('');
       lines.push(finding.body);
       lines.push('');
-      lines.push(`Confidence: ${finding.confidence}`);
+      lines.push(`- **Confidence:** ${finding.confidence}`);
 
       if (finding.sources?.length) {
-        lines.push(`Review passes: ${finding.sources.join(', ')}`);
+        lines.push(`- **Review passes:** ${finding.sources.join(', ')}`);
       }
 
       if (finding.verdict) {
-        lines.push(`Verdict: ${finding.verdict}`);
+        lines.push(`- **Verdict:** ${finding.verdict}`);
       }
 
       lines.push('');
@@ -1093,19 +1093,19 @@ export class GitLabReviewService {
       '',
       finding.body,
       '',
-      `Confidence: ${finding.confidence}`,
+      `- **Confidence:** ${finding.confidence}`,
     ];
 
     if (finding.category) {
-      lines.push(`Category: ${finding.category}`);
+      lines.push(`- **Category:** ${finding.category}`);
     }
 
     if (finding.sources?.length) {
-      lines.push(`Review passes: ${finding.sources.join(', ')}`);
+      lines.push(`- **Review passes:** ${finding.sources.join(', ')}`);
     }
 
     if (finding.verdict) {
-      lines.push(`Verdict: ${finding.verdict}`);
+      lines.push(`- **Verdict:** ${finding.verdict}`);
     }
 
     return lines.join('\n');

@@ -1166,7 +1166,7 @@ describe('GitLabReviewService', () => {
   });
 
   describe('postReview', () => {
-    it('renders structured finding links as readable file line anchors', async () => {
+    it('renders finding links and separates metadata into Markdown list items', async () => {
       const gitlabService = {
         addMergeRequestComment: jest.fn().mockResolvedValue(undefined),
         createMergeRequestDiscussion: jest.fn().mockResolvedValue(undefined),
@@ -1196,7 +1196,10 @@ describe('GitLabReviewService', () => {
             author: { id: 1, name: 'User', username: 'user', email: 'user@example.com' },
           },
         },
-        context,
+        {
+          ...context,
+          diffs: [{ old_path: 'src/a file.ts', new_path: 'src/a file.ts' }],
+        },
         {
           summary: 'Found one issue',
           findings: [
@@ -1207,6 +1210,9 @@ describe('GitLabReviewService', () => {
               path: 'src/a file.ts',
               line: 12,
               lineType: 'new',
+              category: 'contract',
+              sources: ['Comments and local contracts'],
+              verdict: '已确认触发条件，保留 `fentry_enabled` 的原有含义。',
             },
           ],
         }
@@ -1219,6 +1225,17 @@ describe('GitLabReviewService', () => {
       );
       expect(body).not.toContain(
         '\nhttps://gitlab.example.com/group/project/-/blob/head-sha/src/a%20file.ts#L12\n'
+      );
+      expect(gitlabService.createMergeRequestDiscussion).toHaveBeenCalledTimes(1);
+      const inlineBody = gitlabService.createMergeRequestDiscussion.mock.calls[0]?.[2] as string;
+      const sharedMetadata = [
+        '- **Confidence:** 95',
+        '- **Review passes:** Comments and local contracts',
+        '- **Verdict:** 已确认触发条件，保留 `fentry_enabled` 的原有含义。',
+      ];
+      expect(body).toContain(`\n\n${sharedMetadata.join('\n')}\n`);
+      expect(inlineBody).toContain(
+        `\n\n${[sharedMetadata[0], '- **Category:** contract', ...sharedMetadata.slice(1)].join('\n')}`
       );
     });
   });
