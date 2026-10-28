@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { simpleGit } from 'simple-git';
 import { GitLabWebhookEvent } from '../types/gitlab';
 import logger from '../utils/logger';
@@ -9,6 +10,65 @@ import { ReviewCustomizationService } from '../admin/reviewCustomizationService'
 import { ReviewSkill } from '../admin/reviewCustomizationTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
+import {
+  parseReviewJsonPayload,
+  isReviewPassPayload,
+  isReviewFindingPayload,
+} from '../utils/reviewResult';
+import {
+  ReviewSkillCatalog,
+  ReviewSkillDefinition,
+  reviewSkillCatalog as defaultReviewSkillCatalog,
+} from './reviewSkillCatalog';
+
+const FINDING_SCHEMA_PROPERTIES = {
+  title: { type: 'string', description: 'Brief issue title' },
+  body: {
+    type: 'string',
+    description: 'Why the issue is real, the triggering input or state, and the consequence.',
+  },
+  confidence: { type: 'integer', minimum: 0, maximum: 100 },
+  path: { type: 'string', description: 'File path in the revision named by line_type' },
+  line: { type: ['integer', 'null'], minimum: 1 },
+  line_type: { type: 'string', enum: ['new', 'old'] },
+  category: { type: 'string' },
+  old_path: { type: ['string', 'null'] },
+  new_path: { type: ['string', 'null'] },
+} as const;
+
+/** JSON schema returned by each review pass when structured output is enabled. */
+export const REVIEW_PASS_OUTPUT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'findings'],
+  properties: {
+    summary: { type: 'string', description: 'Short summary of what this pass checked' },
+    findings: {
+      type: 'array',
+      maxItems: 5,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'body', 'confidence', 'path', 'line', 'line_type', 'category'],
+        properties: FINDING_SCHEMA_PROPERTIES,
+      },
+    },
+  },
+};
+
+/** JSON schema returned by the scoring stage when structured output is enabled. */
+export const REVIEW_SCORE_OUTPUT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'body', 'confidence', 'path', 'line', 'line_type', 'category', 'verdict'],
+  properties: {
+    ...FINDING_SCHEMA_PROPERTIES,
+    verdict: {
+      type: 'string',
+      description: 'Why this score was assigned, citing the evidence checked.',
+    },
+  },
+};
 
 interface MergeRequestDiff {
   old_path?: string;
@@ -59,6 +119,25 @@ export interface ReviewPassDefinition {
   id: string;
   label: string;
   prompt: string;
+  /** Agent SDK skill names enabled for this pass (Claude provider). */
+  skillNames: string[];
+  /** Slash command that expands the primary skill at the start of the prompt (Claude provider). */
+  skillCommand?: string;
+}
+
+/**
+ * How the built-in SKILL.md skills reach the model for one stage.
+ *
+ * Claude: the first user-invocable skill is expanded by the Agent SDK from a slash command placed
+ * at the very start of the prompt, which is deterministic and needs no tool call. The SDK expands
+ * only that first command, so every other matched skill is inlined as text. If no matched skill
+ * allows slash invocation, every skill is inlined.
+ * Codex: no skill mechanism exists, so every skill is inlined.
+ */
+export interface ReviewSkillDelivery {
+  skillNames: string[];
+  skillCommand?: string;
+  inlineSkills: ReviewSkillDefinition[];
 }
 
 export interface ReviewPassResult extends ParsedReviewResult {
@@ -117,7 +196,8 @@ export class GitLabReviewService {
 
   constructor(
     private gitlabService: GitLabService = new GitLabService(),
-    private reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService
+    private reviewCustomizationService: ReviewCustomizationService = defaultReviewCustomizationService,
+    private reviewSkillCatalog: ReviewSkillCatalog = defaultReviewSkillCatalog
   ) {}
 
   private getReviewConfig() {
@@ -203,24 +283,104 @@ export class GitLabReviewService {
     timeBudget: TimeBudget = this.getDefaultReviewTimeBudget(),
     provider: 'claude' | 'codex' = 'claude'
   ): ReviewPassDefinition[] {
-    return this.getReviewPassTemplates().map(template => ({
-      id: template.id,
-      label: template.label,
-      prompt: this.buildReviewPassPrompt(
-        context,
-        template,
-        userFocus,
-        this.getMatchingSkills(context, template.id, provider),
-        timeBudget
-      ),
-    }));
+    const useBuiltinSkills = this.getReviewConfig().useBuiltinSkills !== false;
+    if (useBuiltinSkills) this.reviewSkillCatalog.assertUsable();
+
+    return this.getReviewPassTemplates().map(template => {
+      const adminSkills = this.getMatchingSkills(context, template.id, provider);
+      const builtinSkills = useBuiltinSkills
+        ? this.resolveBuiltinSkills(context, template.id, adminSkills)
+        : [];
+      const delivery = this.planSkillDelivery(builtinSkills, provider);
+
+      return {
+        id: template.id,
+        label: template.label,
+        skillNames: delivery.skillNames,
+        skillCommand: delivery.skillCommand,
+        prompt: this.buildReviewPassPrompt(
+          context,
+          template,
+          userFocus,
+          adminSkills,
+          timeBudget,
+          delivery.inlineSkills
+        ),
+      };
+    });
+  }
+
+  /** Skill delivery for the scoring stage: the always-on methodology skills only. */
+  public getScoringSkillDelivery(provider: 'claude' | 'codex' = 'claude'): ReviewSkillDelivery {
+    if (this.getReviewConfig().useBuiltinSkills === false) {
+      return { skillNames: [], inlineSkills: [] };
+    }
+    this.reviewSkillCatalog.assertUsable();
+    return this.planSkillDelivery(this.reviewSkillCatalog.getAlwaysSkills(), provider);
+  }
+
+  private planSkillDelivery(
+    skills: ReviewSkillDefinition[],
+    provider: 'claude' | 'codex'
+  ): ReviewSkillDelivery {
+    const skillNames = skills.map(skill => skill.name);
+    const primary = provider === 'claude' ? skills.find(skill => skill.userInvocable) : undefined;
+    if (!primary) {
+      return { skillNames, inlineSkills: skills };
+    }
+
+    return {
+      skillNames,
+      skillCommand: this.reviewSkillCatalog.getInvocationCommand(primary.name),
+      inlineSkills: skills.filter(skill => skill !== primary),
+    };
+  }
+
+  private resolveBuiltinSkills(
+    context: PreparedReviewContext,
+    passId: string,
+    adminSkills: ReviewSkill[]
+  ): ReviewSkillDefinition[] {
+    const changedFiles = context.diffs
+      .flatMap(diff => [diff.new_path, diff.old_path])
+      .filter((file): file is string => Boolean(file));
+
+    const matched = this.reviewSkillCatalog.matchSkills({ passId, changedFiles });
+    const byName = new Map(matched.map(skill => [skill.name, skill]));
+
+    // Admin-defined skills may pin additional on-disk skills by name.
+    for (const adminSkill of adminSkills) {
+      for (const name of adminSkill.skillNames || []) {
+        if (byName.has(name)) {
+          continue;
+        }
+        const definition = this.reviewSkillCatalog.getSkill(name);
+        if (definition) {
+          byName.set(name, definition);
+        } else {
+          logger.warn('Admin review skill references unknown on-disk skill', {
+            adminSkill: adminSkill.name,
+            skill: name,
+          });
+        }
+      }
+    }
+
+    // Always-on skills first so the methodology is loaded before specialised notes.
+    return Array.from(byName.values()).sort((a, b) => {
+      if (a.always !== b.always) {
+        return a.always ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
   }
 
   public buildScoringPrompt(
     context: PreparedReviewContext,
     finding: ReviewFinding,
     userFocus?: string,
-    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget()
+    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget(),
+    inlineSkills: ReviewSkillDefinition[] = []
   ): string {
     const lines = [
       'Score whether this GitLab merge request review finding is real.',
@@ -229,6 +389,8 @@ export class GitLabReviewService {
       '',
       'You are performing the confidence-scoring stage of a multi-pass code review.',
       'Verify the finding against the merge request diff, relevant CLAUDE.md files, and git history as needed.',
+      'Verification is adversarial: try to disprove the finding first. Confirm the exact line is inside a hunk this merge request changed, identify a concrete input or state that triggers the problem, and check whether the code, a comment, or the merge request description already accounts for it.',
+      'If you cannot name a concrete trigger after inspection, score 25 or lower.',
       'Do not use Task, Agent, WebFetch, or WebSearch. Use only local repository inspection tools.',
       'Only score issues introduced or made worse by this merge request.',
       'If this is a CLAUDE.md-related issue, confirm that an applicable CLAUDE.md explicitly calls it out.',
@@ -253,6 +415,7 @@ export class GitLabReviewService {
     lines.push('Candidate rationale:');
     lines.push(finding.body);
     lines.push('');
+    lines.push(...this.formatInlineSkills(inlineSkills));
     lines.push('Use this rubric verbatim:');
     lines.push(
       '0: Not confident at all. This is a false positive that does not stand up to light scrutiny, or is a pre-existing issue.'
@@ -303,17 +466,29 @@ export class GitLabReviewService {
         candidateSources: finding.sources?.join(', ') || 'single pass',
         userFocus: userFocus || '',
         userFocusBlock: userFocus ? `Requested review focus: ${userFocus}` : '',
+        inlineSkillsBlock: this.formatInlineSkills(inlineSkills).join('\n'),
         ...timeBudget,
       },
       defaultPrompt
     );
   }
 
-  public parseReviewOutput(output: string, minConfidence = 80): ParsedReviewResult {
-    const parsed = this.parseJsonPayload(output);
+  public parseReviewOutput(output: string, minConfidence = 80, strict = false): ParsedReviewResult {
+    const parsed = parseReviewJsonPayload(output, strict ? isReviewPassPayload : undefined);
+    if (strict && !isReviewPassPayload(parsed)) {
+      throw new Error(
+        'Invalid review pass result: expected JSON with a summary and valid findings array'
+      );
+    }
     const findings = Array.isArray(parsed?.findings)
       ? parsed.findings
-          .map((finding: unknown) => this.normalizeFinding(finding))
+          .map((finding: unknown) => {
+            const normalized = this.normalizeFinding(finding);
+            if (strict && !normalized) {
+              throw new Error('Invalid review pass result: finding could not be normalized');
+            }
+            return normalized;
+          })
           .filter((finding: ReviewFinding | null): finding is ReviewFinding => Boolean(finding))
           .filter((finding: ReviewFinding) => finding.confidence >= minConfidence)
       : [];
@@ -327,11 +502,23 @@ export class GitLabReviewService {
     };
   }
 
-  public parseScoredFinding(output: string, fallbackFinding: ReviewFinding): ReviewFinding | null {
-    const parsed = this.parseJsonPayload(output);
+  public parseScoredFinding(
+    output: string,
+    fallbackFinding: ReviewFinding,
+    strict = false
+  ): ReviewFinding | null {
+    const parsed = parseReviewJsonPayload(output, strict ? isReviewFindingPayload : undefined);
+    if (strict && !isReviewFindingPayload(parsed)) {
+      throw new Error(
+        'Invalid review scoring result: expected JSON with valid finding fields and confidence'
+      );
+    }
     const normalized = this.normalizeFinding(parsed);
 
     if (!normalized) {
+      if (strict) {
+        throw new Error('Invalid review scoring result: finding could not be normalized');
+      }
       return null;
     }
 
@@ -425,18 +612,23 @@ export class GitLabReviewService {
   public async postReview(
     event: GitLabWebhookEvent,
     context: PreparedReviewContext,
-    review: ParsedReviewResult
+    review: ParsedReviewResult,
+    publishSummary?: (body: string) => Promise<void>
   ): Promise<void> {
     if (!event.merge_request) {
       throw new Error('GitLab code review is only supported for merge requests');
     }
 
     const summaryComment = this.buildSummaryComment(event, context, review);
-    await this.gitlabService.addMergeRequestComment(
-      event.project.id,
-      event.merge_request.iid,
-      summaryComment
-    );
+    if (publishSummary) {
+      await publishSummary(summaryComment);
+    } else {
+      await this.gitlabService.addMergeRequestComment(
+        event.project.id,
+        event.merge_request.iid,
+        summaryComment
+      );
+    }
 
     for (const finding of review.findings) {
       try {
@@ -492,15 +684,45 @@ export class GitLabReviewService {
     variables: Record<string, unknown>,
     fallback: string
   ): string {
+    const inlineSkillsBlock =
+      typeof variables.inlineSkillsBlock === 'string' ? variables.inlineSkillsBlock : '';
+    const skillMarker = inlineSkillsBlock ? `__REVIEW_SKILLS_${randomUUID()}__` : '';
+    const protectSkills = (value: string): string =>
+      skillMarker ? value.split(inlineSkillsBlock).join(skillMarker) : value;
+    const renderVariables = skillMarker
+      ? Object.fromEntries(
+          Object.entries(variables).map(([key, value]) => [
+            key,
+            typeof value === 'string' ? protectSkills(value) : value,
+          ])
+        )
+      : variables;
+    const protectedFallback = protectSkills(fallback);
+    let prompt: string;
     try {
-      return this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+      prompt = this.reviewCustomizationService.renderPromptTemplate(
+        id,
+        renderVariables,
+        protectedFallback
+      );
     } catch (error) {
       logger.warn('Falling back to built-in review prompt template', {
         templateId: id,
         error: error instanceof Error ? error.message : String(error),
       });
-      return fallback;
+      prompt = protectedFallback;
     }
+
+    if (!skillMarker) {
+      return prompt;
+    }
+
+    // Published shells may predate the placeholder or include it alongside the full prompt.
+    // Render the shell first, then insert the literal body once at its first chosen position.
+    const [before, ...after] = prompt.split(skillMarker);
+    return after.length > 0
+      ? before + inlineSkillsBlock + after.join('')
+      : `${prompt}\n\n${inlineSkillsBlock}`;
   }
 
   public buildIncompleteReviewMessage(
@@ -591,7 +813,8 @@ export class GitLabReviewService {
     template: ReviewPassTemplate,
     userFocus?: string,
     skills: ReviewSkill[] = [],
-    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget()
+    timeBudget: TimeBudget = this.getDefaultReviewTimeBudget(),
+    inlineSkills: ReviewSkillDefinition[] = []
   ): string {
     const lines = [
       'Provide a GitLab merge request code review.',
@@ -611,6 +834,10 @@ export class GitLabReviewService {
       skills.forEach(skill => {
         lines.push(`- ${skill.name}: ${skill.systemInstructions}`);
       });
+    }
+
+    if (inlineSkills.length > 0) {
+      lines.push('', ...this.formatInlineSkills(inlineSkills));
     }
 
     lines.push(
@@ -698,10 +925,36 @@ export class GitLabReviewService {
         guidelineFiles: this.formatGuidelineFiles(context.claudeGuidelineFiles),
         userFocus: userFocus || '',
         userFocusBlock: userFocus ? `\nRequested review focus: ${userFocus}` : '',
+        inlineSkillsBlock: this.formatInlineSkills(inlineSkills).join('\n'),
         ...timeBudget,
       },
       defaultPrompt
     );
+  }
+
+  private formatInlineSkills(skills: ReviewSkillDefinition[]): string[] {
+    if (skills.length === 0) {
+      return [];
+    }
+
+    const lines = ['Review skills (apply these methodologies):'];
+    for (const skill of skills) {
+      const skillDir = path.dirname(skill.filePath);
+      const body = skill.body.replace(
+        /\$\{(CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT)\}/g,
+        (_variable, name: string) =>
+          name === 'CLAUDE_SKILL_DIR' ? skillDir : this.reviewSkillCatalog.getPluginDir()
+      );
+      lines.push(
+        '',
+        `<skill name="${skill.name}">`,
+        `Base directory for this skill: ${skillDir}`,
+        body,
+        '</skill>'
+      );
+    }
+    lines.push('');
+    return lines;
   }
 
   private getDefaultReviewTimeBudget(): TimeBudget {
@@ -990,37 +1243,6 @@ export class GitLabReviewService {
             .filter((source): source is string => Boolean(source))
         : undefined,
     };
-  }
-
-  private parseJsonPayload(output: string): Record<string, any> | null {
-    const jsonText = this.extractJsonBlock(output);
-    if (!jsonText) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(jsonText);
-    } catch (error) {
-      logger.warn('Failed to parse review JSON payload', {
-        error: error instanceof Error ? error.message : String(error),
-        outputPreview: output.slice(0, 300),
-      });
-      return null;
-    }
-  }
-
-  private extractJsonBlock(output: string): string {
-    const fencedMatch = output.match(/```json\s*([\s\S]*?)```/i);
-    if (fencedMatch?.[1]) {
-      return fencedMatch[1].trim();
-    }
-
-    const genericFenceMatch = output.match(/```\s*([\s\S]*?)```/);
-    if (genericFenceMatch?.[1]) {
-      return genericFenceMatch[1].trim();
-    }
-
-    return output.trim();
   }
 
   private buildReviewMarker(headSha: string): string {

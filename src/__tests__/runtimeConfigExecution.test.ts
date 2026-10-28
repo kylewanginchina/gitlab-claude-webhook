@@ -114,6 +114,10 @@ const baseRuntimeConfig: RuntimeConfig = {
     skipDraft: true,
     skipExistingSha: true,
     allowedCommands: ['/code-review'],
+    useBuiltinSkills: true,
+    structuredOutput: true,
+    passMaxTurns: 40,
+    scoringMaxTurns: 20,
   },
   workDir: '/tmp/gitlab-claude-work',
   logLevel: 'info',
@@ -888,6 +892,48 @@ describe('runtime config execution paths', () => {
     expect(body).not.toContain('2026-07-06T09:20:31.817Z');
 
     jest.useRealTimers();
+  });
+
+  it('renders stage callback progress without decorative icons and deduplicates normalized updates', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    const context = processor['createRunContext']();
+    context.currentCommentId = 101;
+    const updateComment = jest.fn().mockResolvedValue(undefined);
+    processor['updateComment'] = updateComment;
+    const callback: StreamingProgressCallback = {
+      onProgress: async (message, isComplete) => {
+        await processor['updateProgressComment'](event, context, message, isComplete);
+      },
+      onError: async error => {
+        await processor['updateProgressComment'](event, context, error, false, true);
+      },
+    };
+    const scorer = processor['buildReviewStageCallback']('Scorer 2', callback);
+    const review = processor['buildReviewStageCallback']('Security review', callback);
+
+    await scorer.onProgress('📖 Read /tmp/project/file.ts', false);
+    await scorer.onProgress('Read `/tmp/project/file.ts`', false);
+    await review.onProgress('📖 Read /tmp/project/file.ts', false);
+    await review.onProgress('🔎 Grep unsafe in /tmp/project', false);
+    await scorer.onProgress('💻 Bash git diff', false);
+    await scorer.onProgress('🤖 Checking the changed lines.', false);
+    await scorer.onProgress('⚙️ Using tool: StructuredOutput', false);
+    await scorer.onError('❌ Execution failed: unavailable');
+    await scorer.onProgress('✅ Claude execution completed successfully!', true);
+
+    const body = updateComment.mock.calls.at(-1)?.[2] as string;
+    expect(context.progressMessages).toHaveLength(8);
+    expect(body).toContain('| Read | [Scorer 2] Read `/tmp/project/file.ts` |');
+    expect(body).toContain('| Read | [Security review] Read `/tmp/project/file.ts` |');
+    expect(body).toContain('| Search | [Security review] Grep `unsafe` in `/tmp/project` |');
+    expect(body).toContain('| Command | [Scorer 2] Bash `git diff` |');
+    expect(body).toContain('| Running | [Scorer 2] Checking the changed lines. |');
+    expect(body).toContain('| Running | [Scorer 2] Using tool: StructuredOutput |');
+    expect(body).toContain('| Warning | [Scorer 2] Execution failed: unavailable |');
+    expect(body).toContain('| Completed | [Scorer 2] Claude execution completed successfully. |');
+    expect(body).toContain('**Status:** In progress');
+    expect(body).not.toMatch(/[📖🔎💻🤖⚙✅❌]/u);
   });
 
   it('keeps progress comment state isolated per run context', async () => {
@@ -1706,6 +1752,356 @@ describe('runtime config execution paths', () => {
     expect(finalReview.findings[0]?.title).toBe('First issue');
   });
 
+  describe('machine review result integrity through the real pipeline', () => {
+    const empty = JSON.stringify({ summary: 'Checked diff', findings: [] });
+    const candidate = {
+      title: 'Possible bug',
+      body: 'Evidence in changed code',
+      confidence: 40,
+      path: 'src/a.ts',
+      line: 10,
+      line_type: 'new',
+      category: 'bug',
+    };
+    const passWithCandidate = JSON.stringify({ summary: 'Candidate found', findings: [candidate] });
+
+    const envelope = (payload: string) => 'Review result:\n```json\n' + payload + '\n```\nDone.';
+    const exampleBeforeResult = (result: string): string =>
+      'Example shape:\n```\n' + empty + '\n```\n' + envelope(result);
+    const candidateWithFence = {
+      ...candidate,
+      body: 'The example ```json {"value":1} ``` has a bug.',
+    };
+    const envelopePass = envelope(
+      JSON.stringify({ summary: 'Checked', findings: [candidateWithFence] })
+    );
+    const envelopeScore = envelope(
+      JSON.stringify({ ...candidateWithFence, confidence: 0, verdict: 'Guarded' })
+    );
+    const badPathPass = JSON.stringify({
+      summary: 'Checked',
+      findings: [{ ...candidate, path: './', confidence: 90 }],
+    });
+
+    it.each<{
+      label: string;
+      passes: string[];
+      score: string;
+      expected: 'failed' | 'partial' | 'clean' | 'finding';
+      provider?: 'claude' | 'codex';
+      structuredOutput?: boolean;
+    }>([
+      ...(['claude', 'codex'] as const).map(provider => ({
+        label: `${provider} keeps real findings after a bare clean example`,
+        passes: [exampleBeforeResult(passWithCandidate), empty, empty, empty],
+        score: exampleBeforeResult(
+          JSON.stringify({ ...candidate, confidence: 95, verdict: 'Verified actual result' })
+        ),
+        expected: 'finding' as const,
+        provider,
+        structuredOutput: false,
+      })),
+      ...(['claude', 'codex'] as const).map(provider => ({
+        label: `${provider} rejects an invalid explicit result after a bare clean example`,
+        passes: [empty, empty, empty, exampleBeforeResult('{')],
+        score: '',
+        expected: 'partial' as const,
+        provider,
+        structuredOutput: false,
+      })),
+      {
+        label: 'Claude prose-wrapped empty passes with structured output disabled',
+        passes: [empty, empty, empty, empty].map(envelope),
+        score: '',
+        expected: 'clean',
+        structuredOutput: false,
+      },
+      {
+        label:
+          'Claude prose-wrapped pass and scorer with inner fences and structured output disabled',
+        passes: [envelopePass, empty, empty, empty],
+        score: envelopeScore,
+        expected: 'clean',
+        structuredOutput: false,
+      },
+      {
+        label: 'Codex prose-wrapped pass and scorer with inner fences',
+        passes: [envelopePass, empty, empty, empty],
+        score: envelopeScore,
+        expected: 'clean',
+        provider: 'codex',
+      },
+      {
+        label: 'unnormalizable pass findings',
+        passes: [badPathPass, badPathPass, badPathPass, badPathPass],
+        score: '',
+        expected: 'failed',
+      },
+      {
+        label: 'unnormalizable scorer finding',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: JSON.stringify({ ...candidate, path: './', confidence: 90 }),
+        expected: 'partial',
+      },
+      { label: 'malformed passes', passes: ['{', '{', '{', '{'], score: '', expected: 'failed' },
+      {
+        label: 'prose-only passes',
+        passes: ['Review done', 'Review done', 'Review done', 'Review done'],
+        score: '',
+        expected: 'failed',
+      },
+      {
+        label: 'invalid pass shapes',
+        passes: ['{}', '{}', '{}', '{}'],
+        score: '',
+        expected: 'failed',
+      },
+      {
+        label: 'one valid empty pass and three malformed passes',
+        passes: [empty, '{', '{', '{'],
+        score: '',
+        expected: 'partial',
+      },
+      {
+        label: 'valid empty passes',
+        passes: [empty, empty, empty, empty],
+        score: '',
+        expected: 'clean',
+      },
+      {
+        label: 'fenced legacy empty passes',
+        passes: [empty, empty, empty, empty].map(value => '```json\n' + value + '\n```'),
+        score: '',
+        expected: 'clean',
+      },
+      {
+        label: 'malformed scorer',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: '{',
+        expected: 'partial',
+      },
+      {
+        label: 'invalid scorer shape',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: '{}',
+        expected: 'partial',
+      },
+      {
+        label: 'valid zero-confidence scorer',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: JSON.stringify({ ...candidate, confidence: 0, verdict: 'Already guarded' }),
+        expected: 'clean',
+      },
+    ])(
+      '$label produces a $expected outcome',
+      async ({ passes, score, expected, provider = 'claude', structuredOutput = true }) => {
+        jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(
+          createRuntimeConfig({
+            review: {
+              passConcurrency: 1,
+              scoringConcurrency: 1,
+              structuredOutput,
+              defaultProvider: provider === 'codex' ? 'codex-multipass' : 'claude-multipass',
+            },
+          })
+        );
+        const pendingPasses = [...passes];
+        mockQuery.mockImplementation(({ prompt }) => {
+          const isScorer = prompt.includes(
+            'Score whether this GitLab merge request review finding is real.'
+          );
+          return createAsyncGenerator([
+            {
+              type: 'result',
+              subtype: 'success',
+              result: isScorer ? score : pendingPasses.shift(),
+              total_cost_usd: 0,
+              num_turns: 1,
+              duration_ms: 1,
+            },
+          ]);
+        });
+        mockCodexConstructor.mockImplementation(() => ({
+          startThread: () => ({
+            runStreamed: async (prompt: string) => ({
+              events: createAsyncGenerator([
+                {
+                  type: 'item.completed',
+                  item: {
+                    type: 'agent_message',
+                    id: 'review-result',
+                    text: prompt.includes(
+                      'Score whether this GitLab merge request review finding is real.'
+                    )
+                      ? score
+                      : pendingPasses.shift(),
+                  },
+                },
+                {
+                  type: 'turn.completed',
+                  usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 },
+                },
+              ]),
+            }),
+          }),
+        }));
+        const gitlab = {
+          getMergeRequest: jest
+            .fn()
+            .mockResolvedValue({ ...createMergeRequestEvent().merge_request, sha: 'head-sha' }),
+          getMergeRequestDiffVersions: jest.fn().mockResolvedValue([{ id: 1 }]),
+          getMergeRequestDiffVersion: jest.fn().mockResolvedValue({
+            base_commit_sha: 'base-sha',
+            start_commit_sha: 'start-sha',
+            head_commit_sha: 'head-sha',
+            diffs: [{ old_path: 'src/a.ts', new_path: 'src/a.ts' }],
+          }),
+          getMergeRequestDiscussions: jest.fn().mockResolvedValue([]),
+          addMergeRequestComment: jest.fn().mockResolvedValue({ id: 99 }),
+          updateMergeRequestComment: jest.fn().mockResolvedValue(undefined),
+        };
+        const processor = new EventProcessor();
+        (processor as any).gitlabService = gitlab;
+        (processor as any).gitlabReviewService = new GitLabReviewService(gitlab as any);
+        const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-integrity-'));
+        try {
+          // Local-only repository: context preparation handles the absent origin without network access.
+          await simpleGit(projectPath).init();
+          await (processor as any).executeCodeReview(
+            createMergeRequestEvent(),
+            {
+              command: '/code-review',
+              context: 'MR #2',
+              provider: 'claude',
+            },
+            'main',
+            projectPath,
+            createCallback(),
+            (processor as any).createRunContext()
+          );
+
+          const comments = gitlab.addMergeRequestComment.mock.calls.map(call => call[2] as string);
+          const clean = comments.some(body =>
+            /No high-confidence issues (?:found|remained)/.test(body)
+          );
+          const partial = comments.some(body =>
+            body.includes('Review completed with partial coverage.')
+          );
+          const failed = comments.some(body => body.includes('All code review passes failed:'));
+          expect({ clean, partial, failed }).toEqual({
+            clean: expected === 'clean',
+            partial: expected === 'partial',
+            failed: expected === 'failed',
+          });
+          if (score && expected === 'partial') {
+            expect(comments.some(body => body.includes('Scorer 1'))).toBe(true);
+          }
+          if (expected === 'finding') {
+            expect(comments.some(body => body.includes(candidate.title))).toBe(true);
+            expect(pendingPasses).toHaveLength(0);
+            expect(comments.some(body => body.includes('Verified actual result'))).toBe(true);
+          }
+        } finally {
+          await fs.rm(projectPath, { recursive: true, force: true });
+        }
+      }
+    );
+  });
+
+  it.each(['discussion', 'no discussion', 'unavailable discussion'] as const)(
+    'publishes code-review summaries with %s while retaining inline findings and SHA markers',
+    async route => {
+      jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+      const processor = new EventProcessor();
+      const gitlab = processor['gitlabService'];
+      const reviewService = processor['gitlabReviewService'];
+      const reviewContext = createReviewContext();
+      const runContext = processor['createRunContext']();
+      runContext.currentDiscussionId = route === 'no discussion' ? null : 'command-discussion';
+      const discussions = [{ id: 'command-discussion', notes: [{ body: '@claude /code-review' }] }];
+      jest.spyOn(gitlab, 'getMergeRequestDiscussions').mockResolvedValue(discussions);
+      jest.spyOn(gitlab, 'getMergeRequest').mockResolvedValue({
+        ...createMergeRequestEvent().merge_request,
+        sha: reviewContext.headSha,
+      });
+      const addReply = jest
+        .spyOn(gitlab, 'addMergeRequestDiscussionReply')
+        .mockImplementation(async (_project, _mr, _discussion, body) => {
+          if (route === 'unavailable discussion') throw new Error('Discussion no longer exists');
+          discussions[0].notes.push({ body });
+          return { id: 303 };
+        });
+      const addComment = jest
+        .spyOn(gitlab, 'addMergeRequestComment')
+        .mockImplementation(async (_project, _mr, body) => {
+          discussions.push({ id: 'summary-comment', notes: [{ body }] });
+        });
+      const addInline = jest
+        .spyOn(gitlab, 'createMergeRequestDiscussion')
+        .mockResolvedValue({ id: 'inline-discussion' });
+      jest.spyOn(reviewService, 'prepareReviewContext').mockResolvedValue(reviewContext);
+      jest
+        .spyOn(reviewService, 'buildReviewPasses')
+        .mockReturnValue([
+          { id: 'bug-scan', label: 'Bug scan', prompt: 'Review the diff', skillNames: [] },
+        ]);
+      const finding: ReviewFinding = {
+        title: '[P2] Confirmed regression',
+        body: 'A changed guard causes the failure.',
+        confidence: 95,
+        path: 'src/a.ts',
+        line: 10,
+        lineType: 'new',
+      };
+      processor['executeReviewPass'] = jest.fn().mockResolvedValue({
+        passId: 'bug-scan',
+        label: 'Bug scan',
+        summary: 'One candidate',
+        findings: [finding],
+      });
+      processor['executeReviewScore'] = jest.fn().mockResolvedValue(finding);
+      const event =
+        route === 'no discussion' ? createMergeRequestEvent() : createMergeRequestNoteEvent();
+
+      await processor['executeCodeReview'](
+        event,
+        { command: '/code-review', context: 'MR #2', provider: 'claude' },
+        'main',
+        '/tmp/project',
+        createCallback(),
+        runContext
+      );
+
+      if (route === 'discussion') {
+        expect(addReply).toHaveBeenCalledTimes(1);
+        expect(addReply).toHaveBeenCalledWith(1, 2, 'command-discussion', expect.any(String));
+        expect(addComment).not.toHaveBeenCalled();
+      } else {
+        expect(addReply).toHaveBeenCalledTimes(route === 'no discussion' ? 0 : 1);
+        expect(addComment).toHaveBeenCalledTimes(1);
+      }
+      const summaries = discussions
+        .flatMap(discussion => discussion.notes)
+        .filter(note => note.body.includes('### Code review'));
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].body).toContain('<!-- gitlab-claude-code-review:head-sha -->');
+      expect(summaries[0].body).toContain(finding.title);
+      expect(addInline).toHaveBeenCalledTimes(1);
+      expect(addInline).toHaveBeenCalledWith(1, 2, expect.stringContaining(finding.title), {
+        position: {
+          base_sha: 'base-sha',
+          start_sha: 'start-sha',
+          head_sha: 'head-sha',
+          position_type: 'text',
+          old_path: 'src/a.ts',
+          new_path: 'src/a.ts',
+          new_line: '10',
+        },
+      });
+      await expect(reviewService.hasExistingReview(1, 2, 'head-sha')).resolves.toBe(true);
+    }
+  );
+
   it('uses runtime review minConfidence when deciding which scored findings remain', async () => {
     const runtimeConfig = createRuntimeConfig({
       review: {
@@ -1727,6 +2123,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -1794,6 +2191,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -1859,6 +2257,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -1931,6 +2330,7 @@ describe('runtime config execution paths', () => {
     };
     (processor as any).gitlabReviewService = {
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
     };
     (processor as any).postComment = postComment;
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
@@ -1959,6 +2359,7 @@ describe('runtime config execution paths', () => {
     };
     (processor as any).gitlabReviewService = {
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
     };
     (processor as any).postComment = postComment;
     (processor as any).updateProgressComment = updateProgressComment;
@@ -2009,6 +2410,7 @@ describe('runtime config execution paths', () => {
     };
     (processor as any).gitlabReviewService = {
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
     };
     (processor as any).postComment = postComment;
     (processor as any).updateProgressComment = jest.fn().mockResolvedValue(undefined);
@@ -2072,6 +2474,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2193,6 +2596,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2307,6 +2711,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2440,6 +2845,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest
         .fn()
         .mockReturnValue([{ id: 'pass-1', label: 'Pass 1', prompt: 'Prompt' }]),
@@ -2528,6 +2934,7 @@ describe('runtime config execution paths', () => {
     const mockReviewService = {
       prepareReviewContext: jest.fn().mockResolvedValue(reviewContext),
       hasExistingReview: jest.fn().mockResolvedValue(false),
+      getScoringSkillDelivery: jest.fn().mockReturnValue({ skillNames: [], inlineSkills: [] }),
       buildReviewPasses: jest.fn().mockReturnValue([
         { id: 'pass-1', label: 'Pass 1', prompt: 'Prompt 1' },
         { id: 'pass-2', label: 'Pass 2', prompt: 'Prompt 2' },

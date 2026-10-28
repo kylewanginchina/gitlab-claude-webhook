@@ -72,6 +72,11 @@ cp .env.example .env
 | `REVIEW_SKIP_DRAFT`             | `true`             | `true`、`false`                       | 是否跳过草稿 MR。只有值恰为 `false` 时关闭。                     |
 | `REVIEW_SKIP_EXISTING_SHA`      | `true`             | `true`、`false`                       | 是否跳过已处理过相同 SHA 的代码审查。只有值恰为 `false` 时关闭。 |
 | `REVIEW_ALLOWED_COMMANDS`       | `/code-review`     | 逗号或换行分隔的非空字符串            | 可触发代码审查的命令列表，例如 `/code-review,/review`。          |
+| `REVIEW_USE_BUILTIN_SKILLS`     | `true`             | `true`、`false`                       | 是否加载 `review-skills/` 中的 SKILL.md 审查技能。Claude 以 `/gitlab-review:<skill>` 斜杠命令展开核心技能、其余技能内联；Codex 全部内联。 |
+| `REVIEW_SKILLS_DIR`             | `<repo>/review-skills` | 目录路径                          | 覆盖内置审查技能所在目录，目录下需包含 `skills/<name>/SKILL.md`。 |
+| `REVIEW_STRUCTURED_OUTPUT`      | `true`             | `true`、`false`                       | Claude review pass 与评分阶段使用 JSON Schema 结构化输出；关闭后回退为解析 Markdown 中的 JSON 代码块。 |
+| `REVIEW_PASS_MAX_TURNS`         | `0`                | `0` 或正整数                          | 单个 Claude review pass 允许的最大 agent 轮次，超出即停止并按失败阶段处理；`0` 表示不限制，仅由超时兜底。 |
+| `REVIEW_SCORING_MAX_TURNS`      | `0`                | `0` 或正整数                          | 单个 Claude 评分阶段允许的最大 agent 轮次；`0` 表示不限制。        |
 
 ## 工作目录与日志
 

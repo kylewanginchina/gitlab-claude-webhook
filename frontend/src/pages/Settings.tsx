@@ -144,6 +144,10 @@ function buildPatch(draft: DraftConfig): RuntimeConfigPatch {
       skipDraft: draft.review.skipDraft,
       skipExistingSha: draft.review.skipExistingSha,
       allowedCommands: draft.review.allowedCommands,
+      useBuiltinSkills: draft.review.useBuiltinSkills,
+      structuredOutput: draft.review.structuredOutput,
+      passMaxTurns: draft.review.passMaxTurns,
+      scoringMaxTurns: draft.review.scoringMaxTurns,
     },
     workDir: draft.workDir.trim(),
     logLevel: draft.logLevel,
@@ -251,7 +255,9 @@ export default function Settings() {
     };
   }
 
-  function updateCheckbox(field: 'enabled' | 'skipDraft' | 'skipExistingSha') {
+  function updateCheckbox(
+    field: 'enabled' | 'skipDraft' | 'skipExistingSha' | 'useBuiltinSkills' | 'structuredOutput'
+  ) {
     return (event: ChangeEvent<HTMLInputElement>) => {
       updateDraft(current => ({
         ...current,
@@ -687,6 +693,26 @@ export default function Settings() {
                 onChange={updateReviewNumber('scoringConcurrency')}
               />
             </div>
+            <div className="field">
+              <label htmlFor="pass-max-turns">Pass max turns (0 = no limit)</label>
+              <input
+                id="pass-max-turns"
+                type="number"
+                min={0}
+                value={draft.review.passMaxTurns}
+                onChange={updateReviewNumber('passMaxTurns')}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="scoring-max-turns">Scoring max turns (0 = no limit)</label>
+              <input
+                id="scoring-max-turns"
+                type="number"
+                min={0}
+                value={draft.review.scoringMaxTurns}
+                onChange={updateReviewNumber('scoringMaxTurns')}
+              />
+            </div>
           </div>
           <div className="checkbox-grid">
             <div className="checkbox-row">
@@ -711,6 +737,34 @@ export default function Settings() {
               <label htmlFor="skip-existing-sha">
                 <strong>Skip existing head SHA</strong>
                 <span className="field-hint">Preserve the duplicate-review guard for already-processed SHAs.</span>
+              </label>
+            </div>
+            <div className="checkbox-row">
+              <input
+                id="use-builtin-skills"
+                type="checkbox"
+                checked={draft.review.useBuiltinSkills}
+                onChange={updateCheckbox('useBuiltinSkills')}
+              />
+              <label htmlFor="use-builtin-skills">
+                <strong>Use built-in review skills</strong>
+                <span className="field-hint">
+                  Load the on-disk SKILL.md review methodology and language skills into each pass.
+                </span>
+              </label>
+            </div>
+            <div className="checkbox-row">
+              <input
+                id="structured-output"
+                type="checkbox"
+                checked={draft.review.structuredOutput}
+                onChange={updateCheckbox('structuredOutput')}
+              />
+              <label htmlFor="structured-output">
+                <strong>Structured JSON output</strong>
+                <span className="field-hint">
+                  Ask the Claude SDK for schema-validated JSON instead of parsing fenced code blocks.
+                </span>
               </label>
             </div>
           </div>

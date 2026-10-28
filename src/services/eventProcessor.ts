@@ -15,6 +15,8 @@ import { RuntimeConfig } from '../admin/adminTypes';
 import {
   GitLabReviewService,
   PreparedReviewContext,
+  REVIEW_PASS_OUTPUT_SCHEMA,
+  REVIEW_SCORE_OUTPUT_SCHEMA,
   ReviewFinding,
   ReviewPassResult,
 } from './gitlabReviewService';
@@ -657,7 +659,13 @@ export class EventProcessor {
           pass.label,
           pass.prompt,
           projectPath,
-          executionContext,
+          {
+            ...executionContext,
+            skills: pass.skillNames,
+            skillCommand: pass.skillCommand,
+            outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
+            maxTurns: reviewSettings.passMaxTurns,
+          },
           callback
         )
     );
@@ -758,6 +766,9 @@ export class EventProcessor {
       `Scoring ${candidateFindings.length} candidate finding(s)...`
     );
 
+    const scoringSkills = this.gitlabReviewService.getScoringSkillDelivery(
+      reviewInstruction.provider
+    );
     const scoredResults = await this.runWithConcurrency(
       candidateFindings,
       reviewSettings.scoringConcurrency,
@@ -767,7 +778,13 @@ export class EventProcessor {
           finding,
           index + 1,
           projectPath,
-          executionContext,
+          {
+            ...executionContext,
+            skills: scoringSkills.skillNames,
+            skillCommand: scoringSkills.skillCommand,
+            outputSchema: REVIEW_SCORE_OUTPUT_SCHEMA,
+            maxTurns: reviewSettings.scoringMaxTurns,
+          },
           reviewContext,
           userFocus,
           reviewTimeBudget,
@@ -864,7 +881,9 @@ export class EventProcessor {
       finalReview.summary = partialCoverageSummary;
     }
 
-    await this.gitlabReviewService.postReview(event, reviewContext, finalReview);
+    await this.gitlabReviewService.postReview(event, reviewContext, finalReview, body =>
+      this.postComment(event, body, runContext)
+    );
     await this.updateProgressComment(
       event,
       runContext,
@@ -948,13 +967,19 @@ export class EventProcessor {
       throw new Error(`${passLabel} failed: ${result.error || 'Unknown error'}`);
     }
 
-    const parsed = this.gitlabReviewService.parseReviewOutput(result.output || '', 0);
-    return {
-      passId,
-      label: passLabel,
-      summary: parsed.summary,
-      findings: parsed.findings,
-    };
+    try {
+      const parsed = this.gitlabReviewService.parseReviewOutput(result.output || '', 0, true);
+      return {
+        passId,
+        label: passLabel,
+        summary: parsed.summary,
+        findings: parsed.findings,
+      };
+    } catch (error) {
+      throw new Error(
+        `${passLabel} failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private async executeReviewScore(
@@ -973,7 +998,8 @@ export class EventProcessor {
       reviewContext,
       finding,
       userFocus,
-      timeBudget
+      timeBudget,
+      this.gitlabReviewService.getScoringSkillDelivery(instruction.provider).inlineSkills
     );
 
     const result = await this.executeWithProvider(
@@ -988,7 +1014,13 @@ export class EventProcessor {
       throw new Error(`${stageLabel} failed: ${result.error || 'Unknown error'}`);
     }
 
-    return this.gitlabReviewService.parseScoredFinding(result.output || '', finding);
+    try {
+      return this.gitlabReviewService.parseScoredFinding(result.output || '', finding, true);
+    } catch (error) {
+      throw new Error(
+        `${stageLabel} failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private async executeWithProvider(

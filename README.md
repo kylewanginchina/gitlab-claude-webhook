@@ -130,6 +130,20 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 此模式的执行 provider 由运行时配置 `REVIEW_DEFAULT_PROVIDER` 决定，而不是由 mention 决定。可选值为 `claude-multipass` 与 `codex-multipass`。
 
+评论触发的审查会把结果汇总作为原讨论线程中的新回复发布，与处理进度保持在同一线程；具体问题仍发布到对应代码行。没有原线程或线程回复失败时，汇总发布为 MR 顶层评论。汇总中的提交标记仍用于跳过重复审查。
+
+`REVIEW_ENABLED` 只控制是否允许执行审查命令，不会自动为新 MR 或每次推送创建审查任务。当前常用入口是在 MR 评论中发送 `@claude /code-review` 或 `@codex /code-review`，并在项目 Webhook 中启用 Comments（Note）事件。
+
+MR 事件分支目前读取 `event.merge_request.description`，而 GitLab 标准 Merge Request Webhook 把 MR 信息放在 `object_attributes`；服务尚未归一化这两种结构。因此仅在 MR 描述中保留命令并启用 Merge request events，还不能作为可直接使用的自动审查入口。需要无人值守触发时，可由外部 CI 或机器人在 MR 上发布上述指令评论，再经 Comments Webhook 进入正常审查流程。
+
+#### 内置审查 Skill
+
+`review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` 选项加载插件，并在提示词开头以 `/gitlab-review:mr-review-core` 斜杠命令显式展开核心技能（SDK 只展开提示词开头的第一个命令，因此其余匹配技能以内联文本注入）；Codex 没有 skill 机制，全部 SKILL.md 正文内联到提示词中。两种方式都不依赖模型自行调用 Skill 工具。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。
+
+自定义技能声明 `user-invocable: false` 时仍会应用其审查方法，但以内联方式传递；Claude 选择首个允许 slash 调用的匹配技能作为主技能，如果全部禁止则全部内联。内联正文中的 `${CLAUDE_SKILL_DIR}` 和 `${CLAUDE_PLUGIN_ROOT}` 会分别展开为该技能所在目录和插件根目录，避免引用资源时绑定到其他技能；每个内联块也会标明相对资源路径的基目录。审查与评分阶段、Claude 与 Codex 均使用此资源路径规则。
+
+`REVIEW_SKILLS_DIR` 指向包含 `skills/` 的插件根目录；相对路径在服务启动时按工作目录解析一次，不随 SDK 的 MR 检出目录变化。显式配置的路径无效时不会回退到仓库技能。启用内置技能时，目录缺失、技能文件不可读或正文为空、已有插件清单无效等配置错误会使 Claude/Codex 的审查与评分阶段失败，并提示修复路径；设置 `REVIEW_USE_BUILTIN_SKILLS=false` 后无需技能资产。自定义插件可省略 `.claude-plugin/plugin.json`（命令命名空间使用目录名），也可只提供按语言或 pass 匹配的技能，无需指定 `review-always`。Compose 将该变量传入容器，默认 `/app/review-skills`；覆盖时应填写容器内可读的路径，外部技能目录需自行挂载。
+
 ## 处理流程
 
 1. 验证 GitLab Webhook 签名。
@@ -168,7 +182,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 | Codex      | `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODEX_DEFAULT_MODEL`、`CODEX_DEFAULT_TIMEOUT_MINUTES`            | Codex provider；默认超时 30 分钟  |
 | GitLab     | `GITLAB_BASE_URL`、`GITLAB_TOKEN`                                                                      | GitLab 实例与 API Token           |
 | Webhook    | `WEBHOOK_SECRET`、`PORT`、`WEBHOOK_TASK_CONCURRENCY`                                                   | 默认端口 3000、全局并发 2         |
-| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`                                 | 默认命令为 `/code-review`         |
+| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`、`REVIEW_SKILLS_DIR`、`REVIEW_USE_BUILTIN_SKILLS`、`REVIEW_STRUCTURED_OUTPUT`、`REVIEW_PASS_MAX_TURNS`、`REVIEW_SCORING_MAX_TURNS` | 默认命令为 `/code-review`；默认启用内置 skill 与结构化输出；轮次上限默认 `0`（不限制） |
 | 管理与存储 | `ADMIN_TOKEN`、`DATA_DIR`                                                                              | 管理认证与运行时数据目录          |
 | 工作与日志 | `WORK_DIR`、`LOG_LEVEL`                                                                                | 临时工作目录与日志级别            |
 
@@ -184,7 +198,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 - Prompt Template：edit、review、上下文和评分提示词模板。
 - Review Prompt：多轮 review 的审查阶段与专项提示。
-- Skill：按 `enabled`、当前 Review provider、`promptIds`、`fileGlobs`、`languageHints` 和 `priority` 匹配的审查规则。
+- Skill：按 `enabled`、当前 Review provider、`promptIds`、`fileGlobs`、`languageHints` 和 `priority` 匹配的审查规则；可通过 `skillNames` 额外固定启用 `review-skills/` 中的内置 SKILL.md 技能。
 - Feedback：记录有效、误报、遗漏或不清晰的审查反馈。
 - Proposal：基于反馈生成的提示词优化建议；Open Proposal 可 Apply 到草稿或 Dismiss，Apply 后仍需 Publish。
 

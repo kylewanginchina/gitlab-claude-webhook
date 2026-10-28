@@ -67,7 +67,21 @@ const CODE_FILE_EXTENSIONS = new Set([
   '.mm',
 ]);
 
+function splitProgressStage(message: string): { stagePrefix: string; activity: string } {
+  const normalized = message.replace(/\s+/g, ' ').trim();
+  const stage = normalized.match(/^(\[[^\]]+\])\s*/);
+  return {
+    stagePrefix: stage ? `${stage[1]} ` : '',
+    activity: stage ? normalized.slice(stage[0].length) : normalized,
+  };
+}
+
 export function sanitizeProgressMessage(message: string): string {
+  const { stagePrefix, activity } = splitProgressStage(message);
+  return `${stagePrefix}${sanitizeProgressActivity(activity)}`.trimEnd();
+}
+
+function sanitizeProgressActivity(message: string): string {
   const withoutPrefix = message
     .replace(/^[\s\p{Extended_Pictographic}\uFE0F]+/u, '')
     .replace(/\s+/g, ' ')
@@ -103,28 +117,29 @@ export function inferProgressStatus(
   isComplete?: boolean,
   isError?: boolean
 ): ProgressStatus {
+  const { activity } = splitProgressStage(message);
   if (isError) {
     return 'error';
   }
-  if (isComplete || /completed successfully/i.test(message)) {
+  if (isComplete || /completed successfully/i.test(activity)) {
     return 'success';
   }
-  if (/validation command failed|failed|warning|skipped/i.test(message)) {
+  if (/validation command failed|failed|warning|skipped/i.test(activity)) {
     return 'warning';
   }
-  if (/^🔎|^Grep\b/i.test(message)) {
+  if (/^🔎|^Grep\b/i.test(activity)) {
     return 'search';
   }
-  if (/^📖|^Read\b/i.test(message)) {
+  if (/^📖|^Read\b/i.test(activity)) {
     return 'read';
   }
-  if (/^💻|^Bash\b/i.test(message)) {
+  if (/^💻|^Bash\b/i.test(activity)) {
     return 'command';
   }
-  if (/review/i.test(message)) {
+  if (/review/i.test(activity)) {
     return 'review';
   }
-  if (/starting|initialized|queued/i.test(message)) {
+  if (/starting|initialized|queued/i.test(activity)) {
     return 'queued';
   }
   return 'running';

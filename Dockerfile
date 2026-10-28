@@ -18,9 +18,10 @@ COPY frontend/index.html ./frontend/
 RUN npm ci --ignore-scripts
 RUN npm --prefix frontend ci --ignore-scripts
 
-# Copy source code and .env.example
+# Copy source code, review skills, and .env.example
 COPY src/ ./src/
 COPY frontend/src/ ./frontend/src/
+COPY review-skills/ ./review-skills/
 COPY .env.example ./
 
 # Build the application

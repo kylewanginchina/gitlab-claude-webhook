@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 require_text() {
   local file="$1"
@@ -68,5 +68,19 @@ require_line "$ROOT_DIR/docker-compose.yml" '      - REVIEW_SKIP_DRAFT=${REVIEW_
 require_line "$ROOT_DIR/docker-compose.yml" '      - REVIEW_SKIP_EXISTING_SHA=${REVIEW_SKIP_EXISTING_SHA:-true}'
 require_line "$ROOT_DIR/docker-compose.yml" '      - REVIEW_ALLOWED_COMMANDS=${REVIEW_ALLOWED_COMMANDS:-/code-review}'
 require_line "$ROOT_DIR/docker-compose.yml" '      - LOG_DIR=/app/logs'
+require_line "$ROOT_DIR/docker-compose.yml" '      - REVIEW_SKILLS_DIR=${REVIEW_SKILLS_DIR:-/app/review-skills}'
+
+# Review skills must be copied into this image and present in the build context.
+require_line "$ROOT_DIR/Dockerfile" 'COPY review-skills/ ./review-skills/'
+for asset in review-skills/.claude-plugin/plugin.json review-skills/skills/mr-review-core/SKILL.md; do
+  if [[ ! -s "$ROOT_DIR/$asset" ]]; then
+    echo "Missing or empty review skill asset: $asset" >&2
+    exit 1
+  fi
+done
+require_text "$ROOT_DIR/review-skills/.claude-plugin/plugin.json" '"name": "gitlab-review"'
+require_line "$ROOT_DIR/review-skills/skills/mr-review-core/SKILL.md" 'name: mr-review-core'
+require_text "$ROOT_DIR/review-skills/skills/mr-review-core/SKILL.md" 'review-always: "true"'
+require_line "$ROOT_DIR/review-skills/skills/mr-review-core/SKILL.md" '# Merge request review methodology'
 
 echo "Runtime image files look structurally valid."

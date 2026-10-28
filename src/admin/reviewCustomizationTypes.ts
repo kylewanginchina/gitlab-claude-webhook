@@ -102,6 +102,8 @@ export interface ReviewSkill {
   languageHints: string[];
   promptIds: string[];
   systemInstructions: string;
+  /** On-disk SKILL.md skill names to enable whenever this admin skill matches (Claude). */
+  skillNames: string[];
   priority: number;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +117,7 @@ export interface ReviewSkillInput {
   languageHints?: string[];
   promptIds?: string[];
   systemInstructions: string;
+  skillNames?: string[];
   priority?: number;
   enabled?: boolean;
 }

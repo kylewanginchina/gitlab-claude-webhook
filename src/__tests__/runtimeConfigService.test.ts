@@ -119,6 +119,34 @@ describe('RuntimeConfigService', () => {
     expect(config.review.minConfidence).toBe(80);
     expect(config.review.maxCandidateFindings).toBe(12);
     expect(config.review.maxFinalFindings).toBe(8);
+    expect(config.review.useBuiltinSkills).toBe(true);
+    expect(config.review.structuredOutput).toBe(true);
+    // 0 = no turn cap, so a fresh deployment behaves like the pre-skills release.
+    expect(config.review.passMaxTurns).toBe(0);
+    expect(config.review.scoringMaxTurns).toBe(0);
+  });
+
+  it('accepts a zero turn cap and persists the review skill flags through updateConfig', async () => {
+    const service = await buildRuntimeConfigService();
+
+    const result = await service.updateConfig(
+      {
+        review: {
+          useBuiltinSkills: false,
+          structuredOutput: false,
+          passMaxTurns: 0,
+          scoringMaxTurns: 12,
+        },
+      },
+      'admin'
+    );
+
+    expect(result.config.review.useBuiltinSkills).toBe(false);
+    expect(result.config.review.structuredOutput).toBe(false);
+    expect(result.config.review.passMaxTurns).toBe(0);
+    expect(result.config.review.scoringMaxTurns).toBe(12);
+    expect(service.getConfig().review.passMaxTurns).toBe(0);
+    expect(service.getConfig().review.scoringMaxTurns).toBe(12);
   });
 
   it('creates Claude reasoning effort from environment variables', () => {
@@ -442,6 +470,26 @@ describe('RuntimeConfigService', () => {
       'review.skipExistingSha',
       'review.skipExistingSha must be a boolean',
       { review: { skipExistingSha: 'true' } },
+    ],
+    [
+      'review.useBuiltinSkills',
+      'review.useBuiltinSkills must be a boolean',
+      { review: { useBuiltinSkills: 'yes' } },
+    ],
+    [
+      'review.structuredOutput',
+      'review.structuredOutput must be a boolean',
+      { review: { structuredOutput: 1 } },
+    ],
+    [
+      'review.passMaxTurns',
+      'review.passMaxTurns must be 0 or a positive integer',
+      { review: { passMaxTurns: -1 } },
+    ],
+    [
+      'review.scoringMaxTurns',
+      'review.scoringMaxTurns must be 0 or a positive integer',
+      { review: { scoringMaxTurns: 2.5 } },
     ],
     [
       'review.allowedCommands',

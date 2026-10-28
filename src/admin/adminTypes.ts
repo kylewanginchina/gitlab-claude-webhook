@@ -39,6 +39,14 @@ export interface RuntimeConfig {
     skipDraft: boolean;
     skipExistingSha: boolean;
     allowedCommands: string[];
+    /** Load the on-disk SKILL.md review skills into Claude review runs. */
+    useBuiltinSkills: boolean;
+    /** Ask the Claude SDK for JSON-schema structured output instead of parsing fenced JSON. */
+    structuredOutput: boolean;
+    /** Max agentic turns per review pass (Claude only). 0 = no cap; the timeout still applies. */
+    passMaxTurns: number;
+    /** Max agentic turns per scoring stage (Claude only). 0 = no cap; the timeout still applies. */
+    scoringMaxTurns: number;
   };
   workDir: string;
   logLevel: string;
