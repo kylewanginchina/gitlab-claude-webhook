@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { parse as parseYaml } from 'yaml';
 import logger from '../utils/logger';
 import { detectReviewLanguages, normalizeReviewLanguageHint } from '../admin/reviewLanguages';
 
@@ -174,14 +175,13 @@ export class ReviewSkillCatalog {
         continue;
       }
       const filePath = path.join(skillsRoot, entry.name, 'SKILL.md');
-      let raw: string;
+      let parsed: ParsedFrontmatter;
       try {
-        raw = fs.readFileSync(filePath, 'utf8');
+        parsed = parseFrontmatter(fs.readFileSync(filePath, 'utf8'));
       } catch {
         continue;
       }
 
-      const parsed = parseFrontmatter(raw);
       const name = parsed.fields.name?.trim() || entry.name;
       if (name !== entry.name) {
         logger.warn('Review skill directory name does not match SKILL.md name', {
@@ -195,7 +195,7 @@ export class ReviewSkillCatalog {
         description: parsed.fields.description?.trim() || '',
         body: parsed.body.trim(),
         filePath,
-        userInvocable: !/^false(?:\s+#.*)?$/i.test(parsed.fields['user-invocable'] || ''),
+        userInvocable: parsed.fields['user-invocable']?.toLowerCase() !== 'false',
         always: /^(true|yes|1)$/i.test(parsed.metadata['review-always'] || ''),
         passIds: splitList(parsed.metadata['review-passes']),
         languages: splitList(parsed.metadata['review-languages'])
@@ -257,21 +257,16 @@ function splitList(value: string | undefined): string[] {
   );
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
+function scalarFields(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, field]) => ['string', 'boolean', 'number'].includes(typeof field))
+      .map(([key, field]) => [key, String(field)])
+  );
 }
 
-/**
- * Minimal frontmatter parser: top-level `key: value` scalars plus one level of
- * nested scalars under `metadata:`. Sufficient for SKILL.md files; avoids a YAML dependency.
- */
+/** Parse YAML once, retaining scalar fields and review metadata without modifying the body. */
 export function parseFrontmatter(raw: string): ParsedFrontmatter {
   const normalized = raw.replace(/\r\n/g, '\n');
   const match = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
@@ -279,38 +274,15 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter {
     return { fields: {}, metadata: {}, body: normalized };
   }
 
-  const fields: Record<string, string> = {};
-  const metadata: Record<string, string> = {};
-  let currentBlock: 'metadata' | null = null;
-
-  for (const line of match[1].split('\n')) {
-    if (!line.trim() || line.trim().startsWith('#')) {
-      continue;
-    }
-
-    const indented = /^\s+/.test(line);
-    const keyValue = line.trim().match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
-    if (!keyValue) {
-      continue;
-    }
-    const [, key, value] = keyValue;
-
-    if (!indented) {
-      if (key === 'metadata' && value.trim() === '') {
-        currentBlock = 'metadata';
-        continue;
-      }
-      currentBlock = null;
-      fields[key] = stripQuotes(value);
-      continue;
-    }
-
-    if (currentBlock === 'metadata') {
-      metadata[key] = stripQuotes(value);
-    }
+  const header: unknown = parseYaml(match[1]);
+  if (header !== null && (typeof header !== 'object' || Array.isArray(header))) {
+    throw new Error('Review skill frontmatter must be a YAML mapping');
   }
-
-  return { fields, metadata, body: match[2] };
+  return {
+    fields: scalarFields(header),
+    metadata: scalarFields((header as Record<string, unknown> | null)?.metadata),
+    body: match[2],
+  };
 }
 
 export function matchesAnyGlob(globs: string[], files: string[]): boolean {

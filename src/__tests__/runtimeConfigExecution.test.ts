@@ -1724,6 +1724,8 @@ describe('runtime config execution paths', () => {
     const passWithCandidate = JSON.stringify({ summary: 'Candidate found', findings: [candidate] });
 
     const envelope = (payload: string) => 'Review result:\n```json\n' + payload + '\n```\nDone.';
+    const exampleBeforeResult = (result: string): string =>
+      'Example shape:\n```\n' + empty + '\n```\n' + envelope(result);
     const candidateWithFence = {
       ...candidate,
       body: 'The example ```json {"value":1} ``` has a bug.',
@@ -1743,10 +1745,28 @@ describe('runtime config execution paths', () => {
       label: string;
       passes: string[];
       score: string;
-      expected: 'failed' | 'partial' | 'clean';
+      expected: 'failed' | 'partial' | 'clean' | 'finding';
       provider?: 'claude' | 'codex';
       structuredOutput?: boolean;
     }>([
+      ...(['claude', 'codex'] as const).map(provider => ({
+        label: `${provider} keeps real findings after a bare clean example`,
+        passes: [exampleBeforeResult(passWithCandidate), empty, empty, empty],
+        score: exampleBeforeResult(
+          JSON.stringify({ ...candidate, confidence: 95, verdict: 'Verified actual result' })
+        ),
+        expected: 'finding' as const,
+        provider,
+        structuredOutput: false,
+      })),
+      ...(['claude', 'codex'] as const).map(provider => ({
+        label: `${provider} rejects an invalid explicit result after a bare clean example`,
+        passes: [empty, empty, empty, exampleBeforeResult('{')],
+        score: '',
+        expected: 'partial' as const,
+        provider,
+        structuredOutput: false,
+      })),
       {
         label: 'Claude prose-wrapped empty passes with structured output disabled',
         passes: [empty, empty, empty, empty].map(envelope),
@@ -1933,6 +1953,11 @@ describe('runtime config execution paths', () => {
           });
           if (score && expected === 'partial') {
             expect(comments.some(body => body.includes('Scorer 1'))).toBe(true);
+          }
+          if (expected === 'finding') {
+            expect(comments.some(body => body.includes(candidate.title))).toBe(true);
+            expect(pendingPasses).toHaveLength(0);
+            expect(comments.some(body => body.includes('Verified actual result'))).toBe(true);
           }
         } finally {
           await fs.rm(projectPath, { recursive: true, force: true });

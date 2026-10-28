@@ -40,6 +40,23 @@ describe('parseReviewJsonPayload', () => {
     expect(parseReviewJsonPayload(output)).toEqual(payload);
   });
 
+  it.each([{}, [], null, false, 0, { summary: 'Example', findings: [] }])(
+    'prefers an explicit JSON result over an earlier unlabelled example: %j',
+    example => {
+      const output =
+        `Example:\n\`\`\`\n${JSON.stringify(example)}\n\`\`\`\n` +
+        `Result:\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``;
+      expect(parseReviewJsonPayload(output)).toEqual(payload);
+    }
+  );
+
+  it('does not treat a later unlabelled example as the result', () => {
+    const output =
+      `\`\`\`JSON\n${JSON.stringify(payload)}\n\`\`\`\n` +
+      'Example:\n```\n{"summary":"Example","findings":[]}\n```';
+    expect(parseReviewJsonPayload(output)).toEqual(payload);
+  });
+
   it.each(['```text\nx\n```\n', '```json\n{"incomplete":\n```\n'])(
     'bounds parsing work for repeated invalid blocks: %s',
     block => {

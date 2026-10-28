@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { simpleGit } from 'simple-git';
 import { GitLabWebhookEvent } from '../types/gitlab';
 import logger from '../utils/logger';
@@ -473,7 +474,7 @@ export class GitLabReviewService {
   }
 
   public parseReviewOutput(output: string, minConfidence = 80, strict = false): ParsedReviewResult {
-    const parsed = parseReviewJsonPayload(output);
+    const parsed = parseReviewJsonPayload(output, strict ? isReviewPassPayload : undefined);
     if (strict && !isReviewPassPayload(parsed)) {
       throw new Error(
         'Invalid review pass result: expected JSON with a summary and valid findings array'
@@ -506,7 +507,7 @@ export class GitLabReviewService {
     fallbackFinding: ReviewFinding,
     strict = false
   ): ReviewFinding | null {
-    const parsed = parseReviewJsonPayload(output);
+    const parsed = parseReviewJsonPayload(output, strict ? isReviewFindingPayload : undefined);
     if (strict && !isReviewFindingPayload(parsed)) {
       throw new Error(
         'Invalid review scoring result: expected JSON with valid finding fields and confidence'
@@ -678,25 +679,42 @@ export class GitLabReviewService {
     variables: Record<string, unknown>,
     fallback: string
   ): string {
+    const inlineSkillsBlock =
+      typeof variables.inlineSkillsBlock === 'string' ? variables.inlineSkillsBlock : '';
+    const skillMarker = inlineSkillsBlock ? `__REVIEW_SKILLS_${randomUUID()}__` : '';
+    const protectSkills = (value: string): string =>
+      skillMarker ? value.split(inlineSkillsBlock).join(skillMarker) : value;
+    const renderVariables = skillMarker
+      ? Object.fromEntries(
+          Object.entries(variables).map(([key, value]) => [
+            key,
+            typeof value === 'string' ? protectSkills(value) : value,
+          ])
+        )
+      : variables;
+    const protectedFallback = protectSkills(fallback);
     let prompt: string;
     try {
-      prompt = this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+      prompt = this.reviewCustomizationService.renderPromptTemplate(
+        id,
+        renderVariables,
+        protectedFallback
+      );
     } catch (error) {
       logger.warn('Falling back to built-in review prompt template', {
         templateId: id,
         error: error instanceof Error ? error.message : String(error),
       });
-      prompt = fallback;
+      prompt = protectedFallback;
     }
 
-    const inlineSkillsBlock = variables.inlineSkillsBlock;
-    if (typeof inlineSkillsBlock !== 'string' || !inlineSkillsBlock) {
+    if (!skillMarker) {
       return prompt;
     }
 
     // Published shells may predate the placeholder or include it alongside the full prompt.
-    // Keep the first rendered block in its chosen position and deliver it exactly once.
-    const [before, ...after] = prompt.split(inlineSkillsBlock);
+    // Render the shell first, then insert the literal body once at its first chosen position.
+    const [before, ...after] = prompt.split(skillMarker);
     return after.length > 0
       ? before + inlineSkillsBlock + after.join('')
       : `${prompt}\n\n${inlineSkillsBlock}`;

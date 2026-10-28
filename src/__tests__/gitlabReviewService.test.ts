@@ -222,6 +222,8 @@ describe('GitLabReviewService', () => {
         it.each([
           { core: false, specialized: false, primary: undefined },
           { core: 'false # Internal methodology only', specialized: false, primary: undefined },
+          { core: '"false" # Internal methodology only', specialized: false, primary: undefined },
+          { core: "'false' # Internal methodology only", specialized: false, primary: undefined },
           { core: false, specialized: true, primary: 'specialized' },
           { core: undefined, specialized: false, primary: 'core' },
         ])('delivers every skill once with eligibility %j', async eligibility => {
@@ -545,6 +547,93 @@ describe('GitLabReviewService', () => {
     });
 
     describe.each(['claude', 'codex'] as const)('%s', provider => {
+      it.each([
+        'default',
+        'disabled',
+        'legacy',
+        'inline',
+        'full-prompt',
+        'combined',
+        'combined-prompt-first',
+        'repeated-inline',
+        'error',
+      ])('keeps skill text literal and delivers it once with %s templates', async mode => {
+        const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-literal-skills-'));
+        dataDirs.push(dataDir);
+        const customization = new ReviewCustomizationService({ dataDir });
+        await customization.initialize();
+        const pluginDir = path.join(dataDir, 'plugin');
+        const skillDir = path.join(pluginDir, 'skills', 'literal-core');
+        await fs.mkdir(skillDir, { recursive: true });
+        const literalBody = [
+          '# Template syntax rules',
+          'Inspect {{timeoutMinutes}}, {{mergeRequestTitle}}, {{reviewPassPrompt}},',
+          '{{reviewScoringPrompt}} and {{inlineSkillsBlock}} as literal template expressions.',
+          'Read ${CLAUDE_SKILL_DIR}/rules.md and ${CLAUDE_PLUGIN_ROOT}/shared.md.',
+        ].join('\n');
+        await fs.writeFile(
+          path.join(skillDir, 'SKILL.md'),
+          '---\nname: literal-core\nuser-invocable: false\nmetadata:\n  review-always: true\n---\n' +
+            literalBody
+        );
+
+        for (const [id, fullPromptVariable] of [
+          ['review.pass.template', 'reviewPassPrompt'],
+          ['review.scoring.template', 'reviewScoringPrompt'],
+        ]) {
+          if (mode === 'disabled') {
+            await customization.updatePromptTemplate(id, { enabled: false });
+          } else if (!['default', 'error'].includes(mode)) {
+            let body = 'Before {{timeoutMinutes}}\n{{inlineSkillsBlock}}\nAfter';
+            if (mode === 'legacy') body = 'Legacy {{timeoutMinutes}}';
+            if (mode === 'full-prompt') body = `Before\n{{${fullPromptVariable}}}\nAfter`;
+            if (mode === 'combined') body += `\n{{${fullPromptVariable}}}`;
+            if (mode === 'combined-prompt-first') body = `{{${fullPromptVariable}}}\n${body}`;
+            if (mode === 'repeated-inline') body += '\n{{inlineSkillsBlock}}';
+            await customization.updatePromptTemplate(id, { draft: { body } });
+            await customization.publishPromptTemplate(id, 'Literal skill fixture');
+          }
+        }
+        if (mode === 'error') {
+          jest.spyOn(customization, 'renderPromptTemplate').mockImplementation(() => {
+            throw new Error('Local template rendering failure');
+          });
+        }
+        const storedTemplates = await fs.readFile(path.join(dataDir, 'prompt-templates.json'));
+        const customService = new GitLabReviewService(
+          {} as GitLabService,
+          customization,
+          new ReviewSkillCatalog(pluginDir)
+        );
+        const scoring = customService.getScoringSkillDelivery(provider);
+        const prompts = [
+          ...customService
+            .buildReviewPasses(context, undefined, undefined, provider)
+            .map(pass => pass.prompt),
+          customService.buildScoringPrompt(
+            context,
+            candidate,
+            undefined,
+            undefined,
+            scoring.inlineSkills
+          ),
+        ];
+        const expectedBody = literalBody
+          .split('${CLAUDE_SKILL_DIR}')
+          .join(skillDir)
+          .split('${CLAUDE_PLUGIN_ROOT}')
+          .join(pluginDir);
+        for (const prompt of prompts) {
+          expect(prompt.split('<skill name="literal-core">').length - 1).toBe(1);
+          expect(prompt.split(expectedBody).length - 1).toBe(1);
+          expect(prompt).not.toContain('${CLAUDE_SKILL_DIR}');
+          expect(prompt).not.toContain('${CLAUDE_PLUGIN_ROOT}');
+        }
+        expect(await fs.readFile(path.join(dataDir, 'prompt-templates.json'))).toEqual(
+          storedTemplates
+        );
+      });
+
       it.each(modes)(
         'delivers skills once with %s templates without changing publication',
         async mode => {
@@ -688,6 +777,33 @@ describe('GitLabReviewService', () => {
   });
 
   describe('parseReviewOutput', () => {
+    const finding = {
+      title: 'Actual bug',
+      body: 'Concrete evidence',
+      confidence: 95,
+      path: 'a.ts',
+    };
+
+    it.each(['json', ''])('skips unrelated records before a valid %s pass envelope', language => {
+      const output =
+        `\`\`\`${language}\n{"limit":0}\n\`\`\`\n` +
+        `\`\`\`${language}\n${JSON.stringify({ summary: 'Actual result', findings: [finding] })}\n\`\`\``;
+      expect(service.parseReviewOutput(output, 0, true)).toMatchObject({
+        summary: 'Actual result',
+        findings: [{ title: finding.title }],
+      });
+    });
+
+    it.each(['{}', '{', '[]', '{"summary":"Bad","findings":[{}]}'])(
+      'does not replace an invalid explicit pass result with a bare clean example: %s',
+      invalid => {
+        const output =
+          'Example:\n```\n{"summary":"Example","findings":[]}\n```\n' +
+          `Actual result:\n\`\`\`json\n${invalid}\n\`\`\``;
+        expect(() => service.parseReviewOutput(output, 0, true)).toThrow(/review/i);
+      }
+    );
+
     it('parses raw JSON before looking for code fences inside finding text', () => {
       const payload = {
         summary: 'Code sample',
@@ -919,6 +1035,20 @@ describe('GitLabReviewService', () => {
   });
 
   describe('parseScoredFinding', () => {
+    it.each(['json', ''])('skips unrelated records before a valid %s scorer envelope', language => {
+      const finding = {
+        title: 'Actual issue',
+        body: 'Verified evidence',
+        confidence: 95,
+        path: 'a.ts',
+        lineType: 'new' as const,
+      };
+      const output =
+        `\`\`\`${language}\n{"summary":"Example","findings":[]}\n\`\`\`\n` +
+        `\`\`\`${language}\n${JSON.stringify(finding)}\n\`\`\``;
+      expect(service.parseScoredFinding(output, finding, true)).toMatchObject(finding);
+    });
+
     it.each([
       '',
       'No issues',

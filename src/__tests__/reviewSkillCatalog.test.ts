@@ -141,10 +141,55 @@ describe('ReviewSkillCatalog', () => {
     ['user-invocable: false', false],
     ['user-invocable: false # Internal methodology only', false],
     ['user-invocable: "false"', false],
+    ['user-invocable: "false" # Internal methodology only', false],
+    ["user-invocable: 'false' # Internal methodology only", false],
+    ['user-invocable: "fal\\u0073e" # Escaped scalar', false],
+    ['user-invocable: "true" # Explicitly invocable', true],
+    ["user-invocable: 'true' # Explicitly invocable", true],
   ])('reads slash-command eligibility from %s', (field, expected) => {
     writeSkill(root, 'core', `name: core\n${field}`);
     expect(new ReviewSkillCatalog(root).getSkill('core')).toHaveProperty('userInvocable', expected);
   });
+
+  it('parses YAML quoting, literal hashes, block descriptions and commented metadata', () => {
+    const parsed = parseFrontmatter(
+      [
+        '---',
+        'name: "core" # Stable name',
+        'description: >-',
+        '  Review hashes and',
+        '  quoted values.',
+        'user-invocable: "false" # Internal only',
+        'metadata: # Matching rules',
+        '  review-always: true # Every stage',
+        '  review-globs: "src/#fixtures/**" # Hash is part of the path',
+        "  explanation: 'It''s # literal' # Outside comment",
+        '---',
+        'Unmodified body: {{timeoutMinutes}} and ${CLAUDE_SKILL_DIR}.',
+      ].join('\n')
+    );
+    expect(parsed.fields).toMatchObject({
+      name: 'core',
+      description: 'Review hashes and quoted values.',
+      'user-invocable': 'false',
+    });
+    expect(parsed.metadata).toEqual({
+      'review-always': 'true',
+      'review-globs': 'src/#fixtures/**',
+      explanation: "It's # literal",
+    });
+    expect(parsed.body).toBe('Unmodified body: {{timeoutMinutes}} and ${CLAUDE_SKILL_DIR}.');
+  });
+
+  it.each(['name: "unterminated', 'name: [unterminated', 'name: core\nname: repeated'])(
+    'reports invalid YAML as a configuration error while keeping inspection harmless: %s',
+    frontmatter => {
+      writeSkill(root, 'core', frontmatter);
+      const catalog = new ReviewSkillCatalog(root);
+      expect(() => catalog.assertUsable()).toThrow(/Review skill configuration error/);
+      expect(catalog.listSkills()).toEqual([]);
+    }
+  );
 
   it('reloads when a SKILL.md changes on disk', () => {
     writeSkill(root, 'core', 'name: core\ndescription: first');

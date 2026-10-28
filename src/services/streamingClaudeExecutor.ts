@@ -565,7 +565,10 @@ export class StreamingClaudeExecutor {
     if (!output.trim().startsWith('{') && !output.includes('```')) {
       return false;
     }
-    const parsed = parseReviewJsonPayload(output);
+    const parsed = parseReviewJsonPayload(
+      output,
+      payload => isReviewPassPayload(payload) || isReviewFindingPayload(payload)
+    );
     return isReviewPassPayload(parsed) || isReviewFindingPayload(parsed);
   }
 

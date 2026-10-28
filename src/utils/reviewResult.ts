@@ -35,20 +35,28 @@ function findClosingFence(text: string, start: number): number {
   return -1;
 }
 
-/** Parse raw JSON first, then legacy fenced envelopes (which can include explanatory prose). */
-export function parseReviewJsonPayload(output: string): JsonRecord | null {
+/** Prefer raw JSON, then explicit json fences; only use bare fences when no json fence exists. */
+export function parseReviewJsonPayload(
+  output: string,
+  validate?: (payload: unknown) => boolean
+): JsonRecord | null {
   const text = output.trim();
   if (!text) {
     return null;
   }
 
   try {
-    return asRecord(JSON.parse(text));
+    const record = asRecord(JSON.parse(text));
+    return record && (!validate || validate(record)) ? record : null;
   } catch {
     // Parse disjoint blocks once each, keeping both scan and total JSON parsing work linear.
-    const openingFencePattern = /```(?:json)?\s*/gi;
+    const openingFencePattern = /```(json)?\s*/gi;
+    let sawJsonFence = false;
+    let bareResult: JsonRecord | null = null;
     let openingFence: RegExpExecArray | null;
     while ((openingFence = openingFencePattern.exec(text)) !== null) {
+      const isJsonFence = Boolean(openingFence[1]);
+      sawJsonFence ||= isJsonFence;
       const contentStart = openingFence.index + openingFence[0].length;
       const closingFence = findClosingFence(text, contentStart);
       if (closingFence === -1) {
@@ -56,10 +64,20 @@ export function parseReviewJsonPayload(output: string): JsonRecord | null {
       }
       openingFencePattern.lastIndex = closingFence + 3;
       try {
-        return asRecord(JSON.parse(text.slice(contentStart, closingFence)));
+        const record = asRecord(JSON.parse(text.slice(contentStart, closingFence)));
+        if (!record || (validate && !validate(record))) {
+          continue;
+        }
+        if (isJsonFence) {
+          return record;
+        }
+        bareResult ??= record;
       } catch {
         // Continue after this block instead of retrying combinations of earlier fences.
       }
+    }
+    if (!sawJsonFence && bareResult) {
+      return bareResult;
     }
   }
 
