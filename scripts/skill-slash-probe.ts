@@ -12,13 +12,10 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { createClaudeExecutionEnvironment } from '../src/utils/providerEnvironment';
 
-const env = createClaudeExecutionEnvironment(
-  process.env.ANTHROPIC_AUTH_TOKEN || '',
-  process.env.ANTHROPIC_BASE_URL || ''
-);
 const mode = process.env.PROBE_MODE || 'slash';
 const prompt = process.env.PROBE_PROMPT_FILE
   ? fs.readFileSync(process.env.PROBE_PROMPT_FILE, 'utf8').trimEnd()
@@ -31,8 +28,15 @@ function short(value: unknown, n = 500): string {
 }
 
 (async () => {
+  const sessionId = randomUUID();
+  const env = createClaudeExecutionEnvironment(
+    process.env.ANTHROPIC_AUTH_TOKEN || '',
+    process.env.ANTHROPIC_BASE_URL || '',
+    sessionId
+  );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const options: any = {
+    sessionId,
     cwd: process.cwd(),
     model: process.env.CLAUDE_DEFAULT_MODEL,
     permissionMode: 'bypassPermissions',

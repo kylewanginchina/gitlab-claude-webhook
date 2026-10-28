@@ -12,7 +12,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "format:check": "prettier --check \"src/**/*.{ts,js}\"",
     "test:coverage": "jest --coverage"
   },

@@ -15,19 +15,22 @@
  */
 import 'dotenv/config';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { REVIEW_PASS_OUTPUT_SCHEMA } from '../src/services/gitlabReviewService';
 import { createClaudeExecutionEnvironment } from '../src/utils/providerEnvironment';
 
 const pluginPath = path.resolve(__dirname, '..', 'review-skills');
-const env = createClaudeExecutionEnvironment(
-  process.env.ANTHROPIC_AUTH_TOKEN || '',
-  process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
-);
 const model = process.env.CLAUDE_DEFAULT_MODEL;
 const skillCommand = process.env.SMOKE_SKILL_COMMAND || '/gitlab-review:mr-review-core';
 
 async function run(label: string, maxTurns: number) {
+  const sessionId = randomUUID();
+  const env = createClaudeExecutionEnvironment(
+    process.env.ANTHROPIC_AUTH_TOKEN || '',
+    process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+    sessionId
+  );
   console.log(`\n=== ${label} (maxTurns=${maxTurns}) ===`);
   const started = Date.now();
   const q = query({
@@ -36,6 +39,7 @@ async function run(label: string, maxTurns: number) {
       'Review the most recent commit in this repository (git show HEAD) as if it were a merge request. ' +
       'Return the structured result.',
     options: {
+      sessionId,
       cwd: process.env.SMOKE_CWD || process.cwd(),
       model,
       permissionMode: 'bypassPermissions',

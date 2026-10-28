@@ -1,18 +1,22 @@
 /* eslint-disable no-console */
 import 'dotenv/config';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { createClaudeExecutionEnvironment } from '../src/utils/providerEnvironment';
-const env = createClaudeExecutionEnvironment(
-  process.env.ANTHROPIC_AUTH_TOKEN || '',
-  process.env.ANTHROPIC_BASE_URL || ''
-);
 const skills = (process.env.SMOKE_SKILLS || 'mr-review-core').split(',');
 (async () => {
+  const sessionId = randomUUID();
+  const env = createClaudeExecutionEnvironment(
+    process.env.ANTHROPIC_AUTH_TOKEN || '',
+    process.env.ANTHROPIC_BASE_URL || '',
+    sessionId
+  );
   const q = query({
     prompt:
       'List every skill name available to you via the Skill tool (just the names, one per line). Then invoke the skill whose name contains "mr-review-core" and reply with the first heading of its content. Do not read any files.',
     options: {
+      sessionId,
       cwd: process.cwd(),
       model: process.env.CLAUDE_DEFAULT_MODEL,
       permissionMode: 'bypassPermissions',
