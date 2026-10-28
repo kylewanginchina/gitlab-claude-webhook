@@ -2008,6 +2008,100 @@ describe('runtime config execution paths', () => {
     );
   });
 
+  it.each(['discussion', 'no discussion', 'unavailable discussion'] as const)(
+    'publishes code-review summaries with %s while retaining inline findings and SHA markers',
+    async route => {
+      jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+      const processor = new EventProcessor();
+      const gitlab = processor['gitlabService'];
+      const reviewService = processor['gitlabReviewService'];
+      const reviewContext = createReviewContext();
+      const runContext = processor['createRunContext']();
+      runContext.currentDiscussionId = route === 'no discussion' ? null : 'command-discussion';
+      const discussions = [{ id: 'command-discussion', notes: [{ body: '@claude /code-review' }] }];
+      jest.spyOn(gitlab, 'getMergeRequestDiscussions').mockResolvedValue(discussions);
+      jest.spyOn(gitlab, 'getMergeRequest').mockResolvedValue({
+        ...createMergeRequestEvent().merge_request,
+        sha: reviewContext.headSha,
+      });
+      const addReply = jest
+        .spyOn(gitlab, 'addMergeRequestDiscussionReply')
+        .mockImplementation(async (_project, _mr, _discussion, body) => {
+          if (route === 'unavailable discussion') throw new Error('Discussion no longer exists');
+          discussions[0].notes.push({ body });
+          return { id: 303 };
+        });
+      const addComment = jest
+        .spyOn(gitlab, 'addMergeRequestComment')
+        .mockImplementation(async (_project, _mr, body) => {
+          discussions.push({ id: 'summary-comment', notes: [{ body }] });
+        });
+      const addInline = jest
+        .spyOn(gitlab, 'createMergeRequestDiscussion')
+        .mockResolvedValue({ id: 'inline-discussion' });
+      jest.spyOn(reviewService, 'prepareReviewContext').mockResolvedValue(reviewContext);
+      jest
+        .spyOn(reviewService, 'buildReviewPasses')
+        .mockReturnValue([
+          { id: 'bug-scan', label: 'Bug scan', prompt: 'Review the diff', skillNames: [] },
+        ]);
+      const finding: ReviewFinding = {
+        title: '[P2] Confirmed regression',
+        body: 'A changed guard causes the failure.',
+        confidence: 95,
+        path: 'src/a.ts',
+        line: 10,
+        lineType: 'new',
+      };
+      processor['executeReviewPass'] = jest.fn().mockResolvedValue({
+        passId: 'bug-scan',
+        label: 'Bug scan',
+        summary: 'One candidate',
+        findings: [finding],
+      });
+      processor['executeReviewScore'] = jest.fn().mockResolvedValue(finding);
+      const event =
+        route === 'no discussion' ? createMergeRequestEvent() : createMergeRequestNoteEvent();
+
+      await processor['executeCodeReview'](
+        event,
+        { command: '/code-review', context: 'MR #2', provider: 'claude' },
+        'main',
+        '/tmp/project',
+        createCallback(),
+        runContext
+      );
+
+      if (route === 'discussion') {
+        expect(addReply).toHaveBeenCalledTimes(1);
+        expect(addReply).toHaveBeenCalledWith(1, 2, 'command-discussion', expect.any(String));
+        expect(addComment).not.toHaveBeenCalled();
+      } else {
+        expect(addReply).toHaveBeenCalledTimes(route === 'no discussion' ? 0 : 1);
+        expect(addComment).toHaveBeenCalledTimes(1);
+      }
+      const summaries = discussions
+        .flatMap(discussion => discussion.notes)
+        .filter(note => note.body.includes('### Code review'));
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].body).toContain('<!-- gitlab-claude-code-review:head-sha -->');
+      expect(summaries[0].body).toContain(finding.title);
+      expect(addInline).toHaveBeenCalledTimes(1);
+      expect(addInline).toHaveBeenCalledWith(1, 2, expect.stringContaining(finding.title), {
+        position: {
+          base_sha: 'base-sha',
+          start_sha: 'start-sha',
+          head_sha: 'head-sha',
+          position_type: 'text',
+          old_path: 'src/a.ts',
+          new_path: 'src/a.ts',
+          new_line: '10',
+        },
+      });
+      await expect(reviewService.hasExistingReview(1, 2, 'head-sha')).resolves.toBe(true);
+    }
+  );
+
   it('uses runtime review minConfidence when deciding which scored findings remain', async () => {
     const runtimeConfig = createRuntimeConfig({
       review: {

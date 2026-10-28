@@ -130,6 +130,12 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 此模式的执行 provider 由运行时配置 `REVIEW_DEFAULT_PROVIDER` 决定，而不是由 mention 决定。可选值为 `claude-multipass` 与 `codex-multipass`。
 
+评论触发的审查会把结果汇总作为原讨论线程中的新回复发布，与处理进度保持在同一线程；具体问题仍发布到对应代码行。没有原线程或线程回复失败时，汇总发布为 MR 顶层评论。汇总中的提交标记仍用于跳过重复审查。
+
+`REVIEW_ENABLED` 只控制是否允许执行审查命令，不会自动为新 MR 或每次推送创建审查任务。当前常用入口是在 MR 评论中发送 `@claude /code-review` 或 `@codex /code-review`，并在项目 Webhook 中启用 Comments（Note）事件。
+
+MR 事件分支目前读取 `event.merge_request.description`，而 GitLab 标准 Merge Request Webhook 把 MR 信息放在 `object_attributes`；服务尚未归一化这两种结构。因此仅在 MR 描述中保留命令并启用 Merge request events，还不能作为可直接使用的自动审查入口。需要无人值守触发时，可由外部 CI 或机器人在 MR 上发布上述指令评论，再经 Comments Webhook 进入正常审查流程。
+
 #### 内置审查 Skill
 
 `review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` 选项加载插件，并在提示词开头以 `/gitlab-review:mr-review-core` 斜杠命令显式展开核心技能（SDK 只展开提示词开头的第一个命令，因此其余匹配技能以内联文本注入）；Codex 没有 skill 机制，全部 SKILL.md 正文内联到提示词中。两种方式都不依赖模型自行调用 Skill 工具。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。

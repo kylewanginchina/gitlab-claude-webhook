@@ -881,7 +881,9 @@ export class EventProcessor {
       finalReview.summary = partialCoverageSummary;
     }
 
-    await this.gitlabReviewService.postReview(event, reviewContext, finalReview);
+    await this.gitlabReviewService.postReview(event, reviewContext, finalReview, body =>
+      this.postComment(event, body, runContext)
+    );
     await this.updateProgressComment(
       event,
       runContext,

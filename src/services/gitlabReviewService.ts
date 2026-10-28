@@ -612,18 +612,23 @@ export class GitLabReviewService {
   public async postReview(
     event: GitLabWebhookEvent,
     context: PreparedReviewContext,
-    review: ParsedReviewResult
+    review: ParsedReviewResult,
+    publishSummary?: (body: string) => Promise<void>
   ): Promise<void> {
     if (!event.merge_request) {
       throw new Error('GitLab code review is only supported for merge requests');
     }
 
     const summaryComment = this.buildSummaryComment(event, context, review);
-    await this.gitlabService.addMergeRequestComment(
-      event.project.id,
-      event.merge_request.iid,
-      summaryComment
-    );
+    if (publishSummary) {
+      await publishSummary(summaryComment);
+    } else {
+      await this.gitlabService.addMergeRequestComment(
+        event.project.id,
+        event.merge_request.iid,
+        summaryComment
+      );
+    }
 
     for (const finding of review.findings) {
       try {
