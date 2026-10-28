@@ -675,15 +675,28 @@ export class GitLabReviewService {
     variables: Record<string, unknown>,
     fallback: string
   ): string {
+    let prompt: string;
     try {
-      return this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
+      prompt = this.reviewCustomizationService.renderPromptTemplate(id, variables, fallback);
     } catch (error) {
       logger.warn('Falling back to built-in review prompt template', {
         templateId: id,
         error: error instanceof Error ? error.message : String(error),
       });
-      return fallback;
+      prompt = fallback;
     }
+
+    const inlineSkillsBlock = variables.inlineSkillsBlock;
+    if (typeof inlineSkillsBlock !== 'string' || !inlineSkillsBlock) {
+      return prompt;
+    }
+
+    // Published shells may predate the placeholder or include it alongside the full prompt.
+    // Keep the first rendered block in its chosen position and deliver it exactly once.
+    const [before, ...after] = prompt.split(inlineSkillsBlock);
+    return after.length > 0
+      ? before + inlineSkillsBlock + after.join('')
+      : `${prompt}\n\n${inlineSkillsBlock}`;
   }
 
   public buildIncompleteReviewMessage(

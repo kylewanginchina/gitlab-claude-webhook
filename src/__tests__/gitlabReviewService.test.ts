@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
+import { runtimeConfigService } from '../utils/runtimeConfig';
 
 describe('GitLabReviewService', () => {
   const service = new GitLabReviewService({} as any);
@@ -210,7 +211,7 @@ describe('GitLabReviewService', () => {
         wrapUpMinutes: 2,
       });
 
-      expect(passes[0]?.prompt).toBe('Pass CLAUDE.md compliance budget 13/10/2.');
+      expect(passes[0]?.prompt).toContain('Pass CLAUDE.md compliance budget 13/10/2.');
     });
 
     it('keeps the static-inspection policy when disabled pass and scoring templates use built-in fallbacks', async () => {
@@ -235,6 +236,178 @@ describe('GitLabReviewService', () => {
 
       expect(passPrompt).toContain(staticInspectionPolicy);
       expect(scoringPrompt).toContain(staticInspectionPolicy);
+    });
+  });
+
+  describe('inline skills in published review templates', () => {
+    const dataDirs: string[] = [];
+    const candidate: ReviewFinding = {
+      title: 'Potential regression',
+      body: 'A concrete state transition can fail.',
+      confidence: 80,
+      path: 'src/a.ts',
+      line: 10,
+      lineType: 'new',
+    };
+    const languageInstruction = '请使用简体中文撰写所有审查结论。';
+    const modes = [
+      'legacy',
+      'default',
+      'inline',
+      'full-prompt',
+      'combined',
+      'combined-prompt-first',
+      'repeated-inline',
+      'disabled',
+      'skills-off',
+      'inline-skills-off',
+    ] as const;
+
+    afterEach(async () => {
+      jest.restoreAllMocks();
+      await Promise.all(dataDirs.splice(0).map(dataDir => fs.rm(dataDir, { recursive: true })));
+    });
+
+    describe.each(['claude', 'codex'] as const)('%s', provider => {
+      it.each(modes)(
+        'delivers skills once with %s templates without changing publication',
+        async mode => {
+          const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-inline-templates-'));
+          dataDirs.push(dataDir);
+          const customization = new ReviewCustomizationService({ dataDir });
+          await customization.initialize();
+          const skillsEnabled = !mode.endsWith('skills-off');
+
+          for (const [id, fullPromptVariable] of [
+            ['review.pass.template', 'reviewPassPrompt'],
+            ['review.scoring.template', 'reviewScoringPrompt'],
+          ]) {
+            if (mode === 'default') {
+              continue;
+            }
+            const defaultBody = customization.getPromptTemplate(id).versions[0]!.body;
+            let body = defaultBody.replace('{{inlineSkillsBlock}}', '');
+            if (mode === 'inline' || mode === 'inline-skills-off') {
+              body = 'Before skills\n{{ inlineSkillsBlock }}\nAfter skills';
+            } else if (mode === 'full-prompt') {
+              body = `Before prompt\n{{${fullPromptVariable}}}\nAfter prompt`;
+            } else if (mode === 'combined') {
+              body = `Before skills\n{{inlineSkillsBlock}}\nAfter skills\n{{${fullPromptVariable}}}`;
+            } else if (mode === 'combined-prompt-first') {
+              body = `Before prompt\n{{${fullPromptVariable}}}\nAfter prompt\n{{inlineSkillsBlock}}`;
+            } else if (mode === 'repeated-inline') {
+              body = 'Before skills\n{{inlineSkillsBlock}}\nAfter skills\n{{inlineSkillsBlock}}';
+            }
+            await customization.updatePromptTemplate(id, {
+              draft: { body: `${body}\n${languageInstruction}` },
+            });
+            await customization.publishPromptTemplate(id, 'Custom language v2');
+            if (mode === 'disabled') {
+              await customization.updatePromptTemplate(id, { enabled: false });
+            }
+          }
+
+          const publishedTemplates = customization.listPromptTemplates();
+          const templateFile = path.join(dataDir, 'prompt-templates.json');
+          const storedTemplates = await fs.readFile(templateFile, 'utf8');
+          const reloaded = new ReviewCustomizationService({ dataDir });
+          await reloaded.initialize();
+
+          if (!skillsEnabled) {
+            const config = runtimeConfigService.getConfig();
+            jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue({
+              ...config,
+              review: { ...config.review, useBuiltinSkills: false },
+            });
+          }
+
+          const customService = new GitLabReviewService({} as any, reloaded);
+          const pass = customService
+            .buildReviewPasses(context, undefined, undefined, provider)
+            .find(item => item.id === 'bug-scan')!;
+          const scoringDelivery = customService.getScoringSkillDelivery(provider);
+          const scoringPrompt = customService.buildScoringPrompt(
+            context,
+            candidate,
+            undefined,
+            undefined,
+            scoringDelivery.inlineSkills
+          );
+          const expectedPassSkills = !skillsEnabled
+            ? []
+            : provider === 'claude'
+              ? ['security-review', 'silent-failure-review', 'typescript-review']
+              : ['mr-review-core', 'security-review', 'silent-failure-review', 'typescript-review'];
+          for (const [skillName, heading] of Object.entries({
+            'mr-review-core': '# Merge request review methodology',
+            'security-review': '# Security review of a merge request',
+            'silent-failure-review': '# Silent failure review',
+            'typescript-review': '# TypeScript and JavaScript review notes',
+          })) {
+            const marker = `<skill name="${skillName}">`;
+            const scoringCount =
+              skillsEnabled && provider === 'codex' && skillName === 'mr-review-core' ? 1 : 0;
+            const passCount = expectedPassSkills.includes(skillName) ? 1 : 0;
+            expect(scoringPrompt.split(marker).length - 1).toBe(scoringCount);
+            expect(scoringPrompt.split(heading).length - 1).toBe(scoringCount);
+            expect(pass.prompt.split(marker).length - 1).toBe(passCount);
+            expect(pass.prompt.split(heading).length - 1).toBe(passCount);
+          }
+          const expectedCommand =
+            skillsEnabled && provider === 'claude' ? '/gitlab-review:mr-review-core' : undefined;
+          expect(pass.skillCommand).toBe(expectedCommand);
+          expect(scoringDelivery.skillCommand).toBe(expectedCommand);
+          expect(pass.skillNames).toEqual(
+            !skillsEnabled
+              ? []
+              : ['mr-review-core', 'security-review', 'silent-failure-review', 'typescript-review']
+          );
+
+          for (const prompt of [pass.prompt, scoringPrompt]) {
+            if (mode === 'disabled' || mode === 'default') {
+              expect(prompt).not.toContain(languageInstruction);
+            } else {
+              expect(prompt).toContain(languageInstruction);
+            }
+            if (
+              ['inline', 'combined', 'repeated-inline'].includes(mode) &&
+              prompt.includes('<skill name=')
+            ) {
+              expect(prompt.indexOf('Before skills')).toBeLessThan(prompt.indexOf('<skill name='));
+              expect(prompt.indexOf('</skill>')).toBeLessThan(prompt.indexOf('After skills'));
+            }
+            if (
+              ['full-prompt', 'combined-prompt-first'].includes(mode) &&
+              prompt.includes('<skill name=')
+            ) {
+              expect(prompt.indexOf('Before prompt')).toBeLessThan(prompt.indexOf('<skill name='));
+              expect(prompt.indexOf('</skill>')).toBeLessThan(prompt.indexOf('After prompt'));
+            }
+            if (mode === 'legacy' && prompt.includes('<skill name=')) {
+              expect(prompt.indexOf(languageInstruction)).toBeLessThan(
+                prompt.indexOf('<skill name=')
+              );
+            }
+          }
+          if (mode === 'default') {
+            expect(pass.prompt.indexOf('</skill>')).toBeLessThan(
+              pass.prompt.indexOf('Do not modify files')
+            );
+            if (provider === 'codex') {
+              expect(scoringPrompt.indexOf('</skill>')).toBeLessThan(
+                scoringPrompt.indexOf('Use this rubric verbatim:')
+              );
+            }
+          }
+          for (const id of ['review.pass.template', 'review.scoring.template']) {
+            const published = reloaded.getPromptTemplate(id);
+            expect(published.currentVersion).toBe(mode === 'default' ? 1 : 2);
+            expect(published.versions).toHaveLength(mode === 'default' ? 1 : 2);
+          }
+          expect(reloaded.listPromptTemplates()).toEqual(publishedTemplates);
+          expect(await fs.readFile(templateFile, 'utf8')).toBe(storedTemplates);
+        }
+      );
     });
   });
 
