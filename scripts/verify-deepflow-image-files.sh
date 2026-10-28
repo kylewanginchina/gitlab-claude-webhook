@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DOCKERFILE="$ROOT_DIR/Dockerfile.deepflow"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.deepflow.yml"
 
@@ -112,5 +112,18 @@ require_text "$COMPOSE_FILE" "gitlab-claude-webhook-deepflow"
 require_text "$COMPOSE_FILE" "DEEPFLOW_RUSTUP_INIT_URL"
 require_text "$COMPOSE_FILE" "DEEPFLOW_RUSTUP_DIST_SERVER"
 require_text "$COMPOSE_FILE" "DEEPFLOW_RUSTUP_UPDATE_ROOT"
+
+# Review skills must be copied into this image and present in the build context.
+require_line "$ROOT_DIR/Dockerfile.deepflow" 'COPY review-skills/ ./review-skills/'
+for asset in review-skills/.claude-plugin/plugin.json review-skills/skills/mr-review-core/SKILL.md; do
+  if [[ ! -s "$ROOT_DIR/$asset" ]]; then
+    echo "Missing or empty review skill asset: $asset" >&2
+    exit 1
+  fi
+done
+require_text "$ROOT_DIR/review-skills/.claude-plugin/plugin.json" '"name": "gitlab-review"'
+require_line "$ROOT_DIR/review-skills/skills/mr-review-core/SKILL.md" 'name: mr-review-core'
+require_text "$ROOT_DIR/review-skills/skills/mr-review-core/SKILL.md" 'review-always: "true"'
+require_line "$ROOT_DIR/review-skills/skills/mr-review-core/SKILL.md" '# Merge request review methodology'
 
 echo "DeepFlow image files look structurally valid."

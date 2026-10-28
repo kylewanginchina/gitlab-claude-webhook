@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { runtimeConfigService } from '../utils/runtimeConfig';
+import { ReviewSkillCatalog } from '../services/reviewSkillCatalog';
 
 describe('GitLabReviewService', () => {
   const service = new GitLabReviewService({} as any);
@@ -31,6 +32,144 @@ describe('GitLabReviewService', () => {
   };
 
   describe('buildReviewPasses', () => {
+    describe.each(['claude', 'codex'] as const)('asset validation for %s', provider => {
+      afterEach(() => jest.restoreAllMocks());
+
+      it.each([
+        'missing',
+        'empty',
+        'missing-file',
+        'unreadable',
+        'empty-body',
+        'invalid-frontmatter',
+        'invalid-manifest',
+        'nameless-manifest',
+      ])('rejects %s assets for passes and scoring', async variant => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'review-invalid-assets-'));
+        try {
+          if (variant !== 'missing') await fs.mkdir(path.join(root, 'skills'));
+          if (!['missing', 'empty'].includes(variant)) {
+            const skillDir = path.join(root, 'skills', 'custom-core');
+            await fs.mkdir(skillDir);
+            const file = path.join(skillDir, 'SKILL.md');
+            if (variant === 'unreadable') await fs.mkdir(file);
+            else if (variant !== 'missing-file')
+              await fs.writeFile(
+                file,
+                `---\nname: custom-core\ndescription: Custom core\nmetadata:\n  review-always: "true"\n---\n${variant === 'empty-body' ? '' : 'Custom methodology'}`
+              );
+          }
+          if (variant === 'invalid-frontmatter') {
+            await fs.writeFile(
+              path.join(root, 'skills', 'custom-core', 'SKILL.md'),
+              '---\nname: custom-core\nBroken header without closing delimiter'
+            );
+          }
+          if (variant === 'invalid-manifest' || variant === 'nameless-manifest') {
+            await fs.mkdir(path.join(root, '.claude-plugin'));
+            await fs.writeFile(
+              path.join(root, '.claude-plugin', 'plugin.json'),
+              variant === 'invalid-manifest' ? '{bad json' : '{"name": ""}'
+            );
+          }
+          const customService = new GitLabReviewService(
+            {} as any,
+            undefined,
+            new ReviewSkillCatalog(root)
+          );
+          for (const run of [
+            () => customService.buildReviewPasses(context, undefined, undefined, provider),
+            () => customService.getScoringSkillDelivery(provider),
+          ]) {
+            expect(run).toThrow(/REVIEW_SKILLS_DIR/);
+            expect(run).toThrow(root);
+          }
+        } finally {
+          await fs.rm(root, { recursive: true, force: true });
+        }
+      });
+
+      it('allows disabled builtins without any assets', () => {
+        const config = runtimeConfigService.getConfig();
+        jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue({
+          ...config,
+          review: { ...config.review, useBuiltinSkills: false },
+        });
+        const customService = new GitLabReviewService(
+          {} as any,
+          undefined,
+          new ReviewSkillCatalog('/missing-disabled-assets')
+        );
+        expect(
+          customService
+            .buildReviewPasses(context, undefined, undefined, provider)
+            .every(pass => pass.skillNames.length === 0)
+        ).toBe(true);
+        expect(customService.getScoringSkillDelivery(provider)).toEqual({
+          skillNames: [],
+          inlineSkills: [],
+        });
+      });
+
+      it('supports custom plugins with optional always-on metadata and no matching pass', async () => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'review-optional-always-'));
+        try {
+          const skillDir = path.join(root, 'skills', 'go-only');
+          await fs.mkdir(skillDir, { recursive: true });
+          await fs.writeFile(
+            path.join(skillDir, 'SKILL.md'),
+            '---\nname: go-only\ndescription: Go notes\nmetadata:\n  review-languages: go\n---\nGo methodology'
+          );
+          const customService = new GitLabReviewService(
+            {} as any,
+            undefined,
+            new ReviewSkillCatalog(root)
+          );
+          expect(
+            customService
+              .buildReviewPasses(context, undefined, undefined, provider)
+              .every(pass => pass.skillNames.length === 0)
+          ).toBe(true);
+          expect(customService.getScoringSkillDelivery(provider)).toEqual({
+            skillNames: [],
+            inlineSkills: [],
+          });
+        } finally {
+          await fs.rm(root, { recursive: true, force: true });
+        }
+      });
+
+      it('keeps manifest-less custom core naming for passes and scoring', async () => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'review-custom-assets-'));
+        try {
+          const skillDir = path.join(root, 'skills', 'custom-core');
+          await fs.mkdir(skillDir, { recursive: true });
+          await fs.writeFile(
+            path.join(skillDir, 'SKILL.md'),
+            '---\nname: custom-core\ndescription: Custom core\nmetadata:\n  review-always: "true"\n---\nCustom methodology'
+          );
+          const customService = new GitLabReviewService(
+            {} as any,
+            undefined,
+            new ReviewSkillCatalog(root)
+          );
+          const pass = customService.buildReviewPasses(context, undefined, undefined, provider)[0];
+          const scoring = customService.getScoringSkillDelivery(provider);
+          expect(pass.skillNames).toEqual(['custom-core']);
+          expect(scoring.skillNames).toEqual(['custom-core']);
+          if (provider === 'claude') {
+            expect(pass.skillCommand).toBe(`/${path.basename(root)}:custom-core`);
+            expect(scoring.skillCommand).toBe(pass.skillCommand);
+          } else {
+            expect(pass.prompt).toContain('Custom methodology');
+            expect(scoring.inlineSkills[0].body).toBe('Custom methodology');
+          }
+        } finally {
+          await fs.rm(root, { recursive: true, force: true });
+        }
+      });
+    });
+
     it('should create multiple review passes and include user focus', () => {
       const passes = service.buildReviewPasses(context, 'focus on auth');
 

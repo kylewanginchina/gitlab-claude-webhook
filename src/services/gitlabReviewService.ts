@@ -282,6 +282,7 @@ export class GitLabReviewService {
     provider: 'claude' | 'codex' = 'claude'
   ): ReviewPassDefinition[] {
     const useBuiltinSkills = this.getReviewConfig().useBuiltinSkills !== false;
+    if (useBuiltinSkills) this.reviewSkillCatalog.assertUsable();
 
     return this.getReviewPassTemplates().map(template => {
       const adminSkills = this.getMatchingSkills(context, template.id, provider);
@@ -312,6 +313,7 @@ export class GitLabReviewService {
     if (this.getReviewConfig().useBuiltinSkills === false) {
       return { skillNames: [], inlineSkills: [] };
     }
+    this.reviewSkillCatalog.assertUsable();
     return this.planSkillDelivery(this.reviewSkillCatalog.getAlwaysSkills(), provider);
   }
 

@@ -1,7 +1,12 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { ReviewSkillCatalog, matchesGlob, parseFrontmatter } from '../services/reviewSkillCatalog';
+import {
+  ReviewSkillCatalog,
+  matchesGlob,
+  parseFrontmatter,
+  resolveDefaultReviewSkillsDir,
+} from '../services/reviewSkillCatalog';
 
 function writeSkill(root: string, name: string, frontmatter: string, body = 'Body text'): void {
   const dir = path.join(root, 'skills', name);
@@ -18,6 +23,35 @@ describe('ReviewSkillCatalog', () => {
 
   afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('resolves relative constructor paths once before the SDK changes its cwd', () => {
+    const serviceCwd = process.cwd();
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(serviceCwd);
+    try {
+      const catalog = new ReviewSkillCatalog('review-skills');
+      cwdSpy.mockReturnValue(root);
+      expect(catalog.getPluginDir()).toBe(path.join(serviceCwd, 'review-skills'));
+      expect(catalog.getSkillsDir()).toBe(path.join(serviceCwd, 'review-skills'));
+      expect(catalog.getAlwaysSkills().map(skill => skill.name)).toContain('mr-review-core');
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
+  it('keeps an invalid explicit override instead of falling back to bundled assets', () => {
+    const previous = process.env.REVIEW_SKILLS_DIR;
+    try {
+      process.env.REVIEW_SKILLS_DIR = 'missing-custom-review-skills';
+      const resolved = resolveDefaultReviewSkillsDir();
+      expect(resolved).toBe(path.resolve('missing-custom-review-skills'));
+      const catalog = new ReviewSkillCatalog(resolved);
+      expect(catalog.isAvailable()).toBe(false);
+      expect(catalog.listSkills()).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.REVIEW_SKILLS_DIR;
+      else process.env.REVIEW_SKILLS_DIR = previous;
+    }
   });
 
   it('parses frontmatter scalars and nested metadata', () => {

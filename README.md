@@ -134,6 +134,8 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 `review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` 选项加载插件，并在提示词开头以 `/gitlab-review:mr-review-core` 斜杠命令显式展开核心技能（SDK 只展开提示词开头的第一个命令，因此其余匹配技能以内联文本注入）；Codex 没有 skill 机制，全部 SKILL.md 正文内联到提示词中。两种方式都不依赖模型自行调用 Skill 工具。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。
 
+`REVIEW_SKILLS_DIR` 指向包含 `skills/` 的插件根目录；相对路径在服务启动时按工作目录解析一次，不随 SDK 的 MR 检出目录变化。显式配置的路径无效时不会回退到仓库技能。启用内置技能时，目录缺失、技能文件不可读或正文为空、已有插件清单无效等配置错误会使 Claude/Codex 的审查与评分阶段失败，并提示修复路径；设置 `REVIEW_USE_BUILTIN_SKILLS=false` 后无需技能资产。自定义插件可省略 `.claude-plugin/plugin.json`（命令命名空间使用目录名），也可只提供按语言或 pass 匹配的技能，无需指定 `review-always`。Compose 将该变量传入容器，默认 `/app/review-skills`；覆盖时应填写容器内可读的路径，外部技能目录需自行挂载。
+
 ## 处理流程
 
 1. 验证 GitLab Webhook 签名。
@@ -172,7 +174,7 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 | Codex      | `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODEX_DEFAULT_MODEL`、`CODEX_DEFAULT_TIMEOUT_MINUTES`            | Codex provider；默认超时 30 分钟  |
 | GitLab     | `GITLAB_BASE_URL`、`GITLAB_TOKEN`                                                                      | GitLab 实例与 API Token           |
 | Webhook    | `WEBHOOK_SECRET`、`PORT`、`WEBHOOK_TASK_CONCURRENCY`                                                   | 默认端口 3000、全局并发 2         |
-| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`、`REVIEW_USE_BUILTIN_SKILLS`、`REVIEW_STRUCTURED_OUTPUT`、`REVIEW_PASS_MAX_TURNS`、`REVIEW_SCORING_MAX_TURNS` | 默认命令为 `/code-review`；默认启用内置 skill 与结构化输出；轮次上限默认 `0`（不限制） |
+| Review     | `REVIEW_ENABLED`、`REVIEW_DEFAULT_PROVIDER`、`REVIEW_ALLOWED_COMMANDS`、`REVIEW_SKILLS_DIR`、`REVIEW_USE_BUILTIN_SKILLS`、`REVIEW_STRUCTURED_OUTPUT`、`REVIEW_PASS_MAX_TURNS`、`REVIEW_SCORING_MAX_TURNS` | 默认命令为 `/code-review`；默认启用内置 skill 与结构化输出；轮次上限默认 `0`（不限制） |
 | 管理与存储 | `ADMIN_TOKEN`、`DATA_DIR`                                                                              | 管理认证与运行时数据目录          |
 | 工作与日志 | `WORK_DIR`、`LOG_LEVEL`                                                                                | 临时工作目录与日志级别            |
 

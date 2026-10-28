@@ -170,6 +170,26 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     });
   });
 
+  it('passes an absolute plugin path while the SDK works in the MR checkout', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
+    const executor = new StreamingClaudeExecutor(
+      reviewCustomizationService,
+      new ReviewSkillCatalog(path.relative(process.cwd(), REPO_SKILLS_DIR))
+    );
+    const result = await executor.executeWithStreaming(
+      'Review',
+      '/tmp/different-mr-checkout',
+      createReviewContext(),
+      createCallback()
+    );
+    expect(result.success).toBe(true);
+    expect(mockQuery.mock.calls[0][0].options.cwd).toBe('/tmp/different-mr-checkout');
+    expect(mockQuery.mock.calls[0][0].options.plugins).toEqual([
+      { type: 'local', path: REPO_SKILLS_DIR },
+    ]);
+  });
+
   it('keeps structured findings containing validation-like text without another SDK call', async () => {
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
     const structured = {
@@ -350,7 +370,7 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     expect(options.maxTurns).toBeUndefined();
   });
 
-  it('omits plugins and the skill command when built-in skills are disabled or unavailable', async () => {
+  it('omits plugins and the skill command when built-in skills are disabled', async () => {
     jest
       .spyOn(runtimeConfigService, 'getConfig')
       .mockReturnValue(createRuntimeConfig({ useBuiltinSkills: false, structuredOutput: false }));
@@ -358,7 +378,7 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
 
     const executor = new StreamingClaudeExecutor(
       reviewCustomizationService,
-      new ReviewSkillCatalog(REPO_SKILLS_DIR)
+      new ReviewSkillCatalog('/missing-disabled-review-assets')
     );
     await executor.executeWithStreaming(
       'Review',
@@ -371,7 +391,7 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
       createCallback()
     );
 
-    let { prompt, options } = mockQuery.mock.calls[0][0];
+    const { prompt, options } = mockQuery.mock.calls[0][0];
     // Without the plugin the command would reach the model as literal text, so it is dropped.
     expect(prompt.startsWith('/')).toBe(false);
     expect(options.plugins).toBeUndefined();
@@ -379,15 +399,16 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
     expect(options.outputFormat).toBeUndefined();
     expect(options.settingSources).toEqual(['project']);
+  });
 
-    mockQuery.mockClear();
+  it('fails before calling the SDK when enabled skill assets are missing', async () => {
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
     const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-skills-'));
     const noSkills = new StreamingClaudeExecutor(
       reviewCustomizationService,
       new ReviewSkillCatalog(emptyDir)
     );
-    await noSkills.executeWithStreaming(
+    const missingResult = await noSkills.executeWithStreaming(
       'Review',
       '/tmp/project',
       createReviewContext({
@@ -396,11 +417,39 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
       }),
       createCallback()
     );
-    ({ prompt, options } = mockQuery.mock.calls[0][0]);
-    expect(prompt.startsWith('/')).toBe(false);
-    expect(options.plugins).toBeUndefined();
-    expect(options.tools).toEqual(['Bash', 'Read', 'Glob', 'Grep']);
+    expect(missingResult.success).toBe(false);
+    expect(missingResult.error).toMatch(/REVIEW_SKILLS_DIR/);
+    expect(missingResult.error).toContain(emptyDir);
+    expect(mockQuery).not.toHaveBeenCalled();
     fs.rmSync(emptyDir, { recursive: true, force: true });
+  });
+
+  it('fails when skill assets disappear before the static review fallback', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'removed-review-assets-'));
+    try {
+      const skillDir = path.join(root, 'skills', 'custom-core');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '---\nname: custom-core\nmetadata:\n  review-always: true\n---\nCustom methodology'
+      );
+      mockQuery.mockImplementation(() => {
+        fs.rmSync(root, { recursive: true, force: true });
+        return createAsyncGenerator([
+          successResult({ result: 'npm test failed with exit code 1' }),
+        ]);
+      });
+      const result = await new StreamingClaudeExecutor(
+        reviewCustomizationService,
+        new ReviewSkillCatalog(root)
+      ).executeWithStreaming('Review', '/tmp/project', createReviewContext(), createCallback());
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/REVIEW_SKILLS_DIR/);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('warns when structured output was requested but the run returned prose only', async () => {

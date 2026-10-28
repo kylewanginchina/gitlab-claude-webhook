@@ -27,6 +27,7 @@ import {
 } from '../utils/reviewResult';
 import {
   ReviewSkillCatalog,
+  ReviewSkillConfigurationError,
   reviewSkillCatalog as defaultReviewSkillCatalog,
 } from './reviewSkillCatalog';
 
@@ -112,7 +113,10 @@ export class StreamingClaudeExecutor {
         );
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (!this.shouldContinueWithStaticReview(command, context, errorMessage, true)) {
+        if (
+          error instanceof ReviewSkillConfigurationError ||
+          !this.shouldContinueWithStaticReview(command, context, errorMessage, true)
+        ) {
           throw error;
         }
 
@@ -409,9 +413,9 @@ export class StreamingClaudeExecutor {
       settingSources: ['project'],
     };
 
-    const useBuiltinSkills =
-      runtimeConfig.review.useBuiltinSkills !== false && this.reviewSkillCatalog.isAvailable();
+    const useBuiltinSkills = runtimeConfig.review.useBuiltinSkills !== false;
     if (useBuiltinSkills) {
+      this.reviewSkillCatalog.assertUsable();
       const requested =
         context.skills && context.skills.length > 0
           ? context.skills
@@ -536,7 +540,10 @@ export class StreamingClaudeExecutor {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (this.containsUnknownCommandFailure(message)) {
+      if (
+        error instanceof ReviewSkillConfigurationError ||
+        this.containsUnknownCommandFailure(message)
+      ) {
         throw error;
       }
       logger.warn('Static review fallback failed after validation command failure', {
