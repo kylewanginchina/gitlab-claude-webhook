@@ -894,6 +894,48 @@ describe('runtime config execution paths', () => {
     jest.useRealTimers();
   });
 
+  it('renders stage callback progress without decorative icons and deduplicates normalized updates', async () => {
+    const processor = new EventProcessor();
+    const event = createMergeRequestEvent();
+    const context = processor['createRunContext']();
+    context.currentCommentId = 101;
+    const updateComment = jest.fn().mockResolvedValue(undefined);
+    processor['updateComment'] = updateComment;
+    const callback: StreamingProgressCallback = {
+      onProgress: async (message, isComplete) => {
+        await processor['updateProgressComment'](event, context, message, isComplete);
+      },
+      onError: async error => {
+        await processor['updateProgressComment'](event, context, error, false, true);
+      },
+    };
+    const scorer = processor['buildReviewStageCallback']('Scorer 2', callback);
+    const review = processor['buildReviewStageCallback']('Security review', callback);
+
+    await scorer.onProgress('📖 Read /tmp/project/file.ts', false);
+    await scorer.onProgress('Read `/tmp/project/file.ts`', false);
+    await review.onProgress('📖 Read /tmp/project/file.ts', false);
+    await review.onProgress('🔎 Grep unsafe in /tmp/project', false);
+    await scorer.onProgress('💻 Bash git diff', false);
+    await scorer.onProgress('🤖 Checking the changed lines.', false);
+    await scorer.onProgress('⚙️ Using tool: StructuredOutput', false);
+    await scorer.onError('❌ Execution failed: unavailable');
+    await scorer.onProgress('✅ Claude execution completed successfully!', true);
+
+    const body = updateComment.mock.calls.at(-1)?.[2] as string;
+    expect(context.progressMessages).toHaveLength(8);
+    expect(body).toContain('| Read | [Scorer 2] Read `/tmp/project/file.ts` |');
+    expect(body).toContain('| Read | [Security review] Read `/tmp/project/file.ts` |');
+    expect(body).toContain('| Search | [Security review] Grep `unsafe` in `/tmp/project` |');
+    expect(body).toContain('| Command | [Scorer 2] Bash `git diff` |');
+    expect(body).toContain('| Running | [Scorer 2] Checking the changed lines. |');
+    expect(body).toContain('| Running | [Scorer 2] Using tool: StructuredOutput |');
+    expect(body).toContain('| Warning | [Scorer 2] Execution failed: unavailable |');
+    expect(body).toContain('| Completed | [Scorer 2] Claude execution completed successfully. |');
+    expect(body).toContain('**Status:** In progress');
+    expect(body).not.toMatch(/[📖🔎💻🤖⚙✅❌]/u);
+  });
+
   it('keeps progress comment state isolated per run context', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-07-06T09:20:31.817Z'));
 
