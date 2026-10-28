@@ -1723,7 +1723,64 @@ describe('runtime config execution paths', () => {
     };
     const passWithCandidate = JSON.stringify({ summary: 'Candidate found', findings: [candidate] });
 
-    it.each([
+    const envelope = (payload: string) => 'Review result:\n```json\n' + payload + '\n```\nDone.';
+    const candidateWithFence = {
+      ...candidate,
+      body: 'The example ```json {"value":1} ``` has a bug.',
+    };
+    const envelopePass = envelope(
+      JSON.stringify({ summary: 'Checked', findings: [candidateWithFence] })
+    );
+    const envelopeScore = envelope(
+      JSON.stringify({ ...candidateWithFence, confidence: 0, verdict: 'Guarded' })
+    );
+    const badPathPass = JSON.stringify({
+      summary: 'Checked',
+      findings: [{ ...candidate, path: './', confidence: 90 }],
+    });
+
+    it.each<{
+      label: string;
+      passes: string[];
+      score: string;
+      expected: 'failed' | 'partial' | 'clean';
+      provider?: 'claude' | 'codex';
+      structuredOutput?: boolean;
+    }>([
+      {
+        label: 'Claude prose-wrapped empty passes with structured output disabled',
+        passes: [empty, empty, empty, empty].map(envelope),
+        score: '',
+        expected: 'clean',
+        structuredOutput: false,
+      },
+      {
+        label:
+          'Claude prose-wrapped pass and scorer with inner fences and structured output disabled',
+        passes: [envelopePass, empty, empty, empty],
+        score: envelopeScore,
+        expected: 'clean',
+        structuredOutput: false,
+      },
+      {
+        label: 'Codex prose-wrapped pass and scorer with inner fences',
+        passes: [envelopePass, empty, empty, empty],
+        score: envelopeScore,
+        expected: 'clean',
+        provider: 'codex',
+      },
+      {
+        label: 'unnormalizable pass findings',
+        passes: [badPathPass, badPathPass, badPathPass, badPathPass],
+        score: '',
+        expected: 'failed',
+      },
+      {
+        label: 'unnormalizable scorer finding',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: JSON.stringify({ ...candidate, path: './', confidence: 90 }),
+        expected: 'partial',
+      },
       { label: 'malformed passes', passes: ['{', '{', '{', '{'], score: '', expected: 'failed' },
       {
         label: 'prose-only passes',
@@ -1773,81 +1830,115 @@ describe('runtime config execution paths', () => {
         score: JSON.stringify({ ...candidate, confidence: 0, verdict: 'Already guarded' }),
         expected: 'clean',
       },
-    ])('$label produces a $expected outcome', async ({ passes, score, expected }) => {
-      jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(
-        createRuntimeConfig({
-          review: { passConcurrency: 1, scoringConcurrency: 1 },
-        })
-      );
-      const pendingPasses = [...passes];
-      mockQuery.mockImplementation(({ options }) => {
-        const isScorer = options.outputFormat.schema.required.includes('verdict');
-        return createAsyncGenerator([
-          {
-            type: 'result',
-            subtype: 'success',
-            result: isScorer ? score : pendingPasses.shift(),
-            total_cost_usd: 0,
-            num_turns: 1,
-            duration_ms: 1,
-          },
-        ]);
-      });
-      const gitlab = {
-        getMergeRequest: jest
-          .fn()
-          .mockResolvedValue({ ...createMergeRequestEvent().merge_request, sha: 'head-sha' }),
-        getMergeRequestDiffVersions: jest.fn().mockResolvedValue([{ id: 1 }]),
-        getMergeRequestDiffVersion: jest.fn().mockResolvedValue({
-          base_commit_sha: 'base-sha',
-          start_commit_sha: 'start-sha',
-          head_commit_sha: 'head-sha',
-          diffs: [{ old_path: 'src/a.ts', new_path: 'src/a.ts' }],
-        }),
-        getMergeRequestDiscussions: jest.fn().mockResolvedValue([]),
-        addMergeRequestComment: jest.fn().mockResolvedValue({ id: 99 }),
-        updateMergeRequestComment: jest.fn().mockResolvedValue(undefined),
-      };
-      const processor = new EventProcessor();
-      (processor as any).gitlabService = gitlab;
-      (processor as any).gitlabReviewService = new GitLabReviewService(gitlab as any);
-      const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-integrity-'));
-      try {
-        // Local-only repository: context preparation handles the absent origin without network access.
-        await simpleGit(projectPath).init();
-        await (processor as any).executeCodeReview(
-          createMergeRequestEvent(),
-          {
-            command: '/code-review',
-            context: 'MR #2',
-            provider: 'claude',
-          },
-          'main',
-          projectPath,
-          createCallback(),
-          (processor as any).createRunContext()
+    ])(
+      '$label produces a $expected outcome',
+      async ({ passes, score, expected, provider = 'claude', structuredOutput = true }) => {
+        jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(
+          createRuntimeConfig({
+            review: {
+              passConcurrency: 1,
+              scoringConcurrency: 1,
+              structuredOutput,
+              defaultProvider: provider === 'codex' ? 'codex-multipass' : 'claude-multipass',
+            },
+          })
         );
-
-        const comments = gitlab.addMergeRequestComment.mock.calls.map(call => call[2] as string);
-        const clean = comments.some(body =>
-          /No high-confidence issues (?:found|remained)/.test(body)
-        );
-        const partial = comments.some(body =>
-          body.includes('Review completed with partial coverage.')
-        );
-        const failed = comments.some(body => body.includes('All code review passes failed:'));
-        expect({ clean, partial, failed }).toEqual({
-          clean: expected === 'clean',
-          partial: expected === 'partial',
-          failed: expected === 'failed',
+        const pendingPasses = [...passes];
+        mockQuery.mockImplementation(({ prompt }) => {
+          const isScorer = prompt.includes(
+            'Score whether this GitLab merge request review finding is real.'
+          );
+          return createAsyncGenerator([
+            {
+              type: 'result',
+              subtype: 'success',
+              result: isScorer ? score : pendingPasses.shift(),
+              total_cost_usd: 0,
+              num_turns: 1,
+              duration_ms: 1,
+            },
+          ]);
         });
-        if (score && expected === 'partial') {
-          expect(comments.some(body => body.includes('Scorer 1'))).toBe(true);
+        mockCodexConstructor.mockImplementation(() => ({
+          startThread: () => ({
+            runStreamed: async (prompt: string) => ({
+              events: createAsyncGenerator([
+                {
+                  type: 'item.completed',
+                  item: {
+                    type: 'agent_message',
+                    id: 'review-result',
+                    text: prompt.includes(
+                      'Score whether this GitLab merge request review finding is real.'
+                    )
+                      ? score
+                      : pendingPasses.shift(),
+                  },
+                },
+                {
+                  type: 'turn.completed',
+                  usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 },
+                },
+              ]),
+            }),
+          }),
+        }));
+        const gitlab = {
+          getMergeRequest: jest
+            .fn()
+            .mockResolvedValue({ ...createMergeRequestEvent().merge_request, sha: 'head-sha' }),
+          getMergeRequestDiffVersions: jest.fn().mockResolvedValue([{ id: 1 }]),
+          getMergeRequestDiffVersion: jest.fn().mockResolvedValue({
+            base_commit_sha: 'base-sha',
+            start_commit_sha: 'start-sha',
+            head_commit_sha: 'head-sha',
+            diffs: [{ old_path: 'src/a.ts', new_path: 'src/a.ts' }],
+          }),
+          getMergeRequestDiscussions: jest.fn().mockResolvedValue([]),
+          addMergeRequestComment: jest.fn().mockResolvedValue({ id: 99 }),
+          updateMergeRequestComment: jest.fn().mockResolvedValue(undefined),
+        };
+        const processor = new EventProcessor();
+        (processor as any).gitlabService = gitlab;
+        (processor as any).gitlabReviewService = new GitLabReviewService(gitlab as any);
+        const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-integrity-'));
+        try {
+          // Local-only repository: context preparation handles the absent origin without network access.
+          await simpleGit(projectPath).init();
+          await (processor as any).executeCodeReview(
+            createMergeRequestEvent(),
+            {
+              command: '/code-review',
+              context: 'MR #2',
+              provider: 'claude',
+            },
+            'main',
+            projectPath,
+            createCallback(),
+            (processor as any).createRunContext()
+          );
+
+          const comments = gitlab.addMergeRequestComment.mock.calls.map(call => call[2] as string);
+          const clean = comments.some(body =>
+            /No high-confidence issues (?:found|remained)/.test(body)
+          );
+          const partial = comments.some(body =>
+            body.includes('Review completed with partial coverage.')
+          );
+          const failed = comments.some(body => body.includes('All code review passes failed:'));
+          expect({ clean, partial, failed }).toEqual({
+            clean: expected === 'clean',
+            partial: expected === 'partial',
+            failed: expected === 'failed',
+          });
+          if (score && expected === 'partial') {
+            expect(comments.some(body => body.includes('Scorer 1'))).toBe(true);
+          }
+        } finally {
+          await fs.rm(projectPath, { recursive: true, force: true });
         }
-      } finally {
-        await fs.rm(projectPath, { recursive: true, force: true });
       }
-    });
+    );
   });
 
   it('uses runtime review minConfidence when deciding which scored findings remain', async () => {

@@ -296,6 +296,51 @@ describe('GitLabReviewService', () => {
       expect(service.parseReviewOutput(output)).toEqual({ summary: 'Checked', findings: [] });
     });
 
+    it.each(['json', ''])(
+      'accepts a prose-wrapped %s fence in strict mode, including inner fences',
+      language => {
+        const finding = {
+          title: 'Bug',
+          body: 'The example ```json {"sample":true} ``` fails.',
+          confidence: 90,
+          path: 'src/a.ts',
+          line: 12,
+          line_type: 'old',
+        };
+        const output =
+          'Review result:\n```' +
+          language +
+          '\n' +
+          JSON.stringify({ summary: 'Checked', findings: [finding] }) +
+          '\n```\nDone.';
+        expect(service.parseReviewOutput(output, 0, true)).toMatchObject({
+          summary: 'Checked',
+          findings: [{ body: finding.body, path: 'src/a.ts', lineType: 'old' }],
+        });
+      }
+    );
+
+    it.each(['./', '.\\', ' ./ '])(
+      'rejects a finding that cannot normalize in strict pass mode: %s',
+      path => {
+        const output = JSON.stringify({
+          summary: 'Checked',
+          findings: [{ title: 'Bug', body: 'Evidence', confidence: 90, path }],
+        });
+        expect(() => service.parseReviewOutput(output, 0, true)).toThrow(/review/i);
+        expect(service.parseReviewOutput(output, 0)).toMatchObject({ findings: [] });
+      }
+    );
+
+    it('rejects an unnormalizable finding even when a valid finding survives and its score is below threshold', () => {
+      const valid = { title: 'Bug', body: 'Evidence', confidence: 90, path: 'src/a.ts' };
+      const output = JSON.stringify({
+        summary: 'Checked',
+        findings: [valid, { ...valid, path: './', confidence: 0 }],
+      });
+      expect(() => service.parseReviewOutput(output, 80, true)).toThrow(/review/i);
+    });
+
     it('keeps tolerant parser compatibility for invalid output', () => {
       expect(service.parseReviewOutput('not JSON')).toEqual({
         summary: 'Review completed.',
@@ -466,6 +511,48 @@ describe('GitLabReviewService', () => {
         sources: ['Bug scan'],
       });
     });
+
+    it.each(['json', ''])(
+      'accepts a prose-wrapped %s scorer fence in strict mode, including inner fences',
+      language => {
+        const finding = {
+          title: 'Rejected concern',
+          body: 'The example ```json {"sample":true} ``` is guarded.',
+          confidence: 0,
+          path: 'src/a.ts',
+          line: 12,
+          line_type: 'old',
+          verdict: 'Guarded',
+        };
+        const output =
+          'Scoring result:\n```' + language + '\n' + JSON.stringify(finding) + '\n```\nDone.';
+        expect(
+          service.parseScoredFinding(output, { sources: ['Pass 1'] } as ReviewFinding, true)
+        ).toMatchObject({
+          confidence: 0,
+          body: finding.body,
+          path: 'src/a.ts',
+          lineType: 'old',
+          sources: ['Pass 1'],
+        });
+      }
+    );
+
+    it.each(['./', '.\\', ' ./ '])(
+      'rejects a finding that cannot normalize in strict scoring mode: %s',
+      path => {
+        const output = JSON.stringify({ title: 'Bug', body: 'Evidence', confidence: 90, path });
+        const fallback = {
+          title: 'Candidate',
+          body: 'Candidate body',
+          confidence: 40,
+          path: 'src/a.ts',
+          lineType: 'new' as const,
+        };
+        expect(() => service.parseScoredFinding(output, fallback, true)).toThrow(/review/i);
+        expect(service.parseScoredFinding(output, fallback)).toBeNull();
+      }
+    );
 
     it('should preserve fallback fields when the scorer omits them', () => {
       const fallback: ReviewFinding = {

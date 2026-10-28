@@ -470,7 +470,7 @@ export class GitLabReviewService {
   }
 
   public parseReviewOutput(output: string, minConfidence = 80, strict = false): ParsedReviewResult {
-    const parsed = parseReviewJsonPayload(output, !strict);
+    const parsed = parseReviewJsonPayload(output);
     if (strict && !isReviewPassPayload(parsed)) {
       throw new Error(
         'Invalid review pass result: expected JSON with a summary and valid findings array'
@@ -478,7 +478,13 @@ export class GitLabReviewService {
     }
     const findings = Array.isArray(parsed?.findings)
       ? parsed.findings
-          .map((finding: unknown) => this.normalizeFinding(finding))
+          .map((finding: unknown) => {
+            const normalized = this.normalizeFinding(finding);
+            if (strict && !normalized) {
+              throw new Error('Invalid review pass result: finding could not be normalized');
+            }
+            return normalized;
+          })
           .filter((finding: ReviewFinding | null): finding is ReviewFinding => Boolean(finding))
           .filter((finding: ReviewFinding) => finding.confidence >= minConfidence)
       : [];
@@ -497,7 +503,7 @@ export class GitLabReviewService {
     fallbackFinding: ReviewFinding,
     strict = false
   ): ReviewFinding | null {
-    const parsed = parseReviewJsonPayload(output, !strict);
+    const parsed = parseReviewJsonPayload(output);
     if (strict && !isReviewFindingPayload(parsed)) {
       throw new Error(
         'Invalid review scoring result: expected JSON with valid finding fields and confidence'
@@ -506,6 +512,9 @@ export class GitLabReviewService {
     const normalized = this.normalizeFinding(parsed);
 
     if (!normalized) {
+      if (strict) {
+        throw new Error('Invalid review scoring result: finding could not be normalized');
+      }
       return null;
     }
 

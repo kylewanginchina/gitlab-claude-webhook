@@ -8,11 +8,8 @@ function asRecord(value: unknown): JsonRecord | null {
     : null;
 }
 
-/** Try the full document first: finding text can itself contain Markdown code fences. */
-export function parseReviewJsonPayload(
-  output: string,
-  allowSurroundingProse = false
-): JsonRecord | null {
+/** Parse raw JSON first, then legacy fenced envelopes (which can include explanatory prose). */
+export function parseReviewJsonPayload(output: string): JsonRecord | null {
   const text = output.trim();
   if (!text) {
     return null;
@@ -21,14 +18,19 @@ export function parseReviewJsonPayload(
   try {
     return asRecord(JSON.parse(text));
   } catch {
-    const fence = allowSurroundingProse
-      ? text.match(/```json\s*([\s\S]*?)```/i) || text.match(/```\s*([\s\S]*?)```/)
-      : text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    if (fence) {
-      try {
-        return asRecord(JSON.parse(fence[1]));
-      } catch {
-        // Report the original document below.
+    // Try successive closing fences: a Markdown fence inside a JSON string is content,
+    // not the end of the result envelope. JSON.parse decides when the document is complete.
+    const openingFencePattern = /```(?:json)?\s*/gi;
+    let openingFence: RegExpExecArray | null;
+    while ((openingFence = openingFencePattern.exec(text)) !== null) {
+      const contentStart = openingFence.index + openingFence[0].length;
+      let closingFence = text.indexOf('```', contentStart);
+      while (closingFence !== -1) {
+        try {
+          return asRecord(JSON.parse(text.slice(contentStart, closingFence)));
+        } catch {
+          closingFence = text.indexOf('```', closingFence + 3);
+        }
       }
     }
   }

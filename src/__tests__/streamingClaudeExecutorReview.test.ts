@@ -232,6 +232,38 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     }
   );
 
+  it('returns an authoritative prose-wrapped JSON recovery with an inner Markdown fence', async () => {
+    jest
+      .spyOn(runtimeConfigService, 'getConfig')
+      .mockReturnValue(createRuntimeConfig({ structuredOutput: false }));
+    const payload = {
+      summary: 'Checked',
+      findings: [
+        {
+          title: 'Parser regression',
+          body: 'The input ```json {"value":1} ``` failed to parse.',
+          confidence: 90,
+          path: 'src/a.ts',
+        },
+      ],
+    };
+    const output =
+      'Static inspection complete:\n```json\n' + JSON.stringify(payload) + '\n```\nDone.';
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([successResult({ result: 'npm test failed with exit code 1' })])
+      )
+      .mockImplementationOnce(() => createAsyncGenerator([successResult({ result: output })]));
+    const result = await new StreamingClaudeExecutor().executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createCallback()
+    );
+    expect(result).toMatchObject({ success: true, output });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects an unknown review skill command even when the SDK reports success', async () => {
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
     mockQuery.mockImplementation(() =>

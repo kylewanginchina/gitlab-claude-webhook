@@ -555,7 +555,7 @@ export class StreamingClaudeExecutor {
   }
 
   private isMachineReviewResult(output: string): boolean {
-    if (!/^[{`]/.test(output.trim())) {
+    if (!output.trim().startsWith('{') && !output.includes('```')) {
       return false;
     }
     const parsed = parseReviewJsonPayload(output);
