@@ -127,9 +127,10 @@ export interface ReviewPassDefinition {
 /**
  * How the built-in SKILL.md skills reach the model for one stage.
  *
- * Claude: the primary (always-on) skill is expanded by the Agent SDK from a slash command placed
+ * Claude: the first user-invocable skill is expanded by the Agent SDK from a slash command placed
  * at the very start of the prompt, which is deterministic and needs no tool call. The SDK expands
- * only that first command, so every other matched skill is inlined as text.
+ * only that first command, so every other matched skill is inlined as text. If no matched skill
+ * allows slash invocation, every skill is inlined.
  * Codex: no skill mechanism exists, so every skill is inlined.
  */
 export interface ReviewSkillDelivery {
@@ -322,15 +323,15 @@ export class GitLabReviewService {
     provider: 'claude' | 'codex'
   ): ReviewSkillDelivery {
     const skillNames = skills.map(skill => skill.name);
-    if (provider !== 'claude' || skills.length === 0) {
+    const primary = provider === 'claude' ? skills.find(skill => skill.userInvocable) : undefined;
+    if (!primary) {
       return { skillNames, inlineSkills: skills };
     }
 
-    const [primary, ...inlineSkills] = skills;
     return {
       skillNames,
       skillCommand: this.reviewSkillCatalog.getInvocationCommand(primary.name),
-      inlineSkills,
+      inlineSkills: skills.filter(skill => skill !== primary),
     };
   }
 
@@ -915,7 +916,19 @@ export class GitLabReviewService {
 
     const lines = ['Review skills (apply these methodologies):'];
     for (const skill of skills) {
-      lines.push('', `<skill name="${skill.name}">`, skill.body, '</skill>');
+      const skillDir = path.dirname(skill.filePath);
+      const body = skill.body.replace(
+        /\$\{(CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT)\}/g,
+        (_variable, name: string) =>
+          name === 'CLAUDE_SKILL_DIR' ? skillDir : this.reviewSkillCatalog.getPluginDir()
+      );
+      lines.push(
+        '',
+        `<skill name="${skill.name}">`,
+        `Base directory for this skill: ${skillDir}`,
+        body,
+        '</skill>'
+      );
     }
     lines.push('');
     return lines;

@@ -9,6 +9,7 @@ import path from 'path';
 import { ReviewCustomizationService } from '../admin/reviewCustomizationService';
 import { runtimeConfigService } from '../utils/runtimeConfig';
 import { ReviewSkillCatalog } from '../services/reviewSkillCatalog';
+import type { GitLabService } from '../services/gitlabService';
 
 describe('GitLabReviewService', () => {
   const service = new GitLabReviewService({} as any);
@@ -167,6 +168,142 @@ describe('GitLabReviewService', () => {
         } finally {
           await fs.rm(root, { recursive: true, force: true });
         }
+      });
+    });
+
+    describe('custom skill delivery', () => {
+      let fixtureDir: string;
+      let pluginDir: string;
+      const candidate: ReviewFinding = {
+        title: 'Bug',
+        body: 'Evidence',
+        confidence: 80,
+        path: 'src/a.ts',
+        lineType: 'new',
+      };
+
+      beforeEach(async () => {
+        fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-custom-delivery-'));
+        // Replacement strings must not interpret the dollar sign in a configured path.
+        pluginDir = path.join(fixtureDir, 'plugin $& resources');
+        await fs.mkdir(path.join(pluginDir, '.claude-plugin'), { recursive: true });
+        await fs.writeFile(
+          path.join(pluginDir, '.claude-plugin', 'plugin.json'),
+          JSON.stringify({ name: 'custom-review' })
+        );
+      });
+
+      afterEach(async () => {
+        await fs.rm(fixtureDir, { recursive: true, force: true });
+      });
+
+      async function writeSkill(
+        name: string,
+        invocable?: boolean | string,
+        body = `${name} methodology`
+      ): Promise<void> {
+        const dir = path.join(pluginDir, 'skills', name);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(
+          path.join(dir, 'SKILL.md'),
+          [
+            '---',
+            `name: ${name}`,
+            ...(invocable === undefined ? [] : [`user-invocable: ${invocable}`]),
+            'metadata:',
+            '  review-always: "true"',
+            '---',
+            body,
+          ].join('\n')
+        );
+      }
+
+      describe.each(['claude', 'codex'] as const)('%s', provider => {
+        it.each([
+          { core: false, specialized: false, primary: undefined },
+          { core: 'false # Internal methodology only', specialized: false, primary: undefined },
+          { core: false, specialized: true, primary: 'specialized' },
+          { core: undefined, specialized: false, primary: 'core' },
+        ])('delivers every skill once with eligibility %j', async eligibility => {
+          await writeSkill('core', eligibility.core);
+          await writeSkill('specialized', eligibility.specialized);
+          const customService = new GitLabReviewService(
+            {} as GitLabService,
+            undefined,
+            new ReviewSkillCatalog(pluginDir)
+          );
+          const scoring = customService.getScoringSkillDelivery(provider);
+          const stages = [
+            ...customService.buildReviewPasses(context, undefined, undefined, provider),
+            {
+              ...scoring,
+              prompt: customService.buildScoringPrompt(
+                context,
+                candidate,
+                undefined,
+                undefined,
+                scoring.inlineSkills
+              ),
+            },
+          ];
+          const primary = provider === 'claude' ? eligibility.primary : undefined;
+          for (const stage of stages) {
+            expect(stage.skillCommand).toBe(primary ? `/custom-review:${primary}` : undefined);
+            expect(stage.skillNames).toEqual(['core', 'specialized']);
+            for (const name of stage.skillNames) {
+              const expectedInlineCount = name === primary ? 0 : 1;
+              expect(stage.prompt.split(`<skill name="${name}">`).length - 1).toBe(
+                expectedInlineCount
+              );
+              expect(stage.prompt.split(`${name} methodology`).length - 1).toBe(
+                expectedInlineCount
+              );
+            }
+          }
+          expect(scoring.inlineSkills.map(skill => skill.name)).toEqual(
+            ['core', 'specialized'].filter(name => name !== primary)
+          );
+        });
+
+        it('binds inline resources to each skill directory in passes and scoring', async () => {
+          for (const name of ['core', 'first', 'second']) {
+            await writeSkill(
+              name,
+              undefined,
+              'Read ${CLAUDE_SKILL_DIR}/references/rules.md and ' +
+                '${CLAUDE_PLUGIN_ROOT}/shared/rules.md. Also read references/extra.md.'
+            );
+          }
+          const catalog = new ReviewSkillCatalog(pluginDir);
+          const originalBodies = catalog.listSkills().map(skill => skill.body);
+          const customService = new GitLabReviewService({} as GitLabService, undefined, catalog);
+          const scoring = customService.getScoringSkillDelivery(provider);
+          const prompts = [
+            ...customService
+              .buildReviewPasses(context, undefined, undefined, provider)
+              .map(pass => pass.prompt),
+            customService.buildScoringPrompt(
+              context,
+              candidate,
+              undefined,
+              undefined,
+              scoring.inlineSkills
+            ),
+          ];
+          for (const prompt of prompts) {
+            expect(prompt).not.toContain('${CLAUDE_SKILL_DIR}');
+            expect(prompt).not.toContain('${CLAUDE_PLUGIN_ROOT}');
+            for (const name of provider === 'claude'
+              ? ['first', 'second']
+              : ['core', 'first', 'second']) {
+              const skillDir = path.join(pluginDir, 'skills', name);
+              expect(prompt).toContain(`Base directory for this skill: ${skillDir}`);
+              expect(prompt.split(`${skillDir}/references/rules.md`).length - 1).toBe(1);
+            }
+            expect(prompt).toContain(`${pluginDir}/shared/rules.md`);
+          }
+          expect(catalog.listSkills().map(skill => skill.body)).toEqual(originalBodies);
+        });
       });
     });
 

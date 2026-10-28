@@ -135,6 +135,17 @@ describe('ReviewSkillCatalog', () => {
     expect(skill?.always).toBe(false);
   });
 
+  it.each([
+    ['', true],
+    ['user-invocable: true', true],
+    ['user-invocable: false', false],
+    ['user-invocable: false # Internal methodology only', false],
+    ['user-invocable: "false"', false],
+  ])('reads slash-command eligibility from %s', (field, expected) => {
+    writeSkill(root, 'core', `name: core\n${field}`);
+    expect(new ReviewSkillCatalog(root).getSkill('core')).toHaveProperty('userInvocable', expected);
+  });
+
   it('reloads when a SKILL.md changes on disk', () => {
     writeSkill(root, 'core', 'name: core\ndescription: first');
     const catalog = new ReviewSkillCatalog(root);

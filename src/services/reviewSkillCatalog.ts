@@ -17,6 +17,8 @@ export interface ReviewSkillDefinition {
   description: string;
   body: string;
   filePath: string;
+  /** Whether the SDK exposes this skill as a slash command; defaults to true. */
+  userInvocable: boolean;
   always: boolean;
   passIds: string[];
   languages: string[];
@@ -193,6 +195,7 @@ export class ReviewSkillCatalog {
         description: parsed.fields.description?.trim() || '',
         body: parsed.body.trim(),
         filePath,
+        userInvocable: !/^false(?:\s+#.*)?$/i.test(parsed.fields['user-invocable'] || ''),
         always: /^(true|yes|1)$/i.test(parsed.metadata['review-always'] || ''),
         passIds: splitList(parsed.metadata['review-passes']),
         languages: splitList(parsed.metadata['review-languages'])

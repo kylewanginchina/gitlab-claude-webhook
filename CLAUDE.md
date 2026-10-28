@@ -69,7 +69,8 @@ This is a GitLab webhook service that integrates with Claude Agent SDK to provid
 
 - `mr-review-core` is `review-always` and is active in every pass and the scoring stage
 - Other skills match per pass via frontmatter `metadata`: `review-passes`, `review-languages`, `review-globs`
-- Claude: the first (always-on) skill is expanded from a slash command at the top of the prompt; the SDK expands only one command per prompt, so the remaining matched skills are inlined as `<skill>` blocks. Codex gets every SKILL.md body inlined. Neither provider relies on the model choosing to call the Skill tool
+- Claude: the first matched skill that allows slash invocation is expanded from a command at the top of the prompt; the SDK expands only one command per prompt, so the remaining matched skills are inlined as `<skill>` blocks. Skills with `user-invocable: false` are always inlined; if all matched skills have this flag, no slash command is sent. Codex gets every SKILL.md body inlined. Neither provider relies on the model choosing to call the Skill tool
+- Inline skill bodies expand `${CLAUDE_SKILL_DIR}` to that skill's directory and `${CLAUDE_PLUGIN_ROOT}` to the configured plugin root. Each block also identifies its base directory for relative resource references
 - Admin-defined skills can pin extra on-disk skills via `skillNames`
 
 **CodexExecutor** - Uses `@openai/codex-sdk`:

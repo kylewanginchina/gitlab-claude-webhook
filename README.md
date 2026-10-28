@@ -134,6 +134,8 @@ docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d gitlab
 
 `review-skills/` 目录是一个 Claude Agent SDK 本地插件，`skills/<name>/SKILL.md` 中定义审查方法论与语言专项知识。每个 pass 会根据 SKILL.md frontmatter `metadata` 中的 `review-passes`、`review-languages`、`review-globs` 自动匹配技能，`review-always: "true"` 的技能（如 `mr-review-core`）在所有 pass 与评分阶段始终启用。Claude 通过 SDK 的 `plugins` 选项加载插件，并在提示词开头以 `/gitlab-review:mr-review-core` 斜杠命令显式展开核心技能（SDK 只展开提示词开头的第一个命令，因此其余匹配技能以内联文本注入）；Codex 没有 skill 机制，全部 SKILL.md 正文内联到提示词中。两种方式都不依赖模型自行调用 Skill 工具。新增技能只需添加一个目录并重启服务（或在 `REVIEW_SKILLS_DIR` 指向的目录中放置文件）。
 
+自定义技能声明 `user-invocable: false` 时仍会应用其审查方法，但以内联方式传递；Claude 选择首个允许 slash 调用的匹配技能作为主技能，如果全部禁止则全部内联。内联正文中的 `${CLAUDE_SKILL_DIR}` 和 `${CLAUDE_PLUGIN_ROOT}` 会分别展开为该技能所在目录和插件根目录，避免引用资源时绑定到其他技能；每个内联块也会标明相对资源路径的基目录。审查与评分阶段、Claude 与 Codex 均使用此资源路径规则。
+
 `REVIEW_SKILLS_DIR` 指向包含 `skills/` 的插件根目录；相对路径在服务启动时按工作目录解析一次，不随 SDK 的 MR 检出目录变化。显式配置的路径无效时不会回退到仓库技能。启用内置技能时，目录缺失、技能文件不可读或正文为空、已有插件清单无效等配置错误会使 Claude/Codex 的审查与评分阶段失败，并提示修复路径；设置 `REVIEW_USE_BUILTIN_SKILLS=false` 后无需技能资产。自定义插件可省略 `.claude-plugin/plugin.json`（命令命名空间使用目录名），也可只提供按语言或 pass 匹配的技能，无需指定 `review-always`。Compose 将该变量传入容器，默认 `/app/review-skills`；覆盖时应填写容器内可读的路径，外部技能目录需自行挂载。
 
 ## 处理流程
