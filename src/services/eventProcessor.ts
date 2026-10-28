@@ -965,13 +965,19 @@ export class EventProcessor {
       throw new Error(`${passLabel} failed: ${result.error || 'Unknown error'}`);
     }
 
-    const parsed = this.gitlabReviewService.parseReviewOutput(result.output || '', 0);
-    return {
-      passId,
-      label: passLabel,
-      summary: parsed.summary,
-      findings: parsed.findings,
-    };
+    try {
+      const parsed = this.gitlabReviewService.parseReviewOutput(result.output || '', 0, true);
+      return {
+        passId,
+        label: passLabel,
+        summary: parsed.summary,
+        findings: parsed.findings,
+      };
+    } catch (error) {
+      throw new Error(
+        `${passLabel} failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private async executeReviewScore(
@@ -1006,7 +1012,13 @@ export class EventProcessor {
       throw new Error(`${stageLabel} failed: ${result.error || 'Unknown error'}`);
     }
 
-    return this.gitlabReviewService.parseScoredFinding(result.output || '', finding);
+    try {
+      return this.gitlabReviewService.parseScoredFinding(result.output || '', finding, true);
+    } catch (error) {
+      throw new Error(
+        `${stageLabel} failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private async executeWithProvider(

@@ -239,6 +239,70 @@ describe('GitLabReviewService', () => {
   });
 
   describe('parseReviewOutput', () => {
+    it('parses raw JSON before looking for code fences inside finding text', () => {
+      const payload = {
+        summary: 'Code sample',
+        findings: [
+          {
+            title: 'Bug',
+            body: 'The sample ```json {"bad":true} ``` fails.',
+            confidence: 0,
+            path: 'src/old.ts',
+            line: 7,
+            line_type: 'old',
+            old_path: 'src/old.ts',
+            new_path: 'src/new.ts',
+          },
+        ],
+      };
+      const result = service.parseReviewOutput(JSON.stringify(payload), 0);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]).toMatchObject({
+        body: payload.findings[0].body,
+        confidence: 0,
+        line: 7,
+        lineType: 'old',
+        oldPath: 'src/old.ts',
+        newPath: 'src/new.ts',
+      });
+    });
+
+    it.each([
+      '',
+      'Review complete',
+      '{',
+      'null',
+      '[]',
+      '{}',
+      '{"summary":"ok","findings":{}}',
+      '{"summary":"ok","findings":[{}]}',
+      '{"findings":[]}',
+      JSON.stringify({
+        summary: 'ok',
+        findings: [{ title: 'Bug', body: 'Body', path: 'a.ts', confidence: null }],
+      }),
+      JSON.stringify({
+        summary: 'ok',
+        findings: [{ title: 'Bug', body: 'Body', path: 'a.ts', confidence: 101 }],
+      }),
+    ])('rejects invalid machine pass output in strict mode: %s', output => {
+      expect(() => Reflect.apply(service.parseReviewOutput, service, [output, 0, true])).toThrow(
+        /review/i
+      );
+    });
+
+    it('preserves tolerant parsing of JSON fences surrounded by explanatory prose', () => {
+      const output = 'Review result:\n```json\n{"summary":"Checked", "findings":[]}\n```\nDone.';
+      expect(service.parseReviewOutput(output)).toEqual({ summary: 'Checked', findings: [] });
+    });
+
+    it('keeps tolerant parser compatibility for invalid output', () => {
+      expect(service.parseReviewOutput('not JSON')).toEqual({
+        summary: 'Review completed.',
+        findings: [],
+      });
+    });
+
     it('should parse findings from a JSON code block', () => {
       const output = `\`\`\`json
 {
@@ -361,6 +425,48 @@ describe('GitLabReviewService', () => {
   });
 
   describe('parseScoredFinding', () => {
+    it.each([
+      '',
+      'No issues',
+      '{',
+      '{}',
+      '[]',
+      'null',
+      '{"title":"Bug","body":"Body","path":"a.ts","confidence":"0"}',
+      '{"title":"Bug","body":"Body","path":"a.ts","confidence":0,"line_type":"invalid"}',
+    ])('rejects invalid machine scoring output in strict mode: %s', output => {
+      expect(() =>
+        Reflect.apply(service.parseScoredFinding, service, [output, {} as ReviewFinding, true])
+      ).toThrow(/review/i);
+    });
+
+    it('accepts a legitimate zero score and preserves old/new line metadata', () => {
+      const payload = {
+        title: 'Rejected concern',
+        body: 'Already guarded',
+        path: 'src/old.ts',
+        confidence: 0,
+        line: 5,
+        line_type: 'old',
+        old_path: 'src/old.ts',
+        new_path: 'src/new.ts',
+        verdict: 'False positive',
+      };
+      const scored = Reflect.apply(service.parseScoredFinding, service, [
+        JSON.stringify(payload),
+        { sources: ['Bug scan'] } as ReviewFinding,
+        true,
+      ]);
+      expect(scored).toMatchObject({
+        confidence: 0,
+        line: 5,
+        lineType: 'old',
+        oldPath: 'src/old.ts',
+        newPath: 'src/new.ts',
+        sources: ['Bug scan'],
+      });
+    });
+
     it('should preserve fallback fields when the scorer omits them', () => {
       const fallback: ReviewFinding = {
         title: 'Fallback title',

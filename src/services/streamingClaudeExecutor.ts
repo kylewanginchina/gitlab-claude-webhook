@@ -21,6 +21,11 @@ import { reviewCustomizationService as defaultReviewCustomizationService } from 
 import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 import { createClaudeExecutionEnvironment } from '../utils/providerEnvironment';
 import {
+  parseReviewJsonPayload,
+  isReviewPassPayload,
+  isReviewFindingPayload,
+} from '../utils/reviewResult';
+import {
   ReviewSkillCatalog,
   reviewSkillCatalog as defaultReviewSkillCatalog,
 } from './reviewSkillCatalog';
@@ -33,6 +38,12 @@ const CLAUDE_REVIEW_SYSTEM_PROMPT =
 
 const CLAUDE_CONTEXT_WRAPPER =
   '{{contextBlock}}{{mrAnalysisBlock}}{{modeBlock}}**Time Budget:** Hard timeout {{timeoutMinutes}} minutes. Finish substantive work by {{softDeadlineMinutes}} minutes and reserve {{wrapUpMinutes}} minutes to summarize.\n\n**Request:** {{command}}';
+
+interface ClaudeExecutionResult {
+  output: string;
+  /** Keep SDK provenance separate from finding text and prose failure heuristics. */
+  structuredOutput?: boolean;
+}
 
 interface ReviewModeOptions {
   settingSources: Array<'project'>;
@@ -89,7 +100,7 @@ export class StreamingClaudeExecutor {
       await callback.onProgress('🚀 Claude is analyzing your request...', false);
 
       // Execute claude command with streaming via SDK
-      let result: { output: string; error?: string };
+      let result: ClaudeExecutionResult;
       let usedStaticReviewFallback = false;
       try {
         result = await this.runClaudeWithSDK(
@@ -125,6 +136,8 @@ export class StreamingClaudeExecutor {
 
       if (
         !usedStaticReviewFallback &&
+        !result.structuredOutput &&
+        !this.isMachineReviewResult(result.output) &&
         this.shouldContinueWithStaticReview(command, context, result.output, false)
       ) {
         await callback.onProgress(
@@ -181,7 +194,7 @@ export class StreamingClaudeExecutor {
     context: AIExecutionContext,
     runtimeConfig: RuntimeConfig,
     callback: StreamingProgressCallback
-  ): Promise<{ output: string; error?: string }> {
+  ): Promise<ClaudeExecutionResult> {
     const model = context.model || runtimeConfig.claude.defaultModel;
     const effort = runtimeConfig.claude.reasoningEffort;
     const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
@@ -230,6 +243,7 @@ export class StreamingClaudeExecutor {
     }, timeoutMs);
 
     let output = '';
+    let structuredOutput = false;
     const startedAt = Date.now();
     let lastProgressTime = Date.now();
     let lastActivityDescription = 'Claude is analyzing the request';
@@ -329,6 +343,7 @@ export class StreamingClaudeExecutor {
             if (hasStructuredOutput) {
               // Structured output is authoritative; serialise it so downstream JSON parsing is exact.
               output = JSON.stringify(resultMsg.structured_output);
+              structuredOutput = true;
             } else if (
               'result' in resultMsg &&
               resultMsg.result &&
@@ -337,12 +352,19 @@ export class StreamingClaudeExecutor {
               output = String(resultMsg.result);
             }
             if (reviewOptions.outputFormat && !hasStructuredOutput) {
-              // The model finished without calling StructuredOutput; downstream falls back to
-              // parsing the prose result, which may yield zero findings.
+              // Legacy JSON remains supported; the pipeline strictly validates the final payload.
               logger.warn('Claude SDK run finished without structured output', {
                 turns: resultMsg.num_turns,
                 resultLength: output.length,
               });
+            }
+            if (
+              isReviewMode &&
+              !hasStructuredOutput &&
+              !this.isMachineReviewResult(output) &&
+              this.containsUnknownCommandFailure(output)
+            ) {
+              throw new Error(`Claude execution failed: ${output.trim()}`);
             }
             logger.info('Claude SDK execution completed successfully', {
               cost: resultMsg.total_cost_usd,
@@ -364,7 +386,7 @@ export class StreamingClaudeExecutor {
         }
       }
 
-      return { output: output.trim() };
+      return { output: output.trim(), structuredOutput };
     } finally {
       clearTimeout(timeoutHandle);
       clearInterval(heartbeatHandle);
@@ -484,7 +506,7 @@ export class StreamingClaudeExecutor {
     context: AIExecutionContext,
     runtimeConfig: RuntimeConfig,
     callback: StreamingProgressCallback
-  ): Promise<{ output: string; error?: string }> {
+  ): Promise<ClaudeExecutionResult> {
     const timeoutMs = context.timeoutMs || runtimeConfig.claude.defaultTimeoutMinutes * 60 * 1000;
     const fallbackCommand = this.buildStaticReviewFallbackCommand(
       originalCommand,
@@ -505,11 +527,18 @@ export class StreamingClaudeExecutor {
         callback
       );
 
+      if (fallbackResult.structuredOutput || this.isMachineReviewResult(fallbackResult.output)) {
+        return fallbackResult;
+      }
+
       return {
         output: [previousOutput, fallbackResult.output].filter(Boolean).join('\n\n'),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (this.containsUnknownCommandFailure(message)) {
+        throw error;
+      }
       logger.warn('Static review fallback failed after validation command failure', {
         error: message,
       });
@@ -525,6 +554,18 @@ export class StreamingClaudeExecutor {
     }
   }
 
+  private isMachineReviewResult(output: string): boolean {
+    if (!/^[{`]/.test(output.trim())) {
+      return false;
+    }
+    const parsed = parseReviewJsonPayload(output);
+    return isReviewPassPayload(parsed) || isReviewFindingPayload(parsed);
+  }
+
+  private containsUnknownCommandFailure(output: string): boolean {
+    return /\bUnknown command:\s*\S+/i.test(output);
+  }
+
   private shouldContinueWithStaticReview(
     command: string,
     context: AIExecutionContext,
@@ -535,7 +576,7 @@ export class StreamingClaudeExecutor {
       return false;
     }
 
-    if (this.containsServiceLevelFailure(output)) {
+    if (this.containsUnknownCommandFailure(output) || this.containsServiceLevelFailure(output)) {
       return false;
     }
 

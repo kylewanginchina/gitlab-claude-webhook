@@ -1710,6 +1710,146 @@ describe('runtime config execution paths', () => {
     expect(finalReview.findings[0]?.title).toBe('First issue');
   });
 
+  describe('machine review result integrity through the real pipeline', () => {
+    const empty = JSON.stringify({ summary: 'Checked diff', findings: [] });
+    const candidate = {
+      title: 'Possible bug',
+      body: 'Evidence in changed code',
+      confidence: 40,
+      path: 'src/a.ts',
+      line: 10,
+      line_type: 'new',
+      category: 'bug',
+    };
+    const passWithCandidate = JSON.stringify({ summary: 'Candidate found', findings: [candidate] });
+
+    it.each([
+      { label: 'malformed passes', passes: ['{', '{', '{', '{'], score: '', expected: 'failed' },
+      {
+        label: 'prose-only passes',
+        passes: ['Review done', 'Review done', 'Review done', 'Review done'],
+        score: '',
+        expected: 'failed',
+      },
+      {
+        label: 'invalid pass shapes',
+        passes: ['{}', '{}', '{}', '{}'],
+        score: '',
+        expected: 'failed',
+      },
+      {
+        label: 'one valid empty pass and three malformed passes',
+        passes: [empty, '{', '{', '{'],
+        score: '',
+        expected: 'partial',
+      },
+      {
+        label: 'valid empty passes',
+        passes: [empty, empty, empty, empty],
+        score: '',
+        expected: 'clean',
+      },
+      {
+        label: 'fenced legacy empty passes',
+        passes: [empty, empty, empty, empty].map(value => '```json\n' + value + '\n```'),
+        score: '',
+        expected: 'clean',
+      },
+      {
+        label: 'malformed scorer',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: '{',
+        expected: 'partial',
+      },
+      {
+        label: 'invalid scorer shape',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: '{}',
+        expected: 'partial',
+      },
+      {
+        label: 'valid zero-confidence scorer',
+        passes: [passWithCandidate, empty, empty, empty],
+        score: JSON.stringify({ ...candidate, confidence: 0, verdict: 'Already guarded' }),
+        expected: 'clean',
+      },
+    ])('$label produces a $expected outcome', async ({ passes, score, expected }) => {
+      jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(
+        createRuntimeConfig({
+          review: { passConcurrency: 1, scoringConcurrency: 1 },
+        })
+      );
+      const pendingPasses = [...passes];
+      mockQuery.mockImplementation(({ options }) => {
+        const isScorer = options.outputFormat.schema.required.includes('verdict');
+        return createAsyncGenerator([
+          {
+            type: 'result',
+            subtype: 'success',
+            result: isScorer ? score : pendingPasses.shift(),
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+          },
+        ]);
+      });
+      const gitlab = {
+        getMergeRequest: jest
+          .fn()
+          .mockResolvedValue({ ...createMergeRequestEvent().merge_request, sha: 'head-sha' }),
+        getMergeRequestDiffVersions: jest.fn().mockResolvedValue([{ id: 1 }]),
+        getMergeRequestDiffVersion: jest.fn().mockResolvedValue({
+          base_commit_sha: 'base-sha',
+          start_commit_sha: 'start-sha',
+          head_commit_sha: 'head-sha',
+          diffs: [{ old_path: 'src/a.ts', new_path: 'src/a.ts' }],
+        }),
+        getMergeRequestDiscussions: jest.fn().mockResolvedValue([]),
+        addMergeRequestComment: jest.fn().mockResolvedValue({ id: 99 }),
+        updateMergeRequestComment: jest.fn().mockResolvedValue(undefined),
+      };
+      const processor = new EventProcessor();
+      (processor as any).gitlabService = gitlab;
+      (processor as any).gitlabReviewService = new GitLabReviewService(gitlab as any);
+      const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'review-integrity-'));
+      try {
+        // Local-only repository: context preparation handles the absent origin without network access.
+        await simpleGit(projectPath).init();
+        await (processor as any).executeCodeReview(
+          createMergeRequestEvent(),
+          {
+            command: '/code-review',
+            context: 'MR #2',
+            provider: 'claude',
+          },
+          'main',
+          projectPath,
+          createCallback(),
+          (processor as any).createRunContext()
+        );
+
+        const comments = gitlab.addMergeRequestComment.mock.calls.map(call => call[2] as string);
+        const clean = comments.some(body =>
+          /No high-confidence issues (?:found|remained)/.test(body)
+        );
+        const partial = comments.some(body =>
+          body.includes('Review completed with partial coverage.')
+        );
+        const failed = comments.some(body => body.includes('All code review passes failed:'));
+        expect({ clean, partial, failed }).toEqual({
+          clean: expected === 'clean',
+          partial: expected === 'partial',
+          failed: expected === 'failed',
+        });
+        if (score && expected === 'partial') {
+          expect(comments.some(body => body.includes('Scorer 1'))).toBe(true);
+        }
+      } finally {
+        await fs.rm(projectPath, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('uses runtime review minConfidence when deciding which scored findings remain', async () => {
     const runtimeConfig = createRuntimeConfig({
       review: {

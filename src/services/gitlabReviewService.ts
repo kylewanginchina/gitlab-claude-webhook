@@ -10,6 +10,11 @@ import { ReviewSkill } from '../admin/reviewCustomizationTypes';
 import { reviewCustomizationService as defaultReviewCustomizationService } from '../utils/reviewCustomization';
 import { TimeBudget, createTimeBudget } from '../utils/timeBudget';
 import {
+  parseReviewJsonPayload,
+  isReviewPassPayload,
+  isReviewFindingPayload,
+} from '../utils/reviewResult';
+import {
   ReviewSkillCatalog,
   ReviewSkillDefinition,
   reviewSkillCatalog as defaultReviewSkillCatalog,
@@ -464,8 +469,13 @@ export class GitLabReviewService {
     );
   }
 
-  public parseReviewOutput(output: string, minConfidence = 80): ParsedReviewResult {
-    const parsed = this.parseJsonPayload(output);
+  public parseReviewOutput(output: string, minConfidence = 80, strict = false): ParsedReviewResult {
+    const parsed = parseReviewJsonPayload(output, !strict);
+    if (strict && !isReviewPassPayload(parsed)) {
+      throw new Error(
+        'Invalid review pass result: expected JSON with a summary and valid findings array'
+      );
+    }
     const findings = Array.isArray(parsed?.findings)
       ? parsed.findings
           .map((finding: unknown) => this.normalizeFinding(finding))
@@ -482,8 +492,17 @@ export class GitLabReviewService {
     };
   }
 
-  public parseScoredFinding(output: string, fallbackFinding: ReviewFinding): ReviewFinding | null {
-    const parsed = this.parseJsonPayload(output);
+  public parseScoredFinding(
+    output: string,
+    fallbackFinding: ReviewFinding,
+    strict = false
+  ): ReviewFinding | null {
+    const parsed = parseReviewJsonPayload(output, !strict);
+    if (strict && !isReviewFindingPayload(parsed)) {
+      throw new Error(
+        'Invalid review scoring result: expected JSON with valid finding fields and confidence'
+      );
+    }
     const normalized = this.normalizeFinding(parsed);
 
     if (!normalized) {
@@ -1164,37 +1183,6 @@ export class GitLabReviewService {
             .filter((source): source is string => Boolean(source))
         : undefined,
     };
-  }
-
-  private parseJsonPayload(output: string): Record<string, any> | null {
-    const jsonText = this.extractJsonBlock(output);
-    if (!jsonText) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(jsonText);
-    } catch (error) {
-      logger.warn('Failed to parse review JSON payload', {
-        error: error instanceof Error ? error.message : String(error),
-        outputPreview: output.slice(0, 300),
-      });
-      return null;
-    }
-  }
-
-  private extractJsonBlock(output: string): string {
-    const fencedMatch = output.match(/```json\s*([\s\S]*?)```/i);
-    if (fencedMatch?.[1]) {
-      return fencedMatch[1].trim();
-    }
-
-    const genericFenceMatch = output.match(/```\s*([\s\S]*?)```/);
-    if (genericFenceMatch?.[1]) {
-      return genericFenceMatch[1].trim();
-    }
-
-    return output.trim();
   }
 
   private buildReviewMarker(headSha: string): string {

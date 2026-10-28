@@ -170,6 +170,131 @@ describe('StreamingClaudeExecutor review mode SDK options', () => {
     });
   });
 
+  it('keeps structured findings containing validation-like text without another SDK call', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const structured = {
+      summary: 'Parser regression',
+      findings: [
+        {
+          title: 'Dropped input',
+          body: 'A valid input failed to parse and is dropped.',
+          confidence: 90,
+          path: 'src/parser.ts',
+          line: 3,
+          line_type: 'old',
+          category: 'bug',
+        },
+      ],
+    };
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([successResult({ structured_output: structured })])
+    );
+
+    const result = await new StreamingClaudeExecutor().executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createCallback()
+    );
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ success: true, output: JSON.stringify(structured) });
+  });
+
+  it.each(['structured', 'raw JSON', 'fenced JSON'])(
+    'returns authoritative %s after a validation failure',
+    async format => {
+      jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+      const structured = { summary: 'Static inspection complete', findings: [] };
+      const json = JSON.stringify(structured);
+      const recovery =
+        format === 'structured'
+          ? successResult({ structured_output: structured })
+          : successResult({
+              result: format === 'fenced JSON' ? '```json\n' + json + '\n```' : json,
+            });
+      mockQuery
+        .mockImplementationOnce(() =>
+          createAsyncGenerator([successResult({ result: 'npm test failed with exit code 1' })])
+        )
+        .mockImplementationOnce(() => createAsyncGenerator([recovery]));
+
+      const result = await new StreamingClaudeExecutor().executeWithStreaming(
+        'Review',
+        '/tmp/project',
+        createReviewContext({ outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+        createCallback()
+      );
+
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(result.success).toBe(true);
+      expect(result.output).toBe(format === 'fenced JSON' ? '```json\n' + json + '\n```' : json);
+    }
+  );
+
+  it('rejects an unknown review skill command even when the SDK reports success', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery.mockImplementation(() =>
+      createAsyncGenerator([
+        successResult({ result: 'Unknown command: gitlab-review:mr-review-core' }),
+      ])
+    );
+
+    const result = await new StreamingClaudeExecutor().executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({
+        skillCommand: '/gitlab-review:mr-review-core',
+        outputSchema: REVIEW_PASS_OUTPUT_SCHEMA,
+      }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown command:');
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an unknown review skill command during static recovery', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    mockQuery
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([successResult({ result: 'npm test failed with exit code 1' })])
+      )
+      .mockImplementationOnce(() =>
+        createAsyncGenerator([
+          successResult({ result: 'Unknown command: gitlab-review:mr-review-core' }),
+        ])
+      );
+
+    const result = await new StreamingClaudeExecutor().executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createCallback()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown command:');
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts legacy fenced JSON when structured output was requested', async () => {
+    jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
+    const output = '```json\n{"summary":"Legacy result", "findings":[]}\n```';
+    mockQuery.mockImplementation(() => createAsyncGenerator([successResult({ result: output })]));
+
+    const result = await new StreamingClaudeExecutor().executeWithStreaming(
+      'Review',
+      '/tmp/project',
+      createReviewContext({ outputSchema: REVIEW_PASS_OUTPUT_SCHEMA }),
+      createCallback()
+    );
+
+    expect(result).toMatchObject({ success: true, output });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
   it('defaults to the always-on skills when the context does not name any', async () => {
     jest.spyOn(runtimeConfigService, 'getConfig').mockReturnValue(createRuntimeConfig());
     mockQuery.mockImplementation(() => createAsyncGenerator([successResult()]));
