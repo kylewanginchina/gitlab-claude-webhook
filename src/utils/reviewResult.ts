@@ -8,6 +8,33 @@ function asRecord(value: unknown): JsonRecord | null {
     : null;
 }
 
+/** Find the next envelope boundary without treating fences inside JSON strings as boundaries. */
+function findClosingFence(text: string, start: number): number {
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      // A raw newline is invalid in a JSON string; still allow the malformed block to end.
+      if (char === '\n' || char === '\r') {
+        inString = false;
+        escaped = false;
+      } else if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (text.startsWith('```', index)) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 /** Parse raw JSON first, then legacy fenced envelopes (which can include explanatory prose). */
 export function parseReviewJsonPayload(output: string): JsonRecord | null {
   const text = output.trim();
@@ -18,19 +45,20 @@ export function parseReviewJsonPayload(output: string): JsonRecord | null {
   try {
     return asRecord(JSON.parse(text));
   } catch {
-    // Try successive closing fences: a Markdown fence inside a JSON string is content,
-    // not the end of the result envelope. JSON.parse decides when the document is complete.
+    // Parse disjoint blocks once each, keeping both scan and total JSON parsing work linear.
     const openingFencePattern = /```(?:json)?\s*/gi;
     let openingFence: RegExpExecArray | null;
     while ((openingFence = openingFencePattern.exec(text)) !== null) {
       const contentStart = openingFence.index + openingFence[0].length;
-      let closingFence = text.indexOf('```', contentStart);
-      while (closingFence !== -1) {
-        try {
-          return asRecord(JSON.parse(text.slice(contentStart, closingFence)));
-        } catch {
-          closingFence = text.indexOf('```', closingFence + 3);
-        }
+      const closingFence = findClosingFence(text, contentStart);
+      if (closingFence === -1) {
+        break;
+      }
+      openingFencePattern.lastIndex = closingFence + 3;
+      try {
+        return asRecord(JSON.parse(text.slice(contentStart, closingFence)));
+      } catch {
+        // Continue after this block instead of retrying combinations of earlier fences.
       }
     }
   }
